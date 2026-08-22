@@ -1,0 +1,86 @@
+# Builds the 3DS port end-to-end in devkitPro's official container, so the
+# .3dsx is reproducible without a local toolchain.
+#
+# Mirrors the manual sequence in 3ds/README.md exactly:
+#   make tools && make generated
+#   tools/generate_wasm_assets.py    -> build/assets
+#   rp2350/gen_sound_assets.sh       -> sample .bin + song .s
+#   3ds/build_objs.sh                -> 3ds/build/libpokeemerald.a
+#   make -C 3ds                      -> 3ds/emerald3ds.3dsx
+name: Build 3DS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes an in-flight build irrelevant.
+concurrency:
+  group: build-3ds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: devkitpro/devkitarm:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The decomp tools are host binaries: gbagfx/rsfont need libpng, the rest
+      # need a plain g++. The devkitARM image ships the cross toolchain only.
+      - name: Install host build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config libpng-dev zlib1g-dev python3
+          # checkout leaves the tree owned by a different uid than the container
+          # user; without this git calls inside the build refuse to run.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
+
+      # 3ds/build_objs.sh looks up arm-none-eabi-gcc on PATH and hard-errors if
+      # it is absent; 3ds/Makefile calls smdhtool/3dsxtool out of tools/bin.
+      # Set both explicitly rather than trusting the image's PATH.
+      - name: Put devkitARM on PATH
+        run: |
+          echo "/opt/devkitpro/devkitARM/bin" >> "$GITHUB_PATH"
+          echo "/opt/devkitpro/tools/bin" >> "$GITHUB_PATH"
+
+      # The link needs citro2d/citro3d alongside libctru. Present in the image
+      # today, installed here if a future tag drops them.
+      - name: Ensure 3DS libraries are present
+        run: |
+          if [ ! -f /opt/devkitpro/libctru/lib/libcitro2d.a ]; then
+            dkp-pacman -Sy --noconfirm --needed 3ds-dev
+          fi
+          arm-none-eabi-gcc --version | head -1
+
+      - name: Build decomp tools
+        run: make tools -j"$(nproc)"
+
+      - name: Generate map/JSON sources
+        run: make generated
+
+      # Root Makefile's wasm-assets target wraps this in `uv run`; the script is
+      # pure stdlib, so call it directly instead of installing uv.
+      - name: Generate graphics assets
+        run: python3 tools/generate_wasm_assets.py
+
+      - name: Generate sound assets
+        run: bash rp2350/gen_sound_assets.sh
+
+      - name: Build game archive (ARM11)
+        run: bash 3ds/build_objs.sh
+
+      - name: Link emerald3ds.3dsx
+        run: make -C 3ds
+
+      - name: Upload 3dsx
+        uses: actions/upload-artifact@v4
+        with:
+          name: emerald3ds
+          path: |
+            3ds/emerald3ds.3dsx
+            3ds/emerald3ds.smdh
+          if-no-files-found: error
