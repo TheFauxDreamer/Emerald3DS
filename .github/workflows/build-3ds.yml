@@ -34,7 +34,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential pkg-config libpng-dev zlib1g-dev python3
+            build-essential pkg-config libpng-dev zlib1g-dev python3 \
+            curl unzip ca-certificates
           # checkout leaves the tree owned by a different uid than the container
           # user; without this git calls inside the build refuse to run.
           git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
@@ -73,14 +74,41 @@ jobs:
       - name: Build game archive (ARM11)
         run: bash 3ds/build_objs.sh
 
-      - name: Link emerald3ds.3dsx
+      - name: Link emerald3ds.elf
+        run: make -C 3ds emerald3ds.elf
+
+      # Also published on its own: Azahar/Citra can boot a raw ELF, and it is
+      # what you want for symbol-level debugging.
+      - name: Upload ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: emerald3ds-elf
+          path: 3ds/emerald3ds.elf
+          if-no-files-found: error
+
+      # makerom is not a devkitPro package, so it is fetched from upstream and
+      # pinned by hash -- this is a third-party binary entering the build.
+      - name: Install makerom
+        env:
+          MAKEROM_URL: https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip
+          MAKEROM_SHA256: 287b809dec064e0ad597e3d272c49ecb7eed41693d5ee6fef9d8a8aa24c2497e
+        run: |
+          curl -sSL -o /tmp/makerom.zip "$MAKEROM_URL"
+          echo "$MAKEROM_SHA256  /tmp/makerom.zip" | sha256sum -c -
+          unzip -o /tmp/makerom.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/makerom
+
+      # Produces emerald3ds.cia (install to a console) and emerald3ds.3ds
+      # (CCI -- boots directly in an emulator, no install step).
+      - name: Package .cia and .3ds
         run: make -C 3ds
 
-      - name: Upload 3dsx
+      - name: Upload CIA and 3DS
         uses: actions/upload-artifact@v4
         with:
           name: emerald3ds
           path: |
-            3ds/emerald3ds.3dsx
+            3ds/emerald3ds.cia
+            3ds/emerald3ds.3ds
             3ds/emerald3ds.smdh
           if-no-files-found: error

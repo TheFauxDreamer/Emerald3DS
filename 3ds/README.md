@@ -61,6 +61,7 @@ Exactly one place in the tree ever compared them — `IsTileMapOutsideWram()` in
 
 CI does this on every push (`.github/workflows/build-3ds.yml`) using the
 official `devkitpro/devkitarm` container, so a local toolchain is optional.
+It publishes `emerald3ds.cia`, `emerald3ds.3ds` and the raw `emerald3ds.elf`.
 
 Locally you need devkitPro (devkitARM, libctru, citro2d/citro3d) and libpng for
 the decomp's `gbagfx`:
@@ -70,8 +71,36 @@ make tools && make generated             # decomp tools + generated headers
 python3 tools/generate_wasm_assets.py    # -> build/assets
 rp2350/gen_sound_assets.sh               # one-time: wav->bin, mid->song .s
 3ds/build_objs.sh                        # game sources -> 3ds/build/libpokeemerald.a
-make -C 3ds                              # -> 3ds/emerald3ds.3dsx
+make -C 3ds                              # -> 3ds/emerald3ds.{cia,3ds}
 ```
+
+Packaging also needs [makerom](https://github.com/3DSGuy/Project_CTR/releases)
+on `PATH` (or `make -C 3ds MAKEROM=/path/to/makerom`).
+
+## Why this is not a .3dsx
+
+A `.3dsx` is loaded at a variable address, so every absolute pointer needs a
+load-time relocation, and the 3DSX relocation table is indexed in whole 4-byte
+words. Emerald's script bytecode packs a 4-byte pointer directly after a 1-byte
+opcode:
+
+```
+	.macro goto destination:req
+	.byte SCR_OP_GOTO       @ 1 byte
+	.4byte \destination     @ pointer at an odd offset
+	.endm
+```
+
+Thousands of those relocations are therefore unaligned and cannot be encoded at
+all -- `3dsxtool` aborts with `Unaligned relocation!`. Realigning the bytecode
+would mean changing 332 macros across 9 files plus every interpreter that reads
+them.
+
+A CXI (`.cia`/`.3ds`) is loaded at a fixed address and never relocated, so the
+same pointers are simply correct as linked. That is why the port ships this way.
+`emerald3ds.3ds` boots directly in an emulator; `emerald3ds.cia` installs to a
+console. `make -C 3ds 3dsx` still exists, purely so the failure stays
+reproducible.
 
 ## Layout
 
@@ -80,7 +109,8 @@ make -C 3ds                              # -> 3ds/emerald3ds.3dsx
   bridge.h          the only thing both worlds include
   gba_mem.c         GBA regions + save-flash backing        (game side)
   build_objs.sh     game sources -> libpokeemerald.a (ARM11)
-  Makefile          host sources + link -> emerald3ds.3dsx
+  emerald3ds.rsf    makerom ROM spec (CIA/CCI packaging)
+  Makefile          host sources + link -> emerald3ds.{cia,3ds}
   host/
     main.c          entry point, per-frame hook, input
     video.c         PPU -> PICA200 texture -> both screens
