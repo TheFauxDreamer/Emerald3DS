@@ -1,0 +1,98 @@
+#!/bin/bash
+# Build the pokeemerald game sources for the 3DS (ARM11 / ARMv6K) and archive
+# them into 3ds/build/libpokeemerald.a, using the same preproc pipeline as the
+# WASM/modern/RP2350 builds. Run from anywhere; it cds to the repo root.
+#
+# Adapted from rp2350/build_objs.sh. Two differences that matter:
+#
+#   -DRP2350=1 is deliberate on a 3DS. In this tree "RP2350" has come to mean
+#   "native CPU build, not GBA hardware": no link cable, no real LCD to chase
+#   VCOUNT, no IWRAM mixer copy, save writes through the Rp2350Save* hooks, and
+#   the per-frame Rp2350PresentFrame() callback. All of that is exactly what the
+#   3DS wants, so the port inherits it instead of duplicating 47 seam sites.
+#   -DPLATFORM_3DS=1 then overrides only where the 3DS genuinely differs
+#   (gba/defines.h memory map, gba/flash_internal.h save backing).
+#
+#   The ABI must match libctru exactly or the link is silently wrong:
+#   armv6k / mpcore / hard-float / soft thread-pointer.
+set -e
+cd "$(dirname "$0")/.."   # repo root
+
+OUT=3ds/build
+OBJ=$OUT/obj
+mkdir -p "$OBJ"
+
+if ! command -v arm-none-eabi-gcc >/dev/null; then
+  echo "error: arm-none-eabi-gcc not found. Install devkitPro (devkitARM) and" >&2
+  echo "       open a new shell so /opt/devkitpro/devkitARM/bin is on PATH." >&2
+  exit 1
+fi
+
+CC=arm-none-eabi-gcc
+AS=arm-none-eabi-as
+AR=arm-none-eabi-ar
+PP=tools/preproc/preproc
+ASSETS=build/assets
+
+# Must match 3ds/Makefile's ARCH exactly.
+ARCH="-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-relocations"
+
+CFLAGS="$ARCH -O2 -ffreestanding -fno-strict-aliasing -fomit-frame-pointer \
+  -ffunction-sections -fdata-sections \
+  -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-builtin-declaration-mismatch \
+  -Wno-attributes -Wno-implicit-function-declaration -fno-common"
+
+# -iquote, not -I: the game's include/ has string.h/strings.h that must only
+# satisfy "" includes, never hijack libc's <string.h>.
+CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1"
+
+if [ ! -d "$ASSETS" ]; then
+  echo "error: $ASSETS missing. Run 'make tools && make wasm-assets' first." >&2
+  exit 1
+fi
+
+compile_c() {  # $1 = source .c, $2 = out .o
+  $CC -E $CPPFLAGS "$1" 2>/dev/null \
+    | $PP -i -g $ASSETS "$1" charmap.txt 2>/dev/null \
+    | $CC -x c $CFLAGS -c - -o "$2"
+}
+
+assemble_s() { # $1 = data .s, $2 = out .o
+  $PP "$1" charmap.txt 2>/dev/null \
+    | $CC -E -I include - 2>/dev/null \
+    | $PP -ie "$1" charmap.txt 2>/dev/null \
+    | $AS -march=armv6k -mfloat-abi=hard -I include -o "$2" -
+}
+
+assemble_sound_data() { # $1 = .s, $2 = out .o
+  $PP "$1" charmap.txt 2>/dev/null \
+    | $CC -E -I include -I . - 2>/dev/null \
+    | $PP -ie "$1" charmap.txt 2>/dev/null \
+    | $AS -march=armv6k -mfloat-abi=hard -I . -I sound -I include -o "$2" -
+}
+
+echo "[1/3] compiling C sources..."
+n=0
+for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/m4a_1.c \
+           3ds/gba_mem.c 3ds/ui/*.c; do
+  obj="$OBJ/$(basename "$src" .c).o"
+  compile_c "$src" "$obj"
+  n=$((n+1))
+done
+echo "      $n C objects"
+
+echo "[2/3] assembling data sources..."
+for s in maps map_events event_scripts battle_scripts_1 battle_scripts_2 battle_ai_scripts battle_anim_scripts; do
+  assemble_s "data/$s.s" "$OBJ/data_$s.o"
+done
+
+echo "      sound: data + symbols + $(ls sound/songs/midi/*.s 2>/dev/null | wc -l | tr -d ' ') songs"
+assemble_sound_data data/sound_data.s "$OBJ/data_sound_data.o"
+$AS -march=armv6k -mfloat-abi=hard -o "$OBJ/sound_symbols.o" rp2350/sound_symbols.s
+ls sound/songs/midi/*.s | xargs -P 8 -I{} bash -c \
+  "$AS -march=armv6k -mfloat-abi=hard -I sound -o \"$OBJ/song_\$(basename \"{}\" .s).o\" \"{}\""
+
+echo "[3/3] archiving -> $OUT/libpokeemerald.a"
+rm -f "$OUT/libpokeemerald.a"
+$AR rcs "$OUT/libpokeemerald.a" "$OBJ"/*.o
+echo "done: $(ls -la $OUT/libpokeemerald.a | awk '{print $5}') bytes, $(ls $OBJ/*.o | wc -l) objects"

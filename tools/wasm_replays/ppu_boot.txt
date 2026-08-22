@@ -1,0 +1,7 @@
+# PPU validation: capture GBA memory + reference frame across the boot sequence
+# (copyright -> intro -> title). Whatever the WASM renders, ppu.c must match.
+20 screenshot f0020
+120 screenshot f0120
+300 screenshot f0300
+600 screenshot f0600
+900 screenshot f0900

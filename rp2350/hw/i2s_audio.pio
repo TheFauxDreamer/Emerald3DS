@@ -1,0 +1,72 @@
+;
+; I2S (Philips standard) stereo transmitter for the RP2350 Pokemon Emerald port.
+;
+; Drives a PCM5102A over three GPIOs: DIN (data), BCK (bit clock), LRCK (word /
+; LR clock). 16 bits per channel, 32 bit-clocks per stereo frame, MSB first.
+; Side-set carries the two clocks; they MUST be adjacent GPIOs with BCK as the
+; side-set base (BCK = base, LRCK = base + 1). See i2s_audio.c for the wiring
+; (DIN=GP20, BCK=GP21, LRCK=GP22) and the PCM5102A control-pin strapping.
+;
+; Side-set bit 0 = BCK, bit 1 = LRCK. BCK toggles every instruction (each data
+; bit spans two instructions: data shifted out while BCK is low, held while BCK
+; is high so the DAC samples on the rising edge). LRCK changes one bit before
+; the channel's MSB, which is the standard Philips I2S one-bit delay.
+;
+; The TX FIFO is fed one uint32 per stereo frame, packed (right << 16) | left
+; (autopull at 32 bits, shift left = MSB first). bitloop1 clocks out the high
+; 16 bits with LRCK high (right channel); bitloop0 the low 16 with LRCK low
+; (left). Swap the pack order in i2s_audio.c if L/R come out reversed.
+
+.program i2s_audio
+.side_set 2
+
+;                            /--- LRCK   (side-set bit 1)
+;                            |/-- BCK    (side-set bit 0)
+;                            ||
+bitloop1:                  ; ||
+    out pins, 1       side 0b10
+    jmp x-- bitloop1  side 0b11
+    out pins, 1       side 0b00
+    set x, 14         side 0b01
+bitloop0:
+    out pins, 1       side 0b00
+    jmp x-- bitloop0  side 0b01
+    out pins, 1       side 0b10
+public entry_point:
+    set x, 14         side 0b11
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+// Configure the state machine for I2S TX on the given pins and start it at the
+// requested sample rate. 'data_pin' = DIN; 'clock_pin_base' = BCK (LRCK is
+// clock_pin_base + 1). The PIO runs at sample_rate * 64 (32 BCK/frame, 2
+// instructions/BCK), so BCK = sample_rate * 32.
+static inline void i2s_audio_program_init(PIO pio, uint sm, uint offset,
+                                          uint data_pin, uint clock_pin_base,
+                                          uint32_t sample_rate) {
+    pio_sm_config c = i2s_audio_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_sideset_pins(&c, clock_pin_base);
+    // Shift left (MSB first), autopull at 32 bits = one stereo frame.
+    sm_config_set_out_shift(&c, false, true, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // PIO clock = sample_rate * 64. Use the float divider for accuracy.
+    float div = (float)clock_get_hz(clk_sys) / (float)(sample_rate * 64u);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+
+    uint pin_mask = (1u << data_pin) | (3u << clock_pin_base);
+    pio_sm_set_pindirs_with_mask(pio, sm, pin_mask, pin_mask);
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, clock_pin_base);
+    pio_gpio_init(pio, clock_pin_base + 1);
+    pio_sm_set_pins(pio, sm, 0);
+
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + i2s_audio_offset_entry_point));
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

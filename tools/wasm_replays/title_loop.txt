@@ -1,0 +1,11 @@
+# PPU validation: full intro -> title screen loop, no input. Covers the
+# Rayquaza title animation that ppu_boot.txt (ends at f0900) never reaches.
+1500 screenshot f1500
+2500 screenshot f2500
+3200 screenshot f3200
+3800 screenshot f3800
+4200 screenshot f4200
+4600 screenshot f4600
+5000 screenshot f5000
+5400 screenshot f5400
+6000 screenshot f6000

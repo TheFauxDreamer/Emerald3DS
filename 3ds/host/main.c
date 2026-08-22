@@ -1,0 +1,146 @@
+// 3DS entry point.
+//
+// AgbMain() is the game's superloop and never returns, so this file does not
+// own a frame loop -- the game does. Every frame, src/main.c calls back into
+// Rp2350PresentFrame() (under #if RP2350) once the frame's VRAM, palette, OAM
+// and registers are final. That hook is where all 3DS work happens: rasterise,
+// present, sample input, feed audio, flush saves.
+//
+// The one thing the 3DS needs that a GBA superloop has no concept of is a way
+// out: the HOME menu can ask the application to close at any time. Since
+// AgbMain() will never return on its own, the exit path longjmps back here.
+
+#include <3ds.h>
+#include <setjmp.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "../bridge.h"
+
+int  CtrVideoInit(void);
+void CtrVideoExit(void);
+void CtrVideoPresent(void);
+void CtrAudioInit(void);
+void CtrAudioExit(void);
+void CtrAudioFrame(void);
+void CtrSaveLoad(void);
+void CtrSaveFlush(int force);
+
+static jmp_buf sQuitJmp;
+static int     sQuitting;
+
+// GBA REG_KEYINPUT bit order. Active-low: a CLEAR bit means pressed.
+#define GBA_A      (1 << 0)
+#define GBA_B      (1 << 1)
+#define GBA_SELECT (1 << 2)
+#define GBA_START  (1 << 3)
+#define GBA_RIGHT  (1 << 4)
+#define GBA_LEFT   (1 << 5)
+#define GBA_UP     (1 << 6)
+#define GBA_DOWN   (1 << 7)
+#define GBA_R      (1 << 8)
+#define GBA_L      (1 << 9)
+#define GBA_KEY_MASK 0x03FF
+
+static uint16_t sample_keys(void)
+{
+    uint32_t k = hidKeysHeld();
+    uint16_t gba = 0;
+
+    if (k & KEY_A)      gba |= GBA_A;
+    if (k & KEY_B)      gba |= GBA_B;
+    if (k & KEY_SELECT) gba |= GBA_SELECT;
+    if (k & KEY_START)  gba |= GBA_START;
+    if (k & KEY_R)      gba |= GBA_R;
+    if (k & KEY_L)      gba |= GBA_L;
+
+    // The circle pad doubles as the d-pad: KEY_C* are the libctru-synthesised
+    // digital edges, so both sticks and the pad drive the same GBA bits.
+    if (k & (KEY_DRIGHT | KEY_CPAD_RIGHT)) gba |= GBA_RIGHT;
+    if (k & (KEY_DLEFT  | KEY_CPAD_LEFT))  gba |= GBA_LEFT;
+    if (k & (KEY_DUP    | KEY_CPAD_UP))    gba |= GBA_UP;
+    if (k & (KEY_DDOWN  | KEY_CPAD_DOWN))  gba |= GBA_DOWN;
+
+    // GBA hardware reports 1 = released.
+    return (uint16_t)(~gba & GBA_KEY_MASK);
+}
+
+static void sample_touch(CtrTouchState *t)
+{
+    static int wasTouching;
+
+    touchPosition pos;
+    hidTouchRead(&pos);
+
+    uint32_t held = hidKeysHeld();
+    int touching = (held & KEY_TOUCH) != 0;
+
+    t->x = (int16_t)pos.px;
+    t->y = (int16_t)pos.py;
+    t->touching     = (uint8_t)touching;
+    t->justPressed  = (uint8_t)(touching && !wasTouching);
+    // On release the final coordinates are stale, but they are the last valid
+    // ones, which is exactly what a tap wants to act on.
+    t->justReleased = (uint8_t)(!touching && wasTouching);
+
+    wasTouching = touching;
+}
+
+void Rp2350PresentFrame(void)
+{
+    // HOME menu / power. Do this first so a close request is honoured even if
+    // the frame below would misbehave.
+    if (!aptMainLoop() && !sQuitting) {
+        sQuitting = 1;
+        longjmp(sQuitJmp, 1);
+    }
+
+    hidScanInput();
+
+    // Buttons for the NEXT frame's ReadKeys() (src/main.c), matching how the
+    // GBA's key register is sampled between frames.
+    CtrSetKeyInput(sample_keys());
+
+    CtrTouchState touch;
+    sample_touch(&touch);
+    CtrBottomUpdate(&touch);
+
+    CtrAudioFrame();
+
+    // Rasterise + present. C3D_FrameEnd blocks on VBlank, which is what paces
+    // the game to 60 Hz -- no manual frame pacing needed.
+    CtrVideoPresent();
+
+    // Writes the save image out once the burst of sector writes has stopped.
+    CtrSaveFlush(0);
+}
+
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    // Must precede everything: every VRAM/palette/OAM/register access in the
+    // game derives from this block.
+    Ctr3dsInitGbaMemory();
+    CtrSaveLoad();
+
+    if (!CtrVideoInit()) {
+        CtrVideoExit();
+        return 1;
+    }
+    // New 3DS: 804 MHz + L2 cache; no-op on Old 3DS. Done after the graphics
+    // services are up, since it goes through PTM.
+    osSetSpeedupEnable(true);
+
+    CtrAudioInit();
+    CtrBottomInit();
+
+    if (setjmp(sQuitJmp) == 0)
+        AgbMain();   // never returns; exits via longjmp above
+
+    // Unconditional flush: the deferred writeback may still be pending.
+    CtrSaveFlush(1);
+    CtrAudioExit();
+    CtrVideoExit();
+    return 0;
+}

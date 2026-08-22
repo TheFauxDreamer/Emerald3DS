@@ -1,0 +1,319 @@
+:root {
+  color: #f8f0d2;
+  background: #172f2a;
+  font-family: Avenir Next, Trebuchet MS, Verdana, sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #172f2a;
+}
+
+.shell {
+  width: min(100vmin, 100vw);
+  height: min(100vmin, 100vh);
+  padding: clamp(10px, 2.2vmin, 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: clamp(8px, 1.6vmin, 18px);
+  justify-items: stretch;
+  align-items: center;
+}
+
+.shell > *,
+.masthead > * {
+  min-width: 0;
+}
+
+.masthead {
+  display: grid;
+  justify-items: center;
+  gap: clamp(4px, .8vmin, 9px);
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .42em;
+  color: #fff3bf;
+  font-size: clamp(16px, 3vmin, 26px);
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: underline;
+  text-decoration-thickness: .11em;
+  text-underline-offset: .22em;
+  opacity: .86;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.github-link:hover,
+.github-link:focus-visible {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.github-link svg {
+  width: 1.18em;
+  height: 1.18em;
+  display: block;
+  fill: currentColor;
+  filter: drop-shadow(0 .12em 0 #00000040);
+}
+
+h1 {
+  margin: 0;
+  color: #fff3bf;
+  font-size: clamp(28px, 7vmin, 76px);
+  line-height: .86;
+  letter-spacing: -.075em;
+  text-align: center;
+  text-shadow: 0 .08em 0 #00000040;
+}
+
+.display-panel {
+  height: 100%;
+  max-width: 100%;
+  padding: clamp(6px, 1.2vmin, 14px);
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  border: clamp(2px, .55vmin, 6px) solid #0b1715;
+  border-radius: clamp(14px, 3vmin, 32px);
+  background: #0e1d1a;
+  box-shadow:
+    0 clamp(8px, 2vmin, 22px) 0 #08100f,
+    0 clamp(16px, 5vmin, 52px) #00000066,
+    inset 0 1px 0 #ffffff18;
+}
+
+#screen {
+  width: auto;
+  max-width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  border-radius: clamp(8px, 1.6vmin, 18px);
+  background: #f8f8f8;
+}
+
+.status {
+  min-height: 1.25em;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  color: #9bf2cc;
+  font-size: clamp(12px, 2.2vmin, 19px);
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.controls {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(116px, .95fr) minmax(220px, 1.4fr);
+  grid-template-rows: auto auto;
+  gap: clamp(10px, 2vmin, 22px);
+  align-items: center;
+}
+
+.dpad,
+.face {
+  display: grid;
+  gap: clamp(6px, 1.2vmin, 12px);
+}
+
+.dpad {
+  justify-self: center;
+  grid-template-columns: repeat(3, clamp(38px, 8vmin, 68px));
+  grid-template-rows: repeat(2, clamp(38px, 8vmin, 68px));
+}
+
+.dpad [data-key='up'] { grid-column: 2; }
+.dpad [data-key='left'] { grid-column: 1; grid-row: 2; }
+.dpad [data-key='right'] { grid-column: 3; grid-row: 2; }
+.dpad [data-key='down'] { grid-column: 2; grid-row: 2; }
+
+.face {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+button {
+  min-width: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  min-height: clamp(38px, 8vmin, 68px);
+  border: 0;
+  border-radius: 999px;
+  color: #20140b;
+  background: #f1cf62;
+  font: inherit;
+  font-size: clamp(13px, 2.2vmin, 18px);
+  font-weight: 950;
+  box-shadow:
+    0 clamp(5px, 1.1vmin, 10px) 0 #8b5e22,
+    0 clamp(9px, 2vmin, 18px) clamp(8px, 2vmin, 24px) #00000055;
+  cursor: pointer;
+  touch-action: none;
+}
+
+button:active,
+button.pressed {
+  transform: translateY(clamp(4px, .9vmin, 8px));
+  box-shadow:
+    0 clamp(1px, .35vmin, 3px) 0 #8b5e22,
+    0 clamp(4px, 1vmin, 10px) clamp(6px, 1.5vmin, 18px) #00000055;
+}
+
+.speed-control {
+  grid-column: 1 / -1;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  display: grid;
+  gap: clamp(5px, 1vmin, 10px);
+}
+
+.speed-control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: #fff3bf;
+  font-size: clamp(12px, 2vmin, 16px);
+  font-weight: 900;
+}
+
+#speed-value {
+  color: #9bf2cc;
+  font-variant-numeric: tabular-nums;
+}
+
+#speed {
+  width: 100%;
+  accent-color: #9bf2cc;
+}
+
+.keys {
+  margin: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  color: #e8dcb9;
+  font-size: clamp(11px, 1.8vmin, 15px);
+  line-height: 1.2;
+  text-align: center;
+}
+
+@media (max-width: 700px), (max-aspect-ratio: 4 / 5) {
+  body {
+    min-height: 100dvh;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .shell {
+    width: 100%;
+    min-height: 100dvh;
+    height: auto;
+    padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    grid-template-rows: auto auto auto auto auto;
+    gap: 14px;
+    align-content: center;
+  }
+
+  .masthead {
+    gap: 6px;
+  }
+
+  h1 {
+    width: 100%;
+    max-width: 100%;
+    font-size: clamp(28px, 9.5vw, 46px);
+    letter-spacing: -.06em;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .github-link {
+    font-size: clamp(18px, 6vw, 28px);
+  }
+
+  .display-panel {
+    width: 100%;
+    height: auto;
+    padding: 8px;
+    border-width: 3px;
+    border-radius: 20px;
+    box-shadow:
+      0 10px 0 #08100f,
+      0 18px 34px #00000055,
+      inset 0 1px 0 #ffffff18;
+  }
+
+  #screen {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 2;
+    border-radius: 12px;
+  }
+
+  .status {
+    max-width: 100%;
+    font-size: clamp(14px, 4.2vw, 18px);
+  }
+
+  .controls {
+    grid-template-columns: calc(43% - 5px) calc(57% - 5px);
+    gap: 16px 10px;
+  }
+
+  .dpad {
+    justify-self: start;
+    grid-template-columns: repeat(3, clamp(36px, 11vw, 50px));
+    grid-template-rows: repeat(2, clamp(36px, 11vw, 50px));
+    gap: clamp(6px, 1.8vw, 9px);
+  }
+
+  .face {
+    justify-self: end;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(8px, 2.5vw, 12px);
+  }
+
+  button {
+    min-height: clamp(38px, 12vw, 56px);
+    font-size: clamp(13px, 4vw, 18px);
+  }
+
+  .speed-control {
+    margin-top: 2px;
+  }
+
+  .speed-control label {
+    font-size: clamp(14px, 4vw, 18px);
+  }
+
+  .keys {
+    font-size: clamp(12px, 3.5vw, 15px);
+  }
+}
