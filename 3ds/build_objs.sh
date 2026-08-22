@@ -15,7 +15,13 @@
 #
 #   The ABI must match libctru exactly or the link is silently wrong:
 #   armv6k / mpcore / hard-float / soft thread-pointer.
-set -e
+#
+# pipefail is load-bearing. Every stage below is a pipeline ending in the
+# assembler, and an empty or truncated input is perfectly valid assembly.
+# Without pipefail a preproc that dies halfway through (a missing .include, say)
+# still yields a 0 exit and a silently incomplete object; the first sign of
+# trouble is then an undefined reference at link time, pointing at the wrong file.
+set -eo pipefail
 cd "$(dirname "$0")/.."   # repo root
 
 OUT=3ds/build
@@ -51,23 +57,28 @@ if [ ! -d "$ASSETS" ]; then
   exit 1
 fi
 
+# The two preprocessing stages stay muted: the game's headers are noisy enough
+# through cpp to bury the real compiler diagnostics from the final stage. With
+# pipefail on, a failure in a muted stage would otherwise abort with no output
+# at all, so name the file that broke.
 compile_c() {  # $1 = source .c, $2 = out .o
   $CC -E $CPPFLAGS "$1" 2>/dev/null \
     | $PP -i -g $ASSETS "$1" charmap.txt 2>/dev/null \
-    | $CC -x c $CFLAGS -c - -o "$2"
+    | $CC -x c $CFLAGS -c - -o "$2" \
+    || { echo "error: failed to build $1 (drop the 2>/dev/null in compile_c to see why)" >&2; return 1; }
 }
 
 assemble_s() { # $1 = data .s, $2 = out .o
-  $PP "$1" charmap.txt 2>/dev/null \
-    | $CC -E -I include - 2>/dev/null \
-    | $PP -ie "$1" charmap.txt 2>/dev/null \
+  $PP "$1" charmap.txt \
+    | $CC -E -I include - \
+    | $PP -ie "$1" charmap.txt \
     | $AS -march=armv6k -mfloat-abi=hard -I include -o "$2" -
 }
 
 assemble_sound_data() { # $1 = .s, $2 = out .o
-  $PP "$1" charmap.txt 2>/dev/null \
-    | $CC -E -I include -I . - 2>/dev/null \
-    | $PP -ie "$1" charmap.txt 2>/dev/null \
+  $PP "$1" charmap.txt \
+    | $CC -E -I include -I . - \
+    | $PP -ie "$1" charmap.txt \
     | $AS -march=armv6k -mfloat-abi=hard -I . -I sound -I include -o "$2" -
 }
 

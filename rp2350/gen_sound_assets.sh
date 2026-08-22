@@ -34,7 +34,18 @@ while IFS= read -r line; do
   opts="${line#*:}"
   base="${midfile%.mid}"   # some cfg lines omit the .mid extension
   [[ -f "$MIDDIR/$base.mid" ]] || continue
-  "$MID" "$MIDDIR/$midfile" "$MIDDIR/$base.s" $opts >/dev/null 2>&1 || { echo "  FAIL $base"; fail=$((fail+1)); }
+  # Feed mid2agb "$base.mid", not "$midfile": one cfg line omits the extension,
+  # and passing it through verbatim hands mid2agb a path that does not exist.
+  # The song .s is then never written and the break only shows up much later as
+  # an undefined reference from gSongTable at link time.
+  "$MID" "$MIDDIR/$base.mid" "$MIDDIR/$base.s" $opts >/dev/null 2>&1 || { echo "  FAIL $base"; fail=$((fail+1)); }
 done < "$MIDDIR/midi.cfg"
 
 echo "[sound] done: $(find sound -name '*.bin' | wc -l | tr -d ' ') bin, $(ls $MIDDIR/*.s 2>/dev/null | wc -l | tr -d ' ') song .s, song failures=$fail"
+
+# Every song in the cfg is referenced by gSongTable, so a failure here is a
+# guaranteed link error later. Surface it now.
+if [ "$fail" -ne 0 ]; then
+  echo "error: $fail song(s) failed to convert; gSongTable will not link." >&2
+  exit 1
+fi

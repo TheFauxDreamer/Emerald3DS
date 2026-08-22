@@ -19,6 +19,14 @@ MAP_EVENTS := $(patsubst $(MAPS_DIR)/%/,$(MAPS_DIR)/%/events.inc,$(MAP_DIRS))
 MAP_HEADERS := $(patsubst $(MAPS_DIR)/%/,$(MAPS_DIR)/%/header.inc,$(MAP_DIRS))
 MAP_JSONS := $(patsubst $(MAPS_DIR)/%/,$(MAPS_DIR)/%/map.json,$(MAP_DIRS))
 
+# The per-map .inc files are pulled in by data/maps/{headers,events}.inc, which
+# data/maps.s and data/map_events.s .include. The ROM build reaches them as
+# prerequisites of maps.o/map_events.o below, but the RP2350 and 3DS builds
+# assemble those .s files directly after only `make generated` -- so they have
+# to be part of `generated` too, or preproc dies on the first missing header.inc
+# and silently emits a truncated object (gMapGroups never gets defined).
+AUTO_GEN_TARGETS += $(MAP_CONNECTIONS) $(MAP_EVENTS) $(MAP_HEADERS)
+
 $(DATA_ASM_BUILDDIR)/maps.o: $(DATA_ASM_SUBDIR)/maps.s $(LAYOUTS_DIR)/layouts.inc $(LAYOUTS_DIR)/layouts_table.inc $(MAPS_DIR)/headers.inc $(MAPS_DIR)/groups.inc $(MAPS_DIR)/connections.inc $(MAP_CONNECTIONS) $(MAP_HEADERS)
 	$(PREPROC) $< charmap.txt | $(CPP) -I include - | $(PREPROC) -ie $< charmap.txt | $(AS) $(ASFLAGS) -o $@
 $(DATA_ASM_BUILDDIR)/map_events.o: $(DATA_ASM_SUBDIR)/map_events.s $(MAPS_DIR)/events.inc $(MAP_EVENTS)
