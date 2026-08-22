@@ -99,7 +99,11 @@ done
 
 echo "      sound: data + symbols + $(ls sound/songs/midi/*.s 2>/dev/null | wc -l | tr -d ' ') songs"
 assemble_sound_data data/sound_data.s "$OBJ/data_sound_data.o"
-$AS -march=armv6k -mfloat-abi=hard -o "$OBJ/sound_symbols.o" rp2350/sound_symbols.s
+# rp2350/sound_symbols.s is deliberately NOT assembled here. It defines
+# gNumMusicPlayers/gMaxLines as absolute symbols whose address is the value,
+# which 3dsxtool cannot relocate ("Relocation to invalid address!"). The 3DS
+# build gets them as plain constants instead -- see the PLATFORM_3DS branch in
+# include/gba/m4a_internal.h.
 ls sound/songs/midi/*.s | xargs -P 8 -I{} bash -c \
   "$AS -march=armv6k -mfloat-abi=hard -I sound -o \"$OBJ/song_\$(basename \"{}\" .s).o\" \"{}\""
 

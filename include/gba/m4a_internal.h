@@ -403,11 +403,28 @@ extern const struct PokemonCrySong gPokemonCrySongTemplate;
 
 extern const struct ToneData voicegroup_dummy;
 
+// These two are not variables: the m4a engine encodes each value in the
+// *address* of an absolute symbol, and reads it by casting the array to an
+// integer. rp2350/sound_symbols.s supplies them that way for the RP2350 build.
+//
+// A 3DSX can only express relocations that point inside the loaded image, so
+// &gNumMusicPlayers == 4 makes 3dsxtool abort with
+//   absolute @ relSrc=00000004 / Relocation to invalid address!
+// The values are compile-time constants anyway, so on the 3DS use them
+// directly and emit no relocation at all. sound_symbols.s is correspondingly
+// left out of the 3DS archive (3ds/build_objs.sh), which turns any future
+// re-introduction of the address trick into an immediate link error rather
+// than another 3dsxtool failure.
+#if PLATFORM_3DS
+#define NUM_MUSIC_PLAYERS 4   // BGM, SE1, SE2, SE3
+#define MAX_LINES 0
+#else
 extern char gNumMusicPlayers[];
 extern char gMaxLines[];
 
 #define NUM_MUSIC_PLAYERS ((u16)gNumMusicPlayers)
 #define MAX_LINES ((u32)gMaxLines)
+#endif
 
 u32 umul3232H32(u32 multiplier, u32 multiplicand);
 void SoundMain(void);
