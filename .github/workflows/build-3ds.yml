@@ -88,15 +88,23 @@ jobs:
 
       # makerom is not a devkitPro package, so it is fetched from upstream and
       # pinned by hash -- this is a third-party binary entering the build.
+      #
+      # Deliberately v0.18.3, not the newest. Upstream's Linux builds link
+      # against whatever glibc their CI ran: v0.19.0 needs GLIBC_2.38 and
+      # v0.18.4 needs 2.34, both newer than the devkitARM image provides
+      # ("version `GLIBC_2.38' not found"). v0.18.3 needs only GLIBC_2.14 and
+      # produces byte-identical output for this RSF.
       - name: Install makerom
         env:
-          MAKEROM_URL: https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip
-          MAKEROM_SHA256: 287b809dec064e0ad597e3d272c49ecb7eed41693d5ee6fef9d8a8aa24c2497e
+          MAKEROM_URL: https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.3/makerom-v0.18.3-ubuntu_x86_64.zip
+          MAKEROM_SHA256: 6f36f77946742d2b8286a92d887e845e06d430998ed4a9c4856d8ea2d4eebd6f
         run: |
           curl -sSL -o /tmp/makerom.zip "$MAKEROM_URL"
           echo "$MAKEROM_SHA256  /tmp/makerom.zip" | sha256sum -c -
           unzip -o /tmp/makerom.zip -d /usr/local/bin
           chmod +x /usr/local/bin/makerom
+          # Fail here, with a clear message, rather than mid-package.
+          makerom -? >/dev/null 2>&1 || makerom 2>&1 | head -2
 
       # Produces emerald3ds.cia (install to a console) and emerald3ds.3ds
       # (CCI -- boots directly in an emulator, no install step).
