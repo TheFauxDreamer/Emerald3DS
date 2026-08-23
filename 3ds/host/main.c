@@ -26,6 +26,9 @@ void CtrAudioExit(void);
 void CtrAudioFrame(void);
 void CtrSaveLoad(void);
 void CtrSaveFlush(int force);
+#if CTR_BOOT_DIAG
+void CtrDiagSplash(void);
+#endif
 
 static jmp_buf sQuitJmp;
 static int     sQuitting;
@@ -153,6 +156,12 @@ int main(int argc, char **argv)
     CtrTrace("emerald3ds: audio ready\n");
     CtrBottomInit();
     CtrTrace("emerald3ds: bottom screen ready\n");
+
+#if CTR_BOOT_DIAG
+    // Leaves a known image on screen. If it survives, the game hung; if the
+    // screen stays black, nothing in this file ever ran.
+    CtrDiagSplash();
+#endif
 
     if (setjmp(sQuitJmp) == 0) {
         // If nothing after this line ever appears, the game hung inside its own

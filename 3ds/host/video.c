@@ -134,6 +134,29 @@ void CtrVideoExit(void)
     sReady = 0;
 }
 
+#if CTR_BOOT_DIAG
+// Presented once, before AgbMain(), so a black screen stops being ambiguous.
+// Without it "hung inside the game's init" and "never got as far as running"
+// look identical. Solid blue top / green bottom means everything in this file
+// works and the game is what stalled.
+void CtrDiagSplash(void)
+{
+    if (!sReady)
+        return;
+
+    // A few frames: one alone can be lost to double buffering.
+    for (int i = 0; i < 4; i++) {
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C2D_TargetClear(sTopTarget, C2D_Color32(0x00, 0x00, 0xC0, 0xFF));
+        C2D_SceneBegin(sTopTarget);
+        C2D_TargetClear(sBotTarget, C2D_Color32(0x00, 0x60, 0x00, 0xFF));
+        C2D_SceneBegin(sBotTarget);
+        C3D_FrameEnd(0);
+    }
+    CtrTrace("emerald3ds: splash presented (video path works)\n");
+}
+#endif
+
 // Copy a linear w x h RGB565 image into a wider staging buffer, then let the
 // transfer engine tile it into the texture.
 static void upload(uint16_t *stage, int stageW, const uint16_t *src,
