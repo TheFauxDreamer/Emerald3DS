@@ -95,6 +95,52 @@ void ProcessDma3Requests(void)
     }
 }
 
+#if WASM || RP2350
+// These platforms have no DMA hardware and no interrupts. ProcessDma3Requests()
+// only runs inside VBlankIntr(), which they call explicitly once per frame from
+// WasmRunFrame() (src/main.c) rather than from an interrupt.
+//
+// That breaks every one of the game's `while (TRUE)` init loops that polls for
+// a queued copy to land: the loop never returns to the frame loop, so the queue
+// can never drain, so the poll never clears. It froze the party menu outright --
+// AllocPartyMenuBgGfx() case 1 (src/party_menu.c) waits on
+// IsDma3ManagerBusyWithBgCopy() from inside CB2_InitPartyMenu()'s `while (TRUE)`,
+// taking the entire game with it, second screen included.
+//
+// With no hardware to wait on there is nothing to defer, so do the transfer
+// immediately and never occupy a queue slot. Completion checks then report
+// "done" on the first poll, and ProcessDma3Requests() runs over a permanently
+// empty queue.
+s16 RequestDma3Copy(const void *src, void *dest, u16 size, u8 mode)
+{
+    if (mode == 1)
+    {
+        Dma3CopyLarge32_(src, dest, size);
+    }
+    else
+    {
+        Dma3CopyLarge16_(src, dest, size);
+    }
+
+    // Slot 0 is never occupied here, so CheckForSpaceForDma3Request(0) reads
+    // as complete -- which is exactly true, the copy already happened.
+    return 0;
+}
+
+s16 RequestDma3Fill(s32 value, void *dest, u16 size, u8 mode)
+{
+    if (mode == 1)
+    {
+        Dma3FillLarge32_(value, dest, size);
+    }
+    else
+    {
+        Dma3FillLarge16_(value, dest, size);
+    }
+
+    return 0;
+}
+#else
 s16 RequestDma3Copy(const void *src, void *dest, u16 size, u8 mode)
 {
     int cursor;
@@ -159,6 +205,8 @@ s16 RequestDma3Fill(s32 value, void *dest, u16 size, u8 mode)
     sDma3ManagerLocked = FALSE;
     return -1;  // no free DMA request was found
 }
+
+#endif // WASM || RP2350
 
 s16 CheckForSpaceForDma3Request(s16 index)
 {
