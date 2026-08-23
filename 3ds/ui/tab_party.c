@@ -143,7 +143,15 @@ static void DrawDetail(void)
     // Ability / nature / held item
     y = 112;
     UiText(12, y, UiAscii(label, "ABILITY", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
-    UiText(80, y, gAbilityNames[GetMonAbility(mon)], UI_COL_TEXT, UI_COL_SHADOW);
+    {
+        // Deliberately NOT GetMonAbility(): it routes through
+        // GetAbilityBySpecies(), which writes gLastUsedAbility -- a global the
+        // battle message system reads (src/battle_message.c:2511). Displaying
+        // an ability must not perturb that. This is the same lookup, read-only.
+        u8 abilityNum = (u8)GetMonData(mon, MON_DATA_ABILITY_NUM);
+        u8 ability = gSpeciesInfo[species].abilities[abilityNum ? 1 : 0];
+        UiText(80, y, gAbilityNames[ability], UI_COL_TEXT, UI_COL_SHADOW);
+    }
 
     y += 16;
     UiText(12, y, UiAscii(label, "NATURE", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);

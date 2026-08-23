@@ -24,8 +24,8 @@ enum UiTab
 
 // Emerald's menu palette is loaded per-window; for our own chrome these are
 // fixed RGB565 approximations of it.
-#define UI_COL_TEXT     0x39E7   // near-white
-#define UI_COL_SHADOW   0x39E7
+#define UI_COL_TEXT     0xFFFF   // white
+#define UI_COL_SHADOW   0x2124   // dark, for the font's shadow pixels
 #define UI_COL_DIM      0x8410
 #define UI_COL_ACCENT   0x07FF
 #define UI_COL_BG       0x18C3

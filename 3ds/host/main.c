@@ -72,6 +72,7 @@ static uint16_t sample_keys(void)
 static void sample_touch(CtrTouchState *t)
 {
     static int wasTouching;
+    static touchPosition lastPos;
 
     touchPosition pos;
     hidTouchRead(&pos);
@@ -79,12 +80,20 @@ static void sample_touch(CtrTouchState *t)
     uint32_t held = hidKeysHeld();
     int touching = (held & KEY_TOUCH) != 0;
 
-    t->x = (int16_t)pos.px;
-    t->y = (int16_t)pos.py;
+    // hidScanInput() memsets the touch position every scan and only refills it
+    // while the panel is actually pressed, so on the RELEASE frame hidTouchRead
+    // returns (0,0) rather than the last contact point. Latch it -- otherwise
+    // every tap is reported at the top-left corner, which silently made all
+    // release-driven hit tests target whatever sits at (0,0).
+    if (touching)
+        lastPos = pos;
+
+    t->x = (int16_t)lastPos.px;
+    t->y = (int16_t)lastPos.py;
     t->touching     = (uint8_t)touching;
     t->justPressed  = (uint8_t)(touching && !wasTouching);
-    // On release the final coordinates are stale, but they are the last valid
-    // ones, which is exactly what a tap wants to act on.
+    // Thanks to the latch above, the coordinates on the release frame are the
+    // last contact point, which is what a tap wants to act on.
     t->justReleased = (uint8_t)(!touching && wasTouching);
 
     wasTouching = touching;

@@ -63,6 +63,37 @@ static u32 PartyStateHash(void)
     return hash;
 }
 
+// Before the player has any Pokemon -- title screen, intro, the walk to Route
+// 101 -- every tab has nothing to show, and six empty frames read as a broken
+// menu rather than an idle one. Show a plain identity screen instead.
+static int PartyIsEmpty(void)
+{
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+        if (GetMonData(&gPlayerParty[i], MON_DATA_SPECIES) != SPECIES_NONE)
+            return 0;
+
+    return 1;
+}
+
+static void DrawCentered(int y, const char *ascii, u16 color)
+{
+    u8 label[32];
+
+    UiAscii(label, ascii, sizeof(label));
+    UiText((CTR_BOTTOM_WIDTH - UiTextWidth(label)) / 2, y, label,
+           color, UI_COL_SHADOW);
+}
+
+static void DrawIdle(void)
+{
+    UiClear(UI_COL_BG);
+    UiWindowFrame(2, 5, 36, 14);
+
+    DrawCentered(72, "POKEMON EMERALD", UI_COL_TEXT);
+    DrawCentered(96, "3DS", UI_COL_ACCENT);
+    DrawCentered(140, "Your team appears here", UI_COL_DIM);
+}
+
 static const char *const sTabNames[UI_TAB_COUNT] = { "PARTY", "BAG", "MAP" };
 
 static void DrawTabBar(void)
@@ -88,6 +119,14 @@ static void DrawTabBar(void)
 
 static void Redraw(void)
 {
+    if (PartyIsEmpty())
+    {
+        DrawIdle();
+        sNeedsRepaint = 0;
+        sDirty = 1;
+        return;
+    }
+
     UiClear(UI_COL_BG);
 
     switch (sTab)
@@ -113,11 +152,15 @@ void CtrBottomInit(void)
 
 void CtrBottomUpdate(const CtrTouchState *touch)
 {
+    // Nothing on the idle screen is interactive.
+    if (PartyIsEmpty())
+        touch = NULL;
+
 
     // A tap on the tab bar switches views; anything above it belongs to the
     // active view. Acting on release rather than press means a touch that
     // slides off a tab does not trigger it.
-    if (touch->justReleased && touch->y >= UI_CONTENT_H)
+    if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
     {
         int tab = touch->x / (CTR_BOTTOM_WIDTH / UI_TAB_COUNT);
 
@@ -127,7 +170,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             sNeedsRepaint = 1;
         }
     }
-    else if (touch->y < UI_CONTENT_H)
+    else if (touch != NULL && touch->y < UI_CONTENT_H)
     {
         switch (sTab)
         {
