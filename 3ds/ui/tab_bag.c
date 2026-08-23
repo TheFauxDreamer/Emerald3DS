@@ -32,12 +32,17 @@
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
 
-// Two panels side by side, both on the player's chosen window frame. 19 + 21
-// tiles exactly fills the 40-tile width.
+// Two panels side by side, both on the player's chosen window frame. 24 + 16
+// tiles exactly fills the 40-tile width, a 60/40 split in the list's favour.
+//
+// 24 is the largest the list can take. It leaves the details column 108px of
+// text width, and the widest line in any item description ("raises FARFETCH'D's",
+// src/data/text/item_descriptions.h) is exactly 108px. One tile further and
+// descriptions start wrapping into the border.
 #define PANEL_Y       24
 #define PANEL_TY      (PANEL_Y / 8)
 #define PANEL_TH      ((UI_CONTENT_H - PANEL_Y) / 8)
-#define LEFT_TW       19
+#define LEFT_TW       24
 #define RIGHT_TX      LEFT_TW
 #define RIGHT_TW      ((CTR_BOTTOM_WIDTH / 8) - LEFT_TW)
 
@@ -53,6 +58,14 @@
 
 #define RIGHT_X       (RIGHT_TX * 8 + 10)
 #define RIGHT_W       (RIGHT_TW * 8 - 20)
+
+// The narrower column stacks the icon above the name instead of setting them
+// side by side: at 108px a 32px icon plus the longest item name (72px) does not
+// fit on one line.
+#define ICON_X        (RIGHT_X + (RIGHT_W - 32) / 2)
+#define ICON_Y        (PANEL_Y + 6)
+#define NAME_Y        (PANEL_Y + 40)
+#define DESC_Y        (PANEL_Y + 58)
 
 #define USE_W         88
 #define USE_H         26
@@ -238,6 +251,7 @@ static void DrawList(void)
 static void DrawDetails(void)
 {
     u16 item = CursorItem();
+    const u8 *name;
     u8 label[32];
 
     UiWindowFrame(RIGHT_TX, PANEL_TY, RIGHT_TW, PANEL_TH);
@@ -245,22 +259,28 @@ static void DrawDetails(void)
     if (item == ITEM_NONE)
         return;
 
-    UiItemIcon(RIGHT_X, PANEL_Y + 6, item);
-    UiText(RIGHT_X + 40, PANEL_Y + 16, GetItemName(item),
+    // Icon and name centred. Left-aligning a 32px icon in a column this narrow
+    // reads as though it slipped rather than as a layout.
+    UiItemIcon(ICON_X, ICON_Y, item);
+
+    name = GetItemName(item);
+    UiText(RIGHT_X + (RIGHT_W - UiTextWidth(name)) / 2, NAME_Y, name,
            UiThemeText(), UiThemeShadow());
 
-    // Carries its own line breaks, which UiText honours.
-    UiText(RIGHT_X, PANEL_Y + 46, GetItemDescription(item),
+    // Carries its own line breaks, which UiText honours. Left-aligned, unlike
+    // the two above it: this is prose, and three centred lines read as ragged.
+    UiText(RIGHT_X, DESC_Y, GetItemDescription(item),
            UiThemeText(), UiThemeShadow());
 
     if (sMessage != MSG_NONE)
     {
+        // Kept inside the 108px column: at 6px a glyph that is 18 characters.
         static const char *const text[] = {
             [MSG_USED]      = "Used it.",
             [MSG_NO_EFFECT] = "It had no effect.",
             [MSG_NOT_NOW]   = "Not right now.",
-            [MSG_NO_TARGET] = "Pick a Pokemon first.",
-            [MSG_QUEUED]    = "Using it this turn.",
+            [MSG_NO_TARGET] = "Pick a Pokemon.",
+            [MSG_QUEUED]    = "Use this turn.",
         };
 
         UiText(RIGHT_X, USE_Y - 20, UiAscii(label, text[sMessage], sizeof(label)),
