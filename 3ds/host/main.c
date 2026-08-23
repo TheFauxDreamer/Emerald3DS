@@ -90,6 +90,16 @@ static void sample_touch(CtrTouchState *t)
     wasTouching = touching;
 }
 
+#if CTR_BOOT_DIAG
+// Callable from game-side code, which must never include <3ds.h> (the
+// two-worlds rule in 3ds/README.md). A plain `const char *` crosses the seam
+// safely -- no u8/u16/u32 and no string.h in the signature.
+void CtrTraceMsg(const char *msg)
+{
+    CtrTrace("%s", msg);
+}
+#endif
+
 void Rp2350PresentFrame(void)
 {
     // The first frames are what matter: reaching frame 1 at all rules out a

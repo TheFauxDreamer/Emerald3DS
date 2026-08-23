@@ -89,8 +89,19 @@ void EnableVCountIntrAtLine150(void);
 
 #define B_START_SELECT (B_BUTTON | START_BUTTON | SELECT_BUTTON)
 
+// Temporary bring-up tracing: the 3DS port hangs somewhere in this function
+// before the first frame is presented, and the platform has no console. Strip
+// this block (and the BOOT_TRACE calls below) once it boots.
+#if PLATFORM_3DS && CTR_BOOT_DIAG
+extern void CtrTraceMsg(const char *msg);
+#define BOOT_TRACE(s) CtrTraceMsg("emerald3ds: AgbMain > " s "\n")
+#else
+#define BOOT_TRACE(s) ((void)0)
+#endif
+
 void AgbMain(void)
 {
+    BOOT_TRACE("enter");
     // Modern compilers are liberal with the stack on entry to this function,
     // so RegisterRamReset may crash if it resets IWRAM.
 #if !MODERN
@@ -98,9 +109,12 @@ void AgbMain(void)
 #endif //MODERN
     *(vu16 *)BG_PLTT = RGB_WHITE; // Set the backdrop to white on startup
     InitGpuRegManager();
+    BOOT_TRACE("InitGpuRegManager");
     REG_WAITCNT = WAITCNT_PREFETCH_ENABLE | WAITCNT_WS0_S_1 | WAITCNT_WS0_N_3;
     InitKeys();
+    BOOT_TRACE("InitKeys");
     InitIntrHandlers();
+    BOOT_TRACE("InitIntrHandlers");
 #if WASM || RP2350
     gFlashMemoryPresent = TRUE;
 #if RP2350
@@ -110,10 +124,12 @@ void AgbMain(void)
     // runtime. Re-derive them; the WASM||RP2350 IdentifyFlash sets exactly
     // that set and nothing else.
     IdentifyFlash();
+    BOOT_TRACE("IdentifyFlash");
     // Bring up the real m4a sound engine (asm core ported to C in
     // rp2350/m4a_1.c). The mixer renders into gSoundInfo.pcmBuffer each
     // VBlankIntr; Rp2350MixFrame drains it into the I2S ring.
     m4aSoundInit();
+    BOOT_TRACE("m4aSoundInit");
 #endif
 #else
     m4aSoundInit();
@@ -123,14 +139,20 @@ void AgbMain(void)
     CheckForFlashMemory();
 #endif
     InitMainCallbacks();
+    BOOT_TRACE("InitMainCallbacks");
     InitMapMusic();
+    BOOT_TRACE("InitMapMusic");
 #ifdef BUGFIX
     SeedRngWithRtc(); // see comment at SeedRngWithRtc definition below
 #endif
     ClearDma3Requests();
+    BOOT_TRACE("ClearDma3Requests");
     ResetBgs();
+    BOOT_TRACE("ResetBgs");
     SetDefaultFontsPointer();
+    BOOT_TRACE("SetDefaultFontsPointer");
     InitHeap(gHeap, HEAP_SIZE);
+    BOOT_TRACE("InitHeap");
 
     gSoftResetDisabled = FALSE;
 
@@ -157,7 +179,12 @@ void AgbMain(void)
 
 void WasmRunFrame(void)
 {
+    static int firstFrame = 1;
+#define FRAME_TRACE(s) do { if (firstFrame) BOOT_TRACE("frame1 " s); } while (0)
+
+    FRAME_TRACE("start");
     ReadKeys();
+    FRAME_TRACE("ReadKeys");
 
     if (gSoftResetDisabled == FALSE
      && JOY_HELD_RAW(A_BUTTON)
@@ -189,13 +216,18 @@ void WasmRunFrame(void)
         }
     }
 
+    FRAME_TRACE("callbacks");
     PlayTimeCounter_Update();
     MapMusicMain();
+    FRAME_TRACE("MapMusicMain");
 #if WASM || RP2350
     VBlankIntr();
 #else
     WaitForVBlank();
 #endif
+    FRAME_TRACE("VBlankIntr");
+    firstFrame = 0;
+#undef FRAME_TRACE
 #if RP2350
     { extern volatile u32 gRp2350FrameCount; gRp2350FrameCount++; }
     { extern void Rp2350PresentFrame(void); Rp2350PresentFrame(); }

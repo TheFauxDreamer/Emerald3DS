@@ -50,7 +50,11 @@ CFLAGS="$ARCH -O2 -ffreestanding -fno-strict-aliasing -fomit-frame-pointer \
 
 # -iquote, not -I: the game's include/ has string.h/strings.h that must only
 # satisfy "" includes, never hijack libc's <string.h>.
-CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1"
+# CTR_BOOT_DIAG must match 3ds/Makefile: the bring-up traces in src/main.c are
+# game-side, so without it here they silently compile to nothing while the
+# host-side traces still appear -- a half-instrumented build that looks fine.
+CTR_BOOT_DIAG="${CTR_BOOT_DIAG:-1}"
+CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=$CTR_BOOT_DIAG"
 
 if [ ! -d "$ASSETS" ]; then
   echo "error: $ASSETS missing. Run 'make tools && make wasm-assets' first." >&2
