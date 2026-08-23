@@ -133,6 +133,14 @@ void AgbMain(void)
     // VBlankIntr; Rp2350MixFrame drains it into the I2S ring.
     m4aSoundInit();
     BOOT_TRACE("m4aSoundInit");
+#if PLATFORM_3DS
+    // Unlike the bare RP2350, the 3DS has a working clock behind the SiiRtc
+    // driver (src/siirtc.c under PLATFORM_3DS), so probe it properly. Skipping
+    // this leaves sErrorStatus at zero by accident rather than by check, and
+    // leaves sRtc unpopulated until something else happens to call RtcGetInfo.
+    RtcInit();
+    BOOT_TRACE("RtcInit");
+#endif
 #endif
 #else
     m4aSoundInit();

@@ -14,6 +14,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "../bridge.h"
 #include "trace.h"
@@ -108,6 +109,55 @@ void CtrTraceMsg(const char *msg)
     CtrTrace("%s", msg);
 }
 #endif
+
+// The cartridge RTC, backed by the console clock. src/siirtc.c calls this in
+// place of bit-banging an S-3511A that a 3DS does not have.
+//
+// Cached to the second. RtcCalcLocalTime() runs from DoTimeBasedEvents() every
+// frame in the overworld, and the chip only ever had one-second resolution, so
+// there is nothing to gain from breaking the time down sixty times a second.
+//
+// localtime() rather than gmtime(): a 3DS stores the wall-clock time the user
+// set, with no timezone database, so with TZ unset the two agree. localtime()
+// is the one that stays correct if that ever stops being true.
+void Ctr3dsGetClock(CtrClock *out)
+{
+    static time_t   cachedAt = (time_t)-1;
+    static CtrClock cached;
+
+    time_t now = time(NULL);
+
+    if (now != cachedAt)
+    {
+        struct tm *lt = localtime(&now);
+
+        if (lt == NULL) {
+            // Should not happen, but a zeroed clock here would read as an
+            // invalid month and day to RtcCheckInfo. Hand back the epoch the
+            // cart RTC itself resets to.
+            cached.year = 0; cached.month = 1; cached.day = 1;
+            cached.dayOfWeek = 0;
+            cached.hour = 0; cached.minute = 0; cached.second = 0;
+        } else {
+            // The chip holds a two-digit year. Wrapping keeps it inside the
+            // 0..99 the BCD encoding and ConvertBcdToBinary can represent;
+            // outside that the game would report an invalid-year error.
+            int year = lt->tm_year + 1900 - 2000;
+
+            cached.year      = (uint8_t)(((year % 100) + 100) % 100);
+            cached.month     = (uint8_t)(lt->tm_mon + 1);
+            cached.day       = (uint8_t)lt->tm_mday;
+            cached.dayOfWeek = (uint8_t)lt->tm_wday;
+            cached.hour      = (uint8_t)lt->tm_hour;
+            cached.minute    = (uint8_t)lt->tm_min;
+            cached.second    = (uint8_t)lt->tm_sec;
+        }
+
+        cachedAt = now;
+    }
+
+    *out = cached;
+}
 
 void Rp2350PresentFrame(void)
 {

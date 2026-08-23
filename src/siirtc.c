@@ -60,6 +60,119 @@
 #define DIR_ALL_IN  (DIR_0_IN | DIR_1_IN | DIR_2_IN)
 #define DIR_ALL_OUT (DIR_0_OUT | DIR_1_OUT | DIR_2_OUT)
 
+#if PLATFORM_3DS
+
+// A 3DS has no cartridge, so there is no S-3511A to bit-bang and no GPIO to
+// bit-bang it over. The equivalent hardware is the console's own real-time
+// clock, so this is the same driver interface backed by that instead.
+//
+// Substituting at THIS layer is the point: src/rtc.c, berry growth, the
+// time-of-day events, the bedroom wall clock and the reset-RTC screen are all
+// untouched, because as far as they can tell the cart clock is present and
+// running. It is the same kind of substitution the port already makes for the
+// LCD, the flash save chip and GBA memory.
+//
+// Ctr3dsGetClock() is host-side. bridge.h lists src/** as a game-side TU and
+// contains no libctru, which is why including it here is safe; 3ds/ui/*.c
+// already do the same.
+#include "../3ds/bridge.h"
+
+// Every field of the real chip is two BCD digits, and ConvertBcdToBinary()
+// (src/rtc.c) is what reads them back, so the encoding has to happen here.
+static u8 ToBcd(u8 value)
+{
+    return (u8)(((value / 10) << 4) | (value % 10));
+}
+
+static void ReadHostClock(struct SiiRtcInfo *rtc)
+{
+    CtrClock now;
+
+    Ctr3dsGetClock(&now);
+
+    rtc->year      = ToBcd(now.year);
+    rtc->month     = ToBcd(now.month);
+    rtc->day       = ToBcd(now.day);
+    rtc->dayOfWeek = ToBcd(now.dayOfWeek);
+    rtc->hour      = ToBcd(now.hour);
+    rtc->minute    = ToBcd(now.minute);
+    rtc->second    = ToBcd(now.second);
+}
+
+// No GPIO to protect.
+void SiiRtcUnprotect(void) {}
+void SiiRtcProtect(void) {}
+
+// RtcInit() reads (result & 0xF) != 1 as a dead clock and any of 0xF0 as a
+// warning, so 1 is "present, running, 24-hour, not in test mode".
+u8 SiiRtcProbe(void)
+{
+    return 1;
+}
+
+// The console clock belongs to the system, not to the game, so writes are
+// accepted and ignored rather than applied.
+//
+// This is deliberate, not a shortcut. Emerald never needs to write the chip:
+// the time the player dials in on the wall clock is stored as an offset in the
+// save (RtcCalcLocalTimeOffset), and local time is always the chip minus that
+// offset. A writable clock here would also have to persist across launches, or
+// RtcReset() would zero it, the save would keep an offset measured against
+// 2000-01-01, and the next launch would read the real date and land the player
+// decades in the future.
+bool8 SiiRtcReset(void)
+{
+    return TRUE;
+}
+
+bool8 SiiRtcSetStatus(struct SiiRtcInfo *rtc)
+{
+    (void)rtc;
+    return TRUE;
+}
+
+bool8 SiiRtcSetDateTime(struct SiiRtcInfo *rtc)
+{
+    (void)rtc;
+    return TRUE;
+}
+
+bool8 SiiRtcSetTime(struct SiiRtcInfo *rtc)
+{
+    (void)rtc;
+    return TRUE;
+}
+
+bool8 SiiRtcGetStatus(struct SiiRtcInfo *rtc)
+{
+    // The two bits RtcCheckInfo() tests: 24-hour mode set, power-failure clear.
+    // Getting either wrong is what produces the "internal battery has run dry"
+    // path in the main menu.
+    rtc->status = SIIRTCINFO_24HOUR;
+    return TRUE;
+}
+
+bool8 SiiRtcGetDateTime(struct SiiRtcInfo *rtc)
+{
+    ReadHostClock(rtc);
+    return TRUE;
+}
+
+bool8 SiiRtcGetTime(struct SiiRtcInfo *rtc)
+{
+    struct SiiRtcInfo now;
+
+    // Time only: the real command leaves the date fields of the caller's struct
+    // alone, and SiiRtcProbe() relies on that.
+    ReadHostClock(&now);
+    rtc->hour   = now.hour;
+    rtc->minute = now.minute;
+    rtc->second = now.second;
+    return TRUE;
+}
+
+#else   // the cartridge S-3511A, over the GPIO port
+
 #if RP2350
 // The cartridge GPIO registers live in GBA ROM space (0x080000C4), which is
 // unmapped on the MCU -- a real store there is a bus fault (this hardfaulted
@@ -474,3 +587,5 @@ static void DisableGpioPortRead()
 {
     GPIO_PORT_READ_ENABLE = FALSE;
 }
+
+#endif // PLATFORM_3DS

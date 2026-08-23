@@ -77,6 +77,25 @@ uint16_t Rp2350SaveProgramSector(uint16_t sectorNum, uint8_t *src);
 uint16_t Rp2350SaveProgramByte(uint16_t sectorNum, uint32_t offset, uint8_t data);
 void     Rp2350SaveSync(void);
 
+// The console's real-time clock, standing in for the cartridge RTC. The GBA
+// carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
+// this instead (under PLATFORM_3DS). That file is game-side and includes this
+// header directly, the way 3ds/ui/*.c already do.
+//
+// Fields are PLAIN BINARY. The driver applies the BCD encoding the real chip
+// would have used, because that is what src/rtc.c reads back.
+typedef struct {
+    uint8_t year;       // years since 2000, 0..99: the chip stores two digits
+    uint8_t month;      // 1..12
+    uint8_t day;        // 1..31
+    uint8_t dayOfWeek;  // 0..6, Sunday = 0
+    uint8_t hour;       // 0..23, always 24-hour
+    uint8_t minute;     // 0..59
+    uint8_t second;     // 0..59
+} CtrClock;
+
+void Ctr3dsGetClock(CtrClock *out);
+
 // Mix one frame of PCM. Implemented game-side in rp2350/m4a_1.c.
 int Rp2350MixFrame(int8_t *out, int n);
 
