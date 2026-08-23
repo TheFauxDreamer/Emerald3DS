@@ -128,6 +128,34 @@ member (species / HP / level) straight out of `gPlayerParty`, so it is correctly
 blank until you receive your first Pokémon. The real tabbed PARTY / BAG / DEX
 interface in Emerald's own style comes next.
 
+## Audio requires a DSP firmware dump
+
+Not a quirk of this port — it applies to every 3DS homebrew that uses NDSP.
+libctru loads the DSP component from `sdmc:/3ds/dspfirm.cdc`, and `ndspInit()`
+fails outright if that file is missing, so the game runs silent. `CtrAudioInit()`
+now says so via `CtrLog()` (always compiled, unlike the `CTR_BOOT_DIAG` traces);
+before that it used `printf`, which goes nowhere on a console-less platform and
+made a missing file look like a broken audio path.
+
+**On hardware**, dump it from your own console with
+[DSP1](https://github.com/zoogie/DSP1) — a one-time step already included in the
+standard 3DS CFW setup guides.
+
+**Under an emulator using HLE audio** (Azahar/Citra's default) the contents are
+never used, so any file at that path satisfies libctru:
+`DSP_DSP::LoadComponent` returns success before it even reads the buffer, and
+`DspHle::LoadComponent` states outright that "HLE doesn't need DSP program" and
+only hashes it for the log. A placeholder is enough to test with.
+
+Why not sidestep it with CSND, which needs no firmware: Azahar stubs
+`CSND_SND::ExecuteCommands`, so a CSND backend would be silent in exactly the
+place most testing happens. Not worth a second audio backend.
+
+Rate: m4a is initialised to `SOUND_MODE_FREQ_13379`, which is
+`gPcmSamplesPerVBlankTable[3]` = 224 samples per frame; the port plays them at
+224 x 60 = 13440 Hz (0.5% sharp of the GBA's 59.73 Hz, which keeps the ring from
+drifting).
+
 ### Bring-up notes
 
 The boot crash worth remembering, because nothing about it is obvious:
