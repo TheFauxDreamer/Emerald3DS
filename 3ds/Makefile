@@ -46,8 +46,14 @@ OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 # disagree about the ABI and the link is quietly wrong.
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-relocations
 
+# Boot diagnostics: svcOutputDebugString traces (visible in an emulator's log)
+# plus a cycling pillarbox on the top screen that shows the frame loop is alive.
+# Set to 0 once the port boots. See 3ds/host/trace.h.
+CTR_BOOT_DIAG ?= 1
+
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections \
+            -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 LIBS     := -lcitro2d -lcitro3d -lctru -lm

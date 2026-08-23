@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "../bridge.h"
+#include "trace.h"
 
 int  CtrVideoInit(void);
 void CtrVideoExit(void);
@@ -88,6 +89,16 @@ static void sample_touch(CtrTouchState *t)
 
 void Rp2350PresentFrame(void)
 {
+    // The first frames are what matter: reaching frame 1 at all rules out a
+    // hang in the game's init, and a steadily rising count rules out a hang in
+    // the frame loop. After that it would just spam the log.
+    {
+        static unsigned frame;
+        frame++;
+        if (frame <= 3 || frame == 60 || frame == 600)
+            CtrTrace("emerald3ds: present frame %u\n", frame);
+    }
+
     // HOME menu / power. Do this first so a close request is honoured even if
     // the frame below would misbehave.
     if (!aptMainLoop() && !sQuitting) {
@@ -121,22 +132,34 @@ int main(int argc, char **argv)
 
     // Must precede everything: every VRAM/palette/OAM/register access in the
     // game derives from this block.
+    CtrTrace("emerald3ds: main() entered\n");
+
     Ctr3dsInitGbaMemory();
+    CtrTrace("emerald3ds: gba memory ready\n");
     CtrSaveLoad();
+    CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
+        CtrTrace("emerald3ds: FATAL CtrVideoInit failed\n");
         CtrVideoExit();
         return 1;
     }
+    CtrTrace("emerald3ds: video ready\n");
     // New 3DS: 804 MHz + L2 cache; no-op on Old 3DS. Done after the graphics
     // services are up, since it goes through PTM.
     osSetSpeedupEnable(true);
 
     CtrAudioInit();
+    CtrTrace("emerald3ds: audio ready\n");
     CtrBottomInit();
+    CtrTrace("emerald3ds: bottom screen ready\n");
 
-    if (setjmp(sQuitJmp) == 0)
+    if (setjmp(sQuitJmp) == 0) {
+        // If nothing after this line ever appears, the game hung inside its own
+        // init -- everything above it completed.
+        CtrTrace("emerald3ds: entering AgbMain\n");
         AgbMain();   // never returns; exits via longjmp above
+    }
 
     // Unconditional flush: the deferred writeback may still be pending.
     CtrSaveFlush(1);

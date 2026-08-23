@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "../bridge.h"
+#include "trace.h"
 #include "../../rp2350/ppu.h"
 
 #define TOP_TEX_W  256
@@ -55,6 +56,12 @@ static uint16_t sGbaFrame[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 
 static int sReady;
+
+#if CTR_BOOT_DIAG
+// Kept so the diagnostics below can read DISPCNT; ppu_set_memory() otherwise
+// consumes these and video.c never needs them again.
+static const uint8_t *sRegBase;
+#endif
 
 static void init_subtex(Tex3DS_SubTexture *sub, int w, int h, int texW, int texH)
 {
@@ -104,6 +111,9 @@ int CtrVideoInit(void)
     const void *reg, *pal, *vram, *oam;
     CtrGetGbaRegions(&reg, &pal, &vram, &oam);
     ppu_set_memory(reg, pal, vram, oam);
+#if CTR_BOOT_DIAG
+    sRegBase = (const uint8_t *)reg;
+#endif
 
     sReady = 1;
     return 1;
@@ -145,6 +155,27 @@ void CtrVideoPresent(void)
 
     // Rasterise the frame the game just finished writing.
     ppu_render_rgb565(sGbaFrame, sGbaLayer);
+
+#if CTR_BOOT_DIAG
+    // Two facts decide where a black screen comes from:
+    //   DISPCNT == 0x0080 (forced blank) or 0 -> the game is not driving the
+    //   display, so the PPU is right to emit black; the fault is upstream.
+    //   Otherwise a wholly black frame means the game IS driving the display
+    //   and the PPU or its memory pointers are at fault.
+    {
+        static unsigned frame;
+        frame++;
+        if (frame <= 3 || frame == 60 || frame == 600) {
+            uint16_t dispcnt = sRegBase ? (uint16_t)(sRegBase[0] | (sRegBase[1] << 8)) : 0xFFFF;
+            unsigned nonblack = 0;
+            for (int i = 0; i < CTR_GBA_WIDTH * CTR_GBA_HEIGHT; i++)
+                if (sGbaFrame[i]) nonblack++;
+            CtrTrace("emerald3ds: frame %u DISPCNT=%04x nonblack=%u/%u\n",
+                     frame, dispcnt, nonblack,
+                     (unsigned)(CTR_GBA_WIDTH * CTR_GBA_HEIGHT));
+        }
+    }
+#endif
     upload(sTopStage, TOP_TEX_W, sGbaFrame, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, &sTopTex);
 
     // The bottom screen is mostly static, so only re-tile it when the UI says
@@ -157,7 +188,21 @@ void CtrVideoPresent(void)
 
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
+#if CTR_BOOT_DIAG
+    // Liveness, visible without the log: the GBA image is 360 px on a 400 px
+    // screen, so this shows as a 20 px bar down each side. Cycling bars mean the
+    // frame loop is running; a permanently black screen means it is not.
+    {
+        static unsigned tick;
+        tick++;
+        u8 phase = (u8)((tick / 15) & 3);
+        C2D_TargetClear(sTopTarget, C2D_Color32(phase == 1 ? 0x80 : 0x00,
+                                                phase == 2 ? 0x80 : 0x00,
+                                                phase == 3 ? 0x80 : 0x00, 0xFF));
+    }
+#else
     C2D_TargetClear(sTopTarget, C2D_Color32(0, 0, 0, 0xFF));
+#endif
     C2D_SceneBegin(sTopTarget);
     C2D_DrawImageAt(sTopImage, GBA_DRAW_X, GBA_DRAW_Y, 0.0f, NULL,
                     GBA_SCALE, GBA_SCALE);
