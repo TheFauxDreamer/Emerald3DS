@@ -24,6 +24,18 @@
 #define tButtonMode data[5]
 #define tWindowFrameType data[6]
 
+#if PLATFORM_3DS
+// Mirrors the frame the player is scrolling through, so the bottom screen can
+// preview it alongside the top one. -1 means the options menu is not open and
+// gSaveBlock2Ptr is authoritative again.
+static s16 sCtr3dsLiveFrameType = -1;
+
+s16 Ctr3dsLiveWindowFrameType(void)
+{
+    return sCtr3dsLiveFrameType;
+}
+#endif
+
 enum
 {
     MENUITEM_TEXTSPEED,
@@ -234,6 +246,9 @@ void CB2_InitOptionMenu(void)
         gTasks[taskId].tSound = gSaveBlock2Ptr->optionsSound;
         gTasks[taskId].tButtonMode = gSaveBlock2Ptr->optionsButtonMode;
         gTasks[taskId].tWindowFrameType = gSaveBlock2Ptr->optionsWindowFrameType;
+#if PLATFORM_3DS
+        sCtr3dsLiveFrameType = gTasks[taskId].tWindowFrameType;
+#endif
 
         TextSpeed_DrawChoices(gTasks[taskId].tTextSpeed);
         BattleScene_DrawChoices(gTasks[taskId].tBattleSceneOff);
@@ -334,7 +349,12 @@ static void Task_OptionMenuProcessInput(u8 taskId)
             gTasks[taskId].tWindowFrameType = FrameType_ProcessInput(gTasks[taskId].tWindowFrameType);
 
             if (previousOption != gTasks[taskId].tWindowFrameType)
+            {
                 FrameType_DrawChoices(gTasks[taskId].tWindowFrameType);
+#if PLATFORM_3DS
+                sCtr3dsLiveFrameType = gTasks[taskId].tWindowFrameType;
+#endif
+            }
             break;
         default:
             return;
@@ -356,6 +376,12 @@ static void Task_OptionMenuSave(u8 taskId)
     gSaveBlock2Ptr->optionsSound = gTasks[taskId].tSound;
     gSaveBlock2Ptr->optionsButtonMode = gTasks[taskId].tButtonMode;
     gSaveBlock2Ptr->optionsWindowFrameType = gTasks[taskId].tWindowFrameType;
+
+#if PLATFORM_3DS
+    // Saved now, so the save block is authoritative again. Both ways out of the
+    // menu (A on CANCEL, and B) come through here.
+    sCtr3dsLiveFrameType = -1;
+#endif
 
     BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
     gTasks[taskId].func = Task_OptionMenuFadeOut;

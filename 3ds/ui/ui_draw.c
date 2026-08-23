@@ -4,6 +4,7 @@
 #include "text_window.h"
 #include "pokemon_icon.h"
 #include "menu.h"                     // gStandardMenuPalette
+#include "option_menu.h"              // Ctr3dsLiveWindowFrameType
 #include "constants/characters.h"     // TEXT_COLOR_*
 
 #include "ui_draw.h"
@@ -99,6 +100,15 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
 // centre repeat.
 u8 UiFrameId(void)
 {
+    // While the options menu is open the player's choice lives in that menu's
+    // task and is not written to the save block until they leave. Prefer the
+    // live value, so the border previews here at the same moment it does on the
+    // top screen rather than snapping when the menu closes.
+    s16 live = Ctr3dsLiveWindowFrameType();
+
+    if (live >= 0)
+        return (u8)live;
+
     return gSaveBlock2Ptr->optionsWindowFrameType;
 }
 
