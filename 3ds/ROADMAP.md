@@ -6,7 +6,7 @@ why it is structured the way it is.
 
 ---
 
-# Part A — Top-screen sharpness
+# Part A: Top-screen sharpness
 
 ## Context
 
@@ -16,7 +16,7 @@ be rendered at 2x for sharpness.
 Two findings shape everything below.
 
 **1. 2x is impossible.** `240x160 * 2 = 480x320`; the top screen is `400x240`.
-It exceeds *both* dimensions, so it cannot be done at any setting — not by
+It exceeds *both* dimensions, so it cannot be done at any setting: not by
 filling less of the screen, and not in wide mode, which adds horizontal columns
 only and leaves the 240px height unchanged. The current 1.5x is already the
 largest fit: `240/160 = 1.5` exactly, filling the panel height with a 20px
@@ -30,29 +30,29 @@ present sampler with `present_samplers[!filter_mode]`, where index 0 is
 pixel-perfect frame would still arrive soft through that filter, so **Part A.1
 must be done first or A.2 cannot be judged.**
 
-Because filling the panel is not a priority, pixel-perfect **1x** is viable —
+Because filling the panel is not a priority, pixel-perfect **1x** is viable,
 the only genuinely artifact-free option, since one GBA pixel maps to exactly one
 3DS pixel with no resampling. Vertical 1.5x is otherwise a fixed 2:3 ratio and
 cannot be improved.
 
-## A.1 — Emulator settings (no code; do this first)
+## A.1: Emulator settings (no code; do this first)
 
-Quit Azahar first — it rewrites its config on exit — then in
+Quit Azahar first, because it rewrites its config on exit, then in
 `~/Library/Application Support/Azahar/config/qt-config.ini`, setting each key's
 matching `\default=false` alongside it:
 
-- `filter_mode=false` — nearest present instead of bilinear. Biggest single win.
-- `resolution_factor=4` — rasterises the quad at 4x internally so nearest-sampled
-  GBA pixels stay crisp when enlarged. Valid range 0–18.
-- `use_integer_scaling=true` — avoids fractional window rescaling.
+- `filter_mode=false`: nearest present instead of bilinear. Biggest single win.
+- `resolution_factor=4`: rasterises the quad at 4x internally so nearest-sampled
+  GBA pixels stay crisp when enlarged. Valid range 0-18.
+- `use_integer_scaling=true`: avoids fractional window rescaling.
 
 Judge the result before building anything. This may resolve the complaint
 entirely, in which case A.2 is optional polish.
 
-## A.2 — Selectable top-screen scale
+## A.2: Selectable top-screen scale
 
 Only `3ds/host/video.c` and `3ds/Makefile` change. This is host-side, so unlike
-`CTR_BOOT_DIAG` it does **not** need mirroring into `3ds/build_objs.sh` — no
+`CTR_BOOT_DIAG` it does **not** need mirroring into `3ds/build_objs.sh`: no
 game-side translation unit is affected.
 
 `3ds/Makefile`: `CTR_TOP_SCALE ?= 2`, passed as `-DCTR_TOP_SCALE=$(CTR_TOP_SCALE)`
@@ -75,7 +75,7 @@ For mode 3 only, call `gfxSetWide(true)` immediately after `gfxInitDefault()`
 and **before** `C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT)`. Ordering is
 load-bearing: citro2d picks `GSP_SCREEN_HEIGHT_TOP_2X` (800) over
 `GSP_SCREEN_HEIGHT_TOP` (400) by testing `gfxIsWide()` at creation time. No
-reallocation concern — `gfxSetScreenFormat` already sizes the top framebuffer
+reallocation concern, since `gfxSetScreenFormat` already sizes the top framebuffer
 for 800 unconditionally.
 
 Pass both scales to the existing `C2D_DrawImageAt(...)`, which already accepts
@@ -92,23 +92,23 @@ row can duplicate or drop. Draw positions are integers, which should suffice,
 but if 1x shows a doubled edge the fix is a half-texel inset in `init_subtex`'s
 `right`/`bottom` fractions.
 
-## A — Verification
+## A: Verification
 
 ```sh
 for s in 1 2 3; do make -C 3ds clean && make -C 3ds CTR_TOP_SCALE=$s; done
 ```
 
-- **Mode 2 is the regression test** — must be pixel-identical to today: 360x240
+- **Mode 2 is the regression test**: must be pixel-identical to today: 360x240
   centred, 20px bars. Any difference means the one-scale-to-two refactor is wrong.
-- **Mode 1** — 240x160 centred with wide borders, and *perfectly* sharp: no
+- **Mode 1**: 240x160 centred with wide borders, and *perfectly* sharp: no
   uneven row or column widths anywhere. This is the reference for "correct"; if
   it is not crisp, the remaining blur is Azahar's, not the port's.
-- **Mode 3** — same physical size as mode 2, but vertical edges on sprites and
+- **Mode 3**: same physical size as mode 2, but vertical edges on sprites and
   text noticeably cleaner. Check fill cost: wide mode doubles top-screen fill,
   and since `C3D_FrameEnd` blocks on VBlank a regression shows as sluggishness.
-- **Unaffected each time** — bottom screen, tab switching, party grid, touch.
+- **Unaffected each time**: bottom screen, tab switching, party grid, touch.
 
-## A — Risks
+## A: Risks
 
 - **Judging A.2 before A.1 will mislead.** With `filter_mode=true` every mode
   looks soft, including pixel-perfect 1x.
@@ -122,9 +122,9 @@ for s in 1 2 3; do make -C 3ds clean && make -C 3ds CTR_TOP_SCALE=$s; done
 
 ---
 
-# Part B — Bottom-screen UI (Stages 3–5 outstanding)
+# Part B: Bottom-screen UI (Stages 3-5 outstanding)
 
-Stages 0–2 are implemented: `ui_draw.c` (4bpp blitter, BGR555→RGB565, Emerald
+Stages 0-2 are implemented: `ui_draw.c` (4bpp blitter, BGR555→RGB565, Emerald
 nine-slice window frames, mon icons), `ui_text.c` (Emerald's own font via
 `DecompressGlyphTile`), the tabbed shell in `bottom_screen.c`, and the 2x3 party
 grid with detail view in `tab_party.c`. `tab_bag.c` and `tab_map.c` are
@@ -150,7 +150,13 @@ top screen through hardware the bottom screen does not own, and expect to be
 entered from their own menu's context. Calling one will appear to work and then
 fight the top screen for BG layers and tasks.
 
-## Stage 3 — BAG and item use — IMPLEMENTED
+## Stage 3: BAG and item use (WORKING)
+
+Verified in Azahar: a Potion used from the touch screen heals the selected party
+Pokemon correctly, and the safety gate holds. Items do nothing during a battle,
+which is the intended behaviour: in-battle use was deliberately left out, because
+it has to go through the battle engine's action queue rather than mutating the
+mon directly.
 
 The only stage that mutates game state, so the gate is the design.
 
@@ -170,26 +176,26 @@ The only stage that mutates game state, so the gate is the design.
 - If the gate fails, say so on screen rather than silently ignoring the tap.
 
 Why this point is safe: `CtrBottomUpdate` runs from `Rp2350PresentFrame()`, at
-the end of `WasmRunFrame()` *after* `VBlankIntr()` — the frame's callbacks have
+the end of `WasmRunFrame()` *after* `VBlankIntr()`, so the frame's callbacks have
 finished and the next has not started.
 
 Item use changes the save; the deferred flush in `3ds/host/save.c` covers it.
 Ensure the party hash changes so the grid repaints.
 
-## Stage 4 — MAP
+## Stage 4: MAP
 
 Location readout, no new graphics decoding: current area via
 `GetMapNameGeneric()` with `GetCurrentRegionMapSectionId()`, player coordinates,
 and nearby landmarks via `GetLandmarkName()`. A rendered region map with a
 player marker is a follow-on once the 4bpp blit path has proven itself.
 
-## Stage 5 — DEX
+## Stage 5: DEX
 
 Seen/caught counts from `GetHoennPokedexCount()` / `GetNationalPokedexCount()`,
 a scrollable list filtered by `GetSetPokedexFlag()`, and per-entry category,
 height, weight and description from `struct PokedexEntry`.
 
-## B — Verification
+## B: Verification
 
 Build with diagnostics on so failures are visible:
 
@@ -199,18 +205,18 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 - **Stage 3 is the real test.** Damage a Pokémon, use a Potion from the touch
   screen, then open Emerald's own party menu: HP must match and the bag count
-  must have decremented. Then verify the gate — tap the same item during a
+  must have decremented. Then verify the gate by tapping the same item during a
   battle and mid-cutscene and confirm nothing happens.
-- **Stage 4** — walk between areas, including indoors and caves, and confirm the
+- **Stage 4**: walk between areas, including indoors and caves, and confirm the
   name tracks.
-- **Regression each stage** — top screen unaffected, and
+- **Regression each stage**: top screen unaffected, and
   `~/Library/Application Support/Azahar/sdmc/3ds/emerald3ds/pokeemerald.sav`
   still updates after an in-game save.
 
-## B — Risks
+## B: Risks
 
 - **Item use is the only state-mutating path.** Get the gate right before
-  anything else in Stage 3 — a wrong gate corrupts saves rather than crashing.
+  anything else in Stage 3, because a wrong gate corrupts saves rather than crashing.
 - **Text encoding.** Strings are game-encoded (`charmap.txt`), `EOS`-terminated,
   not ASCII. Passing a C string literal to `UiText` renders garbage; use
   `UiAscii()` for literals.
@@ -228,14 +234,14 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 This port has **no interrupts**: `VBlankIntr()` is called explicitly once per
 frame from `WasmRunFrame()`. Any of the game's `while (TRUE)` init loops that
 waits on state only advanced inside `VBlankIntr()` therefore spins forever,
-freezing everything — second screen included, since `Rp2350PresentFrame()` is
+freezing everything, second screen included, since `Rp2350PresentFrame()` is
 downstream of the same loop. It leaves nothing in the log, so it has to be found
 by reading.
 
 That is what froze the party menu: `AllocPartyMenuBgGfx()` case 1 polls
 `IsDma3ManagerBusyWithBgCopy()`, and the DMA3 queue is only drained by
 `ProcessDma3Requests()` inside `VBlankIntr()`. Fixed by making DMA3 synchronous
-under `#if WASM || RP2350` in `src/dma3_manager.c` — with no hardware to wait
+under `#if WASM || RP2350` in `src/dma3_manager.c`. With no hardware to wait
 on there is nothing to defer, so requests transfer immediately and never occupy
 a queue slot. That covers all 189 call sites of the busy-checks, not just one.
 
@@ -251,7 +257,7 @@ A sweep for other instances came back clean:
 | `VBlankIntrWait()` x2 | no-op stub, `rp2350/bios.c:198` | `ereader_helpers.c` only, unreachable |
 
 `FreeTempTileDataBuffersIfPossible()` (`src/menu.c:1760`) already carried an
-upstream `#if WASM || RP2350` inline-drain for this same problem — evidence the
+upstream `#if WASM || RP2350` inline-drain for this same problem, evidence the
 lineage hit it too, but patched only the one helper it noticed. That workaround
 is now redundant, but harmless, and it documents the hazard. Leave it.
 

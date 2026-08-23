@@ -1,18 +1,18 @@
-# Pokémon Emerald — 3DS dual-screen port
+# Pokémon Emerald: 3DS dual-screen port
 
 A native 3DS build of the pokeemerald decompilation: the game on the top screen,
 a touch dashboard (party/HP, bag, Pokédex) on the bottom. No emulator, and no
-ROM file — the decomp builds its own assets.
+ROM file, because the decomp builds its own assets.
 
 ## Where the work came from
 
-- [pret/pokeemerald](https://github.com/pret/pokeemerald) — the decompilation.
-- [tripplyons/pokeemerald-wasm](https://github.com/tripplyons/pokeemerald-wasm) —
+- [pret/pokeemerald](https://github.com/pret/pokeemerald): the decompilation.
+- [tripplyons/pokeemerald-wasm](https://github.com/tripplyons/pokeemerald-wasm)
   fenced every dependency on real GBA hardware behind `#if WASM`, and its
   software PPU is the byte-exact reference.
-- [mattdeeds/pokeemerald-rp2350](https://github.com/mattdeeds/pokeemerald-rp2350) —
-  this repo's base. Recompiled the game for a different physical CPU behind
-  `#if WASM || RP2350`, with `rp2350/ppu.c` (modes 0–4, affine, sprites,
+- [mattdeeds/pokeemerald-rp2350](https://github.com/mattdeeds/pokeemerald-rp2350)
+  is this repo's base. Recompiled the game for a different physical CPU behind
+  `#if WASM || RP2350`, with `rp2350/ppu.c` (modes 0-4, affine, sprites,
   windows, blending), the m4a mixer in C, and flash-save hooks.
 
 ## Why the 3DS build defines `RP2350=1`
@@ -29,7 +29,7 @@ where the 3DS genuinely differs:
 | `include/gba/defines.h` | Region bases. The 3DS cannot hand out arbitrary virtual addresses, so EWRAM/IWRAM/VRAM/PLTT/OAM/REG are offsets into one `gGbaMem` array. `EWRAM_DATA`/`IWRAM_DATA` become plain `.bss`. |
 | `include/gba/flash_internal.h` | `FLASH_BASE` points at a RAM array mirrored to the SD card, not at QSPI flash. |
 
-Plus one behavioural fix in `src/bg.c` — see below.
+Plus one behavioural fix in `src/bg.c`; see below.
 
 ## The two rules that keep this building
 
@@ -44,7 +44,7 @@ host-side : 3ds/host/**, rp2350/ppu.c
 
 Everything they say to each other is in `3ds/bridge.h`, in stdint types only.
 This is also what makes the bottom screen easy: it is game-side, so Emerald's
-party data, item tables, fonts and icons are ordinary symbols — no RAM scraping.
+party data, item tables, fonts and icons are ordinary symbols, with no RAM scraping.
 
 **2. `gGbaMem` is an array, not a pointer.** An array's address is a link-time
 constant, so `&REG_WIN0H` still works in the static initialisers that
@@ -53,7 +53,7 @@ makes those *"initializer element is not a compile-time constant"*.
 
 The consequence is that the regions sit in `.bss` alongside the game's own
 `EWRAM_DATA` variables, so their relative addresses are link-order dependent.
-Exactly one place in the tree ever compared them — `IsTileMapOutsideWram()` in
+Exactly one place in the tree ever compared them: `IsTileMapOutsideWram()` in
 `src/bg.c`, which asked `tilemap > IWRAM_END` to mean "is this in VRAM?". The
 `PLATFORM_3DS` branch there asks that question directly instead.
 
@@ -122,7 +122,7 @@ reproducible.
 
 ## Status
 
-**Boots and runs** — verified in Azahar, not yet on real hardware. The bottom
+**Boots and runs**, verified in Azahar, not yet on real hardware. The bottom
 screen is still the Phase 1 stub: it draws one plain-rectangle slot per party
 member (species / HP / level) straight out of `gPlayerParty`, so it is correctly
 blank until you receive your first Pokémon. The real tabbed PARTY / BAG / DEX
@@ -130,7 +130,7 @@ interface in Emerald's own style comes next.
 
 ## Audio requires a DSP firmware dump
 
-Not a quirk of this port — it applies to every 3DS homebrew that uses NDSP.
+Not a quirk of this port; it applies to every 3DS homebrew that uses NDSP.
 libctru loads the DSP component from `sdmc:/3ds/dspfirm.cdc`, and `ndspInit()`
 fails outright if that file is missing, so the game runs silent. `CtrAudioInit()`
 now says so via `CtrLog()` (always compiled, unlike the `CTR_BOOT_DIAG` traces);
@@ -138,7 +138,7 @@ before that it used `printf`, which goes nowhere on a console-less platform and
 made a missing file look like a broken audio path.
 
 **On hardware**, dump it from your own console with
-[DSP1](https://github.com/zoogie/DSP1) — a one-time step already included in the
+[DSP1](https://github.com/zoogie/DSP1), a one-time step already included in the
 standard 3DS CFW setup guides.
 
 **Under an emulator using HLE audio** (Azahar/Citra's default) the contents are
@@ -160,11 +160,11 @@ drifting).
 
 The boot crash worth remembering, because nothing about it is obvious:
 
-`REG_KEYINPUT` is **active-low** — a clear bit means *pressed*. `gGbaMem` starts
+`REG_KEYINPUT` is **active-low**: a clear bit means *pressed*. `gGbaMem` starts
 zeroed, so the register powered on reading "all ten buttons held", and
 `CtrSetKeyInput()` could not correct it in time because it runs from
 `Rp2350PresentFrame()` at the *end* of a frame while `ReadKeys()` samples at the
-*start*. The first frame therefore saw A+B+START+SELECT — the soft-reset combo —
+*start*. The first frame therefore saw A+B+START+SELECT, the soft-reset combo,
 and called into `rfu_REQ_stopMode()`, whose `gSTWIStatus` is NULL here because
 `InitRFU()` is GBA-only. The result was a null dereference at `+0xA`
 (`STWIStatus::timerSelect`) before a single frame was drawn.

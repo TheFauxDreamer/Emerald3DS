@@ -1,155 +1,160 @@
-# pokeemerald-rp2350
+# Emerald3DS
 
-**Pokémon Emerald running natively on a $6 microcontroller** — full game, 60 fps,
-HDMI out, real buttons, saves that survive a power cycle. No emulator: the
-[pret decompilation](https://github.com/pret/pokeemerald) is recompiled from
-ARMv4T to Cortex-M33 and the Game Boy Advance's video hardware is reimplemented
-in software on the second core.
+**Pokémon Emerald as a native, dual-screen 3DS game.** The game runs on the
+top screen, with a touch interface for your party and bag on the bottom. No
+emulator and no ROM: the [pret decompilation](https://github.com/pret/pokeemerald)
+is recompiled from ARMv4T to the 3DS's ARM11, and it builds its own assets.
 
-Target board is a **WeAct Studio Core2350B** (RP2350B, 16 MB QSPI flash). The
-whole game — code, graphics, maps, music — is an 11.7 MB image executed in place
-from flash.
+The second screen is the point. Every GBA-on-3DS approach that exists, whether
+GBA Virtual Console or [open_agb_firm](https://github.com/profi200/open_agb_firm),
+hands the game to the 3DS's built-in GBA hardware, which runs as a FIRM with the
+OS shut down and only one screen available. Native recompilation is the only
+route to a GBA game that can use the touch screen, which is why this exists.
 
 ```
-        RP2350B @ 252 MHz
-  ┌──────────────┬──────────────┐
-  │    core 0    │    core 1    │
-  │  game logic  │  PPU render  │──▶ 240×160 RGB565 framebuffer
-  │   ~0.3 ms/f  │  ~12 ms/f    │         │
-  └──────────────┴──────────────┘         ▼
-         ▲                          HSTX ──▶ DVI/HDMI 640×480p60
-    GP0–GP9 buttons                        (2× upscale, DMA control-block ring)
+  ┌──────────────────────────────────┐   top: software PPU (rp2350/ppu.c)
+  │        240x160 -> 360x240        │        -> RGB565 -> PICA200 texture
+  │           GBA output             │        via citro2d, nearest, 1.5x
+  └──────────────────────────────────┘
+  ┌────────────────────────────┐         bottom: drawn game-side, so it reads
+  │  PARTY   BAG   MAP         │         gPlayerParty and gBagPockets as
+  │  [icon] NAME  Lv12  ####   │         ordinary symbols -- no RAM scraping
+  └────────────────────────────┘
 ```
 
 ## Status
 
-Playable start to finish as far as it has been tested — boots, plays the intro,
-starts a new game, walks the overworld, battles, and saves. Every scene holds a
-locked 60 fps except the OBJ-window intro cinematic. It is **not** a finished
-product; see [Limitations](#limitations).
+**Boots and plays, verified in the Azahar emulator. Not yet run on real
+hardware.** Treat every row below as "works where it has been tested", which so
+far means an emulator only.
 
 | | |
 |---|---|
-| Video | ✅ Full PPU: modes 0–4, affine, sprites, windows, blending. Byte-exact vs. reference. |
-| Frame rate | ✅ Locked 60 fps, tear-free, vsync-locked to the scanout beam |
-| Input | ✅ 10 GPIO buttons |
-| Saves | ✅ Persist to QSPI flash, survive reboot and reflash |
-| Audio | ⚠️ Music plays; some instrument classes silent (see below) |
+| Boot / overworld / battles | ✅ Runs |
+| Top screen | ✅ Software PPU through citro2d |
+| Saves | ✅ 128 KB to `sdmc:/3ds/emerald3ds/pokeemerald.sav` |
+| Bottom: party | ✅ 2×3 grid: icon, name, level, HP; tap for a detail view |
+| Bottom: bag | ✅ Pockets, quantities, tap-to-use; gated to the overworld |
+| Bottom: map | ❌ Placeholder |
+| Window borders | ✅ Follows the player's Options → Frame choice |
+| Audio | ⚠️ Needs a DSP firmware dump; some sample types silent |
+| Frame rate | ❓ Never measured on a 3DS |
 | Link cable / RFU | ❌ Not implemented |
 
-## Hardware
+## Getting it
 
-See **[docs/HARDWARE.md](docs/HARDWARE.md)** for the full pinout, bill of
-materials, and wiring notes. In brief: an RP2350B board, an HSTX-to-HDMI
-breakout wired in the Pico DVI Sock pin order, ten buttons to ground, and
-optionally a PCM5102A I²S DAC for sound.
+Every push builds it. Grab **`emerald3ds`** from the latest
+[Actions run](../../actions). It contains `emerald3ds.cia` (install to a
+console) and `emerald3ds.3ds` (boots directly in an emulator, no install step).
+The **`emerald3ds-elf`** artifact holds the ELF and linker map; keep the one
+matching your build, because a crash log only ever gives a raw PC and those are
+what turn it back into a function name.
 
-## Build
-
-See **[docs/BUILD.md](docs/BUILD.md)** for prerequisites and the full procedure.
-The short version, from the repo root:
+To build locally you need devkitPro (devkitARM, libctru, citro2d/citro3d),
+libpng for the decomp's `gbagfx`, and
+[makerom](https://github.com/3DSGuy/Project_CTR/releases):
 
 ```sh
-make tools && make modern           # first: decomp tools + generated assets
-rp2350/gen_sound_assets.sh          # one-time: wav→bin, mid→song .s
-rp2350/build_objs.sh                # game sources → rp2350/build/libpokeemerald.a
-cmake -B rp2350/hw/build -S rp2350/hw -G Ninja   # PICO_SDK_PATH must be set
-ninja -C rp2350/hw/build emerald
-picotool load -f rp2350/hw/build/emerald.uf2
+make tools && make generated             # decomp tools + generated headers
+python3 tools/generate_wasm_assets.py    # -> build/assets
+rp2350/gen_sound_assets.sh               # one-time: wav->bin, mid->song .s
+3ds/build_objs.sh                        # game sources -> libpokeemerald.a (ARM11)
+make -C 3ds                              # -> 3ds/emerald3ds.{cia,3ds}
 ```
 
-`rp2350/hw/CMakeLists.txt` also builds standalone bring-up targets that were
-used to validate each subsystem on silicon before integration, and which are the
-fastest way to debug a new board: `hstx_test` (colour bars), `psram_test`,
-`i2s_test` (440 Hz sine), `display_test`, `ppu_display_test`, `emerald_hwtest`.
+**It is not a `.3dsx`, and cannot be.** Emerald's script bytecode packs a 4-byte
+pointer directly after a 1-byte opcode, so thousands of relocations are
+unaligned, and the 3DSX relocation table is indexed in whole 4-byte words, so
+they cannot be encoded at all. A CXI is loaded at a fixed address and never
+relocated, so the same pointers are simply correct. See
+[3ds/README.md](3ds/README.md).
 
 ## How it works
 
-The full engineering log — every phase, the measurements that made the go/no-go
-call, and the bugs that cost the most time — is in
-**[docs/PORTING.md](docs/PORTING.md)**. The short story:
+[3ds/README.md](3ds/README.md) is the real explanation. The two rules that
+matter:
 
-**It piggybacks on a WASM port.** [tripplyons/pokeemerald-wasm](https://github.com/tripplyons/pokeemerald-wasm)
-had already fenced every dependency on real GBA hardware behind `#if WASM`.
-Reusing those seams as `#if WASM || RP2350` meant the de-hardwaring work was
-already done; this port only had to add the MCU-specific half.
+**Two worlds, one bridge.** `include/gba/types.h` and `<3ds.h>` both typedef
+`u8`/`u16`/`u32`, and the game's `include/` shadows libc's `string.h`, so no
+translation unit may include both. Game-side code (`src/**`, `3ds/gba_mem.c`,
+`3ds/ui/**`) sees only game headers; host-side code (`3ds/host/**`,
+`rp2350/ppu.c`) sees only libctru. Everything they say to each other is in
+[3ds/bridge.h](3ds/bridge.h), in stdint types. This is what makes the bottom
+screen cheap: it is game-side, so Emerald's party data, item tables, fonts and
+mon icons are ordinary symbols.
 
-**The GBA memory map survives.** The game still writes DISPCNT, VRAM, OAM and
-palette RAM at their original addresses — those are just plain SRAM now. Live
-RAM is ~378 KB of the RP2350's 520 KB. ROM lives in QSPI flash via XIP, with the
-game's `0x08000000` base remapped to `0x10000000`.
+**The GBA memory map becomes one array.** The 3DS cannot hand out arbitrary
+virtual addresses, so EWRAM/IWRAM/VRAM/palette/OAM/registers are offsets into a
+single `gGbaMem` array, and the game keeps writing them exactly as before.
 
-**The PPU is a software rasteriser on core 1.** Ported from the WASM host's
-`web/app.js` and validated byte-exact against it. The first working version ran
-at 909 ms/frame; per-frame palette LUTs, per-scanline window masks, 8-pixel tile
-spans, and incremental affine stepping brought that to 60 fps — about 45×
-faster. Specialised inner loops then cut typical scenes to ~12 ms.
+The port defines `RP2350=1`, which in this tree means *native CPU build, not GBA
+hardware*. It inherits all 47 of that port's hardware seams rather than
+duplicating them. `PLATFORM_3DS=1` then overrides only where the 3DS genuinely
+differs.
 
-**Scanout needs no CPU at all.** A DMA control-block ring feeds the HSTX
-serialiser a full 525-line frame with the CPU never touching the re-arm path.
-The interrupt is advisory. This is what makes the display immune to the
-multi-millisecond stalls that flash writes cause during saves — and it took
-killing an ~0.8-blink-per-minute HDMI dropout to get there.
+[3ds/ROADMAP.md](3ds/ROADMAP.md) has what is planned next, plus the bring-up
+notes worth reading before debugging anything.
 
 ## Limitations
 
-Honest list of what is stubbed, missing, or wrong:
-
-- **Audio is incomplete.** The m4a engine is ported and music plays, but DPCM
-  (compressed) and reverse-playback instruments are silent stubs. Mixing is
-  coupled to the frame rate, so any scene below 60 fps underruns. It has not had
-  a careful by-ear correctness pass.
-- **No link cable or wireless.** The RFU and multiboot paths are stubbed. Trading,
-  battling, and the Mystery Gift download-code path do not work. (Mystery Gift's
-  run-downloaded-code path relocates data as Thumb code, which cannot work on an
-  M33 as written.)
-- **The RTC is a dead cartridge clock.** Real Emerald bit-bangs an RTC over
-  cartridge GPIO, which does not exist here. Time reads as zero and the in-game
-  clock-set screen reports "clock is stopped." Berry growth and other
-  time-of-day events are affected.
-- **The OBJ-window intro cinematic runs at 20–25 ms/frame**, below 60 fps. It is
-  the one scene with no fast path.
-- **Audio hardware is optional but unpolished.** Without the I²S DAC wired, the
-  game runs silently and correctly.
+- **Audio needs a DSP firmware dump.** libctru loads the DSP component from
+  `sdmc:/3ds/dspfirm.cdc` and `ndspInit()` fails outright without it. The game
+  then runs silent and says so in the log. Dump it from your own console with
+  [DSP1](https://github.com/zoogie/DSP1); it is a standard one-time CFW setup
+  step every NDSP homebrew requires. Separately, DPCM (compressed) and
+  reverse-playback instruments are still silent stubs in `rp2350/m4a_1.c`.
+- **Never run on hardware.** No fill-rate, battery or timing data exists.
+- **No link cable or wireless.** RFU and multiboot are stubbed, so trading,
+  link battles and Mystery Gift do not work.
+- **The RTC is a dead cartridge clock.** Time reads as zero and the clock-set
+  screen reports "clock is stopped", which affects berry growth and
+  time-of-day events.
+- **The top screen is 1.5×, not integer.** 240×160 × 1.5 = 360×240 fills the
+  panel height exactly; true 2× is 480×320 and does not fit a 400×240 screen at
+  any setting. Rows and columns therefore alternate 1px/2px.
 
 ## Repository layout
 
-This is a fork of pokeemerald-wasm, which is a fork of pret/pokeemerald. Almost
-everything here is upstream; the port is confined to one directory.
+Almost everything here is upstream decomp. The port is confined to one
+directory.
 
 | Path | What it is |
 |---|---|
-| `rp2350/` | **The port.** PPU, HSTX display driver, BIOS calls, m4a engine, build scripts. |
-| `rp2350/hw/` | Pico SDK project: `game_main.c`, linker script, flash saves, I²S, test targets. |
-| `docs/` | Hardware, build, and porting documentation. |
-| `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald game sources and assets. |
-| `web/`, `tools/wasm_*` | The WASM build, kept as the PPU reference (see below). |
+| `3ds/` | **The port.** Bridge, GBA memory block, build scripts, ROM spec. |
+| `3ds/host/` | libctru side: entry point, video, audio, saves, tracing. |
+| `3ds/ui/` | Bottom screen, game-side: drawing, Emerald-font text, tabs. |
+| `rp2350/` | The RP2350 port this is built on. `ppu.c` and `m4a_1.c` are shared. |
+| `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald sources and assets. |
+| `web/`, `tools/wasm_*` | The WASM build, retained as the PPU reference. |
+| `docs/` | RP2350 hardware, build and porting documentation. |
 
-**The WASM build is deliberately retained.** `rp2350/ppu_validate.sh` runs the
-game in a browser, dumps GBA memory plus reference frames from the JavaScript
-rasteriser, renders the same state with `rp2350/ppu.c`, and pixel-diffs the two.
-That harness is the only reason the PPU can be called byte-exact, and it caught
-real bugs during every optimisation pass. The Cloudflare deployment config from
-upstream has been removed, but `make wasm` and `make serve-wasm` still work.
+The RP2350 and WASM targets still build (`make wasm`, and see
+[docs/BUILD.md](docs/BUILD.md)). The WASM build in particular is deliberately
+kept: `rp2350/ppu_validate.sh` pixel-diffs `rp2350/ppu.c` against the JavaScript
+rasteriser, and that harness is the only reason the PPU can be called
+byte-exact.
 
 ## Licensing
 
-`rp2350/` is original work, released under the **MIT License**
+`3ds/` and `rp2350/` are original work under the **MIT License**
 ([rp2350/LICENSE](rp2350/LICENSE)).
 
-The rest of the repository is the pret decompilation and carries no license from
-this project. Following pret convention, no ROM is required or included — the
-decompilation builds the game from its own committed sources. Pokémon and
-Pokémon character names are trademarks of Nintendo, Creatures Inc., and GAME
-FREAK Inc. This project is not affiliated with or endorsed by any of them.
+The rest is the pret decompilation and carries no license from this project.
+Following pret convention, no ROM is required or included. The decompilation
+builds the game from its own committed sources. Pokémon and Pokémon character
+names are trademarks of Nintendo, Creatures Inc., and GAME FREAK Inc. This
+project is not affiliated with or endorsed by any of them.
 
 ## Credits
 
-- **[pret/pokeemerald](https://github.com/pret/pokeemerald)** — the decompilation
-  this is built on. Years of work by many people; none of this is possible
-  without it.
+- **[pret/pokeemerald](https://github.com/pret/pokeemerald)**: the
+  decompilation everything is built on.
 - **[tripplyons/pokeemerald-wasm](https://github.com/tripplyons/pokeemerald-wasm)**
-  — the WebAssembly port, whose `#if WASM` seams and reference rasteriser this
-  port depends on directly.
+  fenced every dependency on real GBA hardware behind `#if WASM`. That work,
+  reused as `#if WASM || RP2350`, is why this port did not have to rediscover
+  where a 1M-line decomp touches hardware.
+- **[mattdeeds/pokeemerald-rp2350](https://github.com/mattdeeds/pokeemerald-rp2350)**
+  is this repo's direct base: the software PPU, the m4a mixer in C, and the
+  flash-save hooks the 3DS port inherits.
 - The original pokeemerald README is preserved at
   [docs/original-pokeemerald-readme.md](docs/original-pokeemerald-readme.md).
