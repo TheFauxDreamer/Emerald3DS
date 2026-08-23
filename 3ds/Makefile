@@ -46,10 +46,13 @@ OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 # disagree about the ABI and the link is quietly wrong.
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-relocations
 
-# Boot diagnostics: svcOutputDebugString traces (visible in an emulator's log)
-# plus a cycling pillarbox on the top screen that shows the frame loop is alive.
-# Set to 0 once the port boots. See 3ds/host/trace.h.
-CTR_BOOT_DIAG ?= 1
+# Boot diagnostics: svcOutputDebugString traces (visible in an emulator's log),
+# a blue/green splash before AgbMain, and a cycling pillarbox on the top screen
+# showing the frame loop is alive. Off by default now that the port boots --
+# rebuild with `make -C 3ds CTR_BOOT_DIAG=1` (and pass the same to
+# 3ds/build_objs.sh) to bring them back for the next bring-up problem.
+# See 3ds/host/trace.h.
+CTR_BOOT_DIAG ?= 0
 
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections \

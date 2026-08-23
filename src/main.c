@@ -89,9 +89,12 @@ void EnableVCountIntrAtLine150(void);
 
 #define B_START_SELECT (B_BUTTON | START_BUTTON | SELECT_BUTTON)
 
-// Temporary bring-up tracing: the 3DS port hangs somewhere in this function
-// before the first frame is presented, and the platform has no console. Strip
-// this block (and the BOOT_TRACE calls below) once it boots.
+// Bring-up tracing for the 3DS port, which has no console: every trace goes to
+// svcOutputDebugString, which an emulator logs. Compiled out unless
+// CTR_BOOT_DIAG=1, and absent entirely from every other platform's build.
+// These bisected the boot crash (KEYINPUT powering on as all-held, which fired
+// the soft-reset combo into uninitialised RFU code); kept because the next
+// bring-up problem will want them.
 #if PLATFORM_3DS && CTR_BOOT_DIAG
 extern void CtrTraceMsg(const char *msg);
 #define BOOT_TRACE(s) CtrTraceMsg("emerald3ds: AgbMain > " s "\n")

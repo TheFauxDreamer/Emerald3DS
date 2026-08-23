@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "../bridge.h"
+#include "trace.h"
 
 // m4a produces this many samples per VBlank at Emerald's SOUND_MODE_FREQ_13379
 // (gPcmSamplesPerVBlankTable index 4, m4a_internal.h).
@@ -46,10 +47,15 @@ static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
 void CtrAudioInit(void)
 {
-    if (R_FAILED(ndspInit())) {
-        // Missing/undumped DSP firmware (dspfirm.cdc). The game is perfectly
-        // playable silent, so this is a warning, not a failure.
-        printf("audio: ndspInit failed - running silent\n");
+    Result rc = ndspInit();
+    if (R_FAILED(rc)) {
+        // Almost always a missing DSP firmware dump: libctru loads the DSP
+        // component from sdmc:/3ds/dspfirm.cdc and ndspInit() fails outright if
+        // that file is absent. The game is perfectly playable silent, so this
+        // is a warning -- but it must be a VISIBLE one, or it presents as
+        // "the port has no sound".
+        CtrLog("emerald3ds: audio disabled - ndspInit failed (rc=0x%08lX). "
+               "Missing sdmc:/3ds/dspfirm.cdc?\n", (unsigned long)rc);
         return;
     }
 
@@ -61,7 +67,8 @@ void CtrAudioInit(void)
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
         sBlock[i] = linearAlloc(BLOCK_SAMPLES);
         if (sBlock[i] == NULL) {
-            printf("audio: linearAlloc failed - running silent\n");
+            CtrLog("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
+                   BLOCK_SAMPLES);
             return;
         }
         memset(sBlock[i], 0, BLOCK_SAMPLES);
@@ -72,6 +79,7 @@ void CtrAudioInit(void)
     }
 
     sReady = 1;
+    CtrLog("emerald3ds: audio ready (%d Hz, mono PCM8)\n", SAMPLE_RATE);
 }
 
 void CtrAudioExit(void)

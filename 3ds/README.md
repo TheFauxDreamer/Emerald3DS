@@ -122,7 +122,37 @@ reproducible.
 
 ## Status
 
-Phase 1 (boot on hardware) is written but not yet run on a device — nothing here
-has been executed on a 3DS. The bottom screen is a stub that draws a live
-party/HP readout to prove the data path; the real tabbed PARTY / BAG / DEX UI in
-Emerald's own style comes next.
+**Boots and runs** — verified in Azahar, not yet on real hardware. The bottom
+screen is still the Phase 1 stub: it draws one plain-rectangle slot per party
+member (species / HP / level) straight out of `gPlayerParty`, so it is correctly
+blank until you receive your first Pokémon. The real tabbed PARTY / BAG / DEX
+interface in Emerald's own style comes next.
+
+### Bring-up notes
+
+The boot crash worth remembering, because nothing about it is obvious:
+
+`REG_KEYINPUT` is **active-low** — a clear bit means *pressed*. `gGbaMem` starts
+zeroed, so the register powered on reading "all ten buttons held", and
+`CtrSetKeyInput()` could not correct it in time because it runs from
+`Rp2350PresentFrame()` at the *end* of a frame while `ReadKeys()` samples at the
+*start*. The first frame therefore saw A+B+START+SELECT — the soft-reset combo —
+and called into `rfu_REQ_stopMode()`, whose `gSTWIStatus` is NULL here because
+`InitRFU()` is GBA-only. The result was a null dereference at `+0xA`
+(`STWIStatus::timerSelect`) before a single frame was drawn.
+`Ctr3dsInitGbaMemory()` now seeds `REG_KEYINPUT = KEYS_MASK`.
+
+The RP2350 port never hit this: its buttons come from GPIO pull-ups, which read
+high, i.e. released.
+
+For the next such problem, build with diagnostics on:
+
+```sh
+CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
+```
+
+That enables `svcOutputDebugString` tracing through `main()` and `AgbMain()`
+(an emulator logs it; needs `Debug.Emulated:Debug` in Azahar's log filter), a
+blue/green splash before `AgbMain` proving the video path, and a cycling
+pillarbox showing the frame loop is alive. A crash log gives a raw PC; the ELF
+and `.map` published by CI turn it back into a function name.
