@@ -79,11 +79,15 @@ jobs:
 
       # Also published on its own: Azahar/Citra can boot a raw ELF, and it is
       # what you want for symbol-level debugging.
-      - name: Upload ELF
+      # The .map goes with it: a crash log only ever gives a raw PC, and these
+      # two are the only way to turn one back into a function name.
+      - name: Upload ELF + link map
         uses: actions/upload-artifact@v4
         with:
           name: emerald3ds-elf
-          path: 3ds/emerald3ds.elf
+          path: |
+            3ds/emerald3ds.elf
+            3ds/build/emerald3ds.map
           if-no-files-found: error
 
       # makerom is not a devkitPro package, so it is fetched from upstream and
