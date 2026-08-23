@@ -32,10 +32,19 @@ enum UiTab
 #define UI_COL_DIM      0x8410
 #define UI_COL_ACCENT   0x07FF
 #define UI_COL_BG       0x18C3
-#define UI_COL_HP_HIGH  0x2648
-#define UI_COL_HP_MID   0xE604
-#define UI_COL_HP_LOW   0xE1C7
-#define UI_COL_HP_BACK  0x1082
+// The game's own HP bar colours, taken from graphics/battle_interface/hpbar.png
+// (palette indices 10-15). Each state has a light and a dark shade and the real
+// bar uses both, which is what gives it depth rather than looking like a flat
+// block. Hardcoded from the art rather than read from the palette at runtime,
+// because the healthbox palette is only loaded during battle and this bar is
+// shown outside battle too.
+#define UI_COL_HP_HIGH    0x5EB0   // RGB( 90,213,131)
+#define UI_COL_HP_HIGH_L  0x77F5   // RGB(115,255,172)
+#define UI_COL_HP_MID     0xCD61   // RGB(205,172,  8)
+#define UI_COL_HP_MID_L   0xFF27   // RGB(255,230, 57)
+#define UI_COL_HP_LOW     0xAA09   // RGB(172, 65, 74)
+#define UI_COL_HP_LOW_L   0xFAC7   // RGB(255, 90, 57)
+#define UI_COL_HP_BACK    0x1082
 
 // Any view calls this after changing something the screen depends on. The host
 // only re-uploads the 320x240 texture when the screen is dirty.

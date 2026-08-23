@@ -9,7 +9,9 @@
 #include "pokemon.h"
 #include "item.h"
 #include "data.h"
+#include "battle.h"             // struct DisableStruct, for the headers below
 #include "battle_main.h"
+#include "battle_interface.h"   // GetHPBarLevel
 #include "pokemon_summary_screen.h"
 #include "constants/species.h"
 
@@ -83,7 +85,7 @@ bool8 UiPartyTick(void)
 
 static void HpBar(int x, int y, int w, u32 hp, u32 maxHp)
 {
-    u16 color = UI_COL_HP_HIGH;
+    u16 light, dark;
     u32 filled;
 
     UiFillRect(x, y, w, 8, UI_COL_HP_BACK);
@@ -91,15 +93,26 @@ static void HpBar(int x, int y, int w, u32 hp, u32 maxHp)
     if (maxHp == 0)
         return;
 
+    // The game's own thresholds via its own function, rather than a
+    // reimplementation of the 50/20 percent split that could disagree at the
+    // boundaries: GetHPBarLevel compares a ROUNDED pixel count from
+    // GetScaledHPFraction, not the exact ratio.
+    switch (GetHPBarLevel((s16)hp, (s16)maxHp))
+    {
+    case HP_BAR_FULL:
+    case HP_BAR_GREEN:  light = UI_COL_HP_HIGH_L; dark = UI_COL_HP_HIGH; break;
+    case HP_BAR_YELLOW: light = UI_COL_HP_MID_L;  dark = UI_COL_HP_MID;  break;
+    default:            light = UI_COL_HP_LOW_L;  dark = UI_COL_HP_LOW;  break;
+    }
+
     filled = (hp * (u32)w) / maxHp;
     // Any surviving HP should show at least a sliver rather than reading as 0.
     if (filled == 0 && hp > 0)
         filled = 1;
 
-    if (hp * 2 <= maxHp) color = UI_COL_HP_MID;
-    if (hp * 5 <= maxHp) color = UI_COL_HP_LOW;
-
-    UiFillRect(x, y, (int)filled, 8, color);
+    // Light over dark, the way the game's own two-tone bar reads.
+    UiFillRect(x, y, (int)filled, 4, light);
+    UiFillRect(x, y + 4, (int)filled, 4, dark);
 }
 
 // Two small squares, drawn only when the matchup is actually worth noticing.
