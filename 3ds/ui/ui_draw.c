@@ -5,11 +5,13 @@
 #include "pokemon_icon.h"
 #include "item_icon.h"
 #include "graphics.h"                 // gStatusGfx_Icons, gStatusPal_Icons
+#include "data.h"                     // gMonFrontPicTable, gMonPaletteTable
 #include "decompress.h"
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
 #include "constants/characters.h"     // TEXT_COLOR_*
 #include "constants/party_menu.h"     // AILMENT_*
+#include "constants/species.h"        // SPECIES_UNOWN, SPECIES_SPINDA
 
 #include "ui_draw.h"
 #include "ui_shell.h"                 // UI_COL_SHADOW
@@ -215,6 +217,113 @@ void UiItemIcon(int x, int y, u16 itemId)
 
     for (int t = 0; t < 16; t++)
         UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, tiles + t * 32, pal, TRUE);
+}
+
+// A Pokedex front sprite. Every mon pic is 64x64 4bpp
+// (src/data/pokemon_graphics/front_pic_coordinates.h says so explicitly), laid
+// out as 64 consecutive tiles in 1D sprite order, which is the same convention
+// UiMonIcon uses at 4x4.
+//
+// LoadSpecialPokePic_DontHandleDeoxys is the game's own loader and is safe from
+// here: it is an LZ77UnCompWram plus DrawSpindaSpots, with no allocation and no
+// OAM. It also resolves the Unown letter, which is why the personality matters.
+//
+// Cached on species. A dex cursor moving down a list repaints the whole screen
+// each step, and re-expanding 2 KB every time would be pure waste.
+void UiMonPic(int x, int y, u16 species)
+{
+    static u8  pic[MON_PIC_SIZE];
+    static u16 pal[16];
+    static u16 cachedSpecies = SPECIES_NONE;
+
+    if (species == SPECIES_NONE || species >= NUM_SPECIES)
+        return;
+
+    if (cachedSpecies != species)
+    {
+        u16 gbaPal[16];
+
+        if (GetDecompressedDataSize(gMonPaletteTable[species].data) > sizeof(gbaPal))
+            return;
+
+        // Unown and Spinda are the only two whose art depends on a stored
+        // personality; GetPokedexMonPersonality (static, src/pokedex.c:4654) is
+        // just these two fields, so this is that function inlined.
+        u32 personality = (species == SPECIES_UNOWN)  ? gSaveBlock2Ptr->pokedex.unownPersonality
+                        : (species == SPECIES_SPINDA) ? gSaveBlock2Ptr->pokedex.spindaPersonality
+                        : 0;
+
+        LoadSpecialPokePic_DontHandleDeoxys(&gMonFrontPicTable[species], pic,
+                                            species, personality, TRUE);
+        LZDecompressWram(gMonPaletteTable[species].data, gbaPal);
+        UiLoadPal(pal, gbaPal, 16);
+        cachedSpecies = species;
+    }
+
+    for (int t = 0; t < 64; t++)
+        UiBlit4bppTile(x + (t % 8) * 8, y + (t / 8) * 8, pic + t * 32, pal, TRUE);
+}
+
+// The Pokedex "caught" marker. This is graphics/pokedex/caught_ball.png
+// transcribed rather than linked: the game holds it in sCaughtBall_Gfx, which is
+// static to src/pokedex.c. Same 7x7 shape the dex itself draws.
+//
+// Fixed red and white rather than theme colours. A Poke Ball is recognisable
+// because of its colours, and its own dark outline carries it on any of the 20
+// window frames.
+void UiPokeball(int x, int y)
+{
+    // 0 transparent, 1 outline, 2 upper half, 3 lower half.
+    static const u8 kBall[UI_BALL_H][UI_BALL_W] =
+    {
+        { 0,0,1,1,1,0,0 },
+        { 0,1,2,2,2,1,0 },
+        { 1,2,1,1,2,2,1 },
+        { 1,1,1,3,1,1,1 },
+        { 1,3,3,1,1,3,1 },
+        { 0,1,3,3,3,1,0 },
+        { 0,0,1,1,1,0,0 },
+    };
+    static const u16 kColors[4] = { 0, UI_COL_SHADOW, UI_COL_BALL_TOP, UI_COL_BALL_BOTTOM };
+
+    for (int row = 0; row < UI_BALL_H; row++)
+        for (int col = 0; col < UI_BALL_W; col++)
+            if (kBall[row][col])
+                UiFillRect(x + col, y + row, 1, 1, kColors[kBall[row][col]]);
+}
+
+// A species footprint: 4 tiles of 1bpp, arranged 2x2, which is what
+// DrawFootprint does (src/pokedex.c:4585). Declared extern here because the
+// table is a plain global with no public header, the same situation as
+// gPokedexEntries in tab_dex.c.
+extern const u8 *const gMonFootprintTable[];
+
+void UiFootprint(int x, int y, u16 species, u16 color)
+{
+    const u8 *gfx;
+
+    if (species == SPECIES_NONE || species >= NUM_SPECIES)
+        return;
+
+    gfx = gMonFootprintTable[species];
+    if (gfx == NULL)
+        return;
+
+    // 4 tiles of 8 bytes, one byte per 8-pixel row, low bit leftmost.
+    for (int t = 0; t < 4; t++)
+    {
+        int tx = x + (t % 2) * 8;
+        int ty = y + (t / 2) * 8;
+
+        for (int row = 0; row < 8; row++)
+        {
+            u8 bits = gfx[t * 8 + row];
+
+            for (int col = 0; col < 8; col++)
+                if (bits & (1 << col))
+                    UiFillRect(tx + col, ty + row, 1, 1, color);
+        }
+    }
 }
 
 // The party menu's own ailment art, so PSN here is the same badge PSN is there.

@@ -45,6 +45,10 @@ enum UiTab
 #define UI_COL_HP_LOW     0xAA09   // RGB(172, 65, 74)
 #define UI_COL_HP_LOW_L   0xFAC7   // RGB(255, 90, 57)
 #define UI_COL_HP_BACK    0x1082
+// Poke Ball marker. Fixed rather than themed: the ball is recognisable by its
+// colours, and it carries its own dark outline on every window frame.
+#define UI_COL_BALL_TOP    0xE104   // red
+#define UI_COL_BALL_BOTTOM 0xFFFF   // white
 
 // Any view calls this after changing something the screen depends on. The host
 // only re-uploads the 320x240 texture when the screen is dirty.

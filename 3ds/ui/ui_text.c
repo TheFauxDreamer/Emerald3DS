@@ -2,6 +2,7 @@
 
 #include "global.h"
 #include "fonts.h"
+#include "string_util.h"              // GetExtCtrlCodeLength
 #include "constants/characters.h"
 
 #include "ui_draw.h"
@@ -32,7 +33,9 @@ static u32 GlyphPixel(const u16 *glyph, int x, int y)
     return (v == 3) ? 0 : v;
 }
 
-static void BlitGlyph(int x, int y, u8 glyphId, u16 fg, u16 shadow)
+// u16, not u8: CHAR_EXTRA_SYMBOL selects glyph `operand | 0x100` out of the same
+// tables (src/text.c:1455). latin_normal.png is 256x512, so all 512 slots exist.
+static void BlitGlyph(int x, int y, u16 glyphId, u16 fg, u16 shadow)
 {
     const u16 *glyph = gFontNormalLatinGlyphs + (0x20 * glyphId);
     int width = gFontNormalLatinGlyphWidths[glyphId];
@@ -63,6 +66,33 @@ static void BlitGlyph(int x, int y, u8 glyphId, u16 fg, u16 shadow)
     }
 }
 
+// How far past `str` an EXT_CTRL_CODE_BEGIN sequence runs, matching
+// SkipExtCtrlCode() (src/string_util.c:694): the 0xFC byte, then the length the
+// game reports for the code, which already counts the code byte itself.
+// GetExtCtrlCodeLength returns 0 for a code it does not know, which would stall
+// the walk, so floor it at 1.
+static int CtrlCodeSpan(const u8 *str)
+{
+    u8 len = GetExtCtrlCodeLength(str[1]);
+
+    return 1 + (len ? len : 1);
+}
+
+// A two-byte sequence whose second byte is the terminator is a malformed
+// string, and stepping over it would walk past the EOS. The iteration guard
+// would eventually stop that, but only after drawing rubbish.
+static bool8 Truncated(const u8 *str)
+{
+    return str[1] == EOS;
+}
+
+// Emerald's strings are not plain byte streams. Three control codes move the
+// pen without printing (src/text.c:1063-1085), and CHAR_EXTRA_SYMBOL escapes
+// into the upper half of the glyph table. Without these the Pokedex prints
+// "{NO}" and "??'??" as garbage, and every other game string is one control
+// code away from doing the same.
+//
+// UiTextWidth below MUST stay in step with this: centring compares the two.
 int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
 {
     int startX = x;
@@ -73,22 +103,68 @@ int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
 
     // Bounded: these strings come from game tables, and a missing EOS would
     // otherwise walk off the end of one and draw whatever follows it.
-    for (; *str != EOS && guard-- > 0; str++)
+    while (*str != EOS && guard-- > 0)
     {
+        if (*str == EXT_CTRL_CODE_BEGIN)
+        {
+            u8 code, arg;
+
+            if (Truncated(str))
+                break;
+
+            code = str[1];
+            arg  = str[2];
+
+            switch (code)
+            {
+            case EXT_CTRL_CODE_CLEAR:    x += arg;                            break;
+            case EXT_CTRL_CODE_SKIP:     x  = startX + arg;                   break;
+            case EXT_CTRL_CODE_CLEAR_TO: if (startX + arg > x) x = startX + arg; break;
+            default: break;   // colours, pauses, sounds: nothing to draw here
+            }
+
+            str += CtrlCodeSpan(str);
+            continue;
+        }
+
+        // Two bytes, and the second is the payload. The keypad icons live in
+        // their own sheet we do not load, so that one is skipped rather than
+        // drawn as a wrong glyph.
+        if (*str == CHAR_EXTRA_SYMBOL || *str == CHAR_KEYPAD_ICON)
+        {
+            if (Truncated(str))
+                break;
+
+            if (*str == CHAR_EXTRA_SYMBOL)
+            {
+                u16 glyph = (u16)(str[1] | 0x100);
+
+                BlitGlyph(x, y, glyph, fg, shadow);
+                x += gFontNormalLatinGlyphWidths[glyph];
+            }
+
+            str += 2;
+            continue;
+        }
+
         if (*str == CHAR_NEWLINE)
         {
             x = startX;
             y += UI_LINE_H;
+            str++;
             continue;
         }
 
         BlitGlyph(x, y, *str, fg, shadow);
         x += gFontNormalLatinGlyphWidths[*str];
+        str++;
     }
 
     return x - startX;
 }
 
+// Mirrors UiText, and mirrors GetStringWidth's handling of the three pen codes
+// (src/text.c:1425-1435): CLEAR adds, SKIP assigns, CLEAR_TO takes the maximum.
 int UiTextWidth(const u8 *str)
 {
     int w = 0, best = 0;
@@ -97,15 +173,52 @@ int UiTextWidth(const u8 *str)
     if (str == NULL)
         return 0;
 
-    for (; *str != EOS && guard-- > 0; str++)
+    while (*str != EOS && guard-- > 0)
     {
+        if (*str == EXT_CTRL_CODE_BEGIN)
+        {
+            u8 code, arg;
+
+            if (Truncated(str))
+                break;
+
+            code = str[1];
+            arg  = str[2];
+
+            switch (code)
+            {
+            case EXT_CTRL_CODE_CLEAR:    w += arg;                break;
+            case EXT_CTRL_CODE_SKIP:     w  = arg;                break;
+            case EXT_CTRL_CODE_CLEAR_TO: if (arg > w) w = arg;    break;
+            default: break;
+            }
+
+            str += CtrlCodeSpan(str);
+            continue;
+        }
+
+        if (*str == CHAR_EXTRA_SYMBOL || *str == CHAR_KEYPAD_ICON)
+        {
+            if (Truncated(str))
+                break;
+
+            if (*str == CHAR_EXTRA_SYMBOL)
+                w += gFontNormalLatinGlyphWidths[str[1] | 0x100];
+
+            str += 2;
+            continue;
+        }
+
         if (*str == CHAR_NEWLINE)
         {
             if (w > best) best = w;
             w = 0;
+            str++;
             continue;
         }
+
         w += gFontNormalLatinGlyphWidths[*str];
+        str++;
     }
 
     return (w > best) ? w : best;
@@ -181,6 +294,9 @@ u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
         else if (c == '?')             out = CHAR_QUESTION_MARK;
         else if (c == '%')             out = CHAR_PERCENT;
         else if (c == '+')             out = CHAR_PLUS;
+        // Feet and inches, for the Pokedex height readout.
+        else if (c == '\'')            out = CHAR_SGL_QUOTE_RIGHT;
+        else if (c == '"')             out = CHAR_DBL_QUOTE_RIGHT;
         else if (c == '\n')            out = CHAR_NEWLINE;
         else                           out = CHAR_SPACE;
 

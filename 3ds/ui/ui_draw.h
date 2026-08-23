@@ -56,6 +56,19 @@ void UiMonIcon(int x, int y, u16 species, u32 personality);
 // A bag item icon: 32x32, drawn the way the game builds its own item sprites.
 void UiItemIcon(int x, int y, u16 itemId);
 
+// A Pokedex front sprite: 64x64, the game's own art. Cached on species, so
+// moving a cursor through a list costs one decompress per mon, not per repaint.
+void UiMonPic(int x, int y, u16 species);
+
+// The Pokedex "caught" marker, 7x7.
+#define UI_BALL_W 7
+#define UI_BALL_H 7
+
+void UiPokeball(int x, int y);
+
+// A species footprint: 16x16, 1bpp, drawn in `color`.
+void UiFootprint(int x, int y, u16 species, u16 color);
+
 // A status badge (PSN, SLP, BRN ...): 32x8, the party menu's own art. Takes an
 // AILMENT_* value, normally straight from GetMonAilment(). Draws nothing for
 // AILMENT_NONE or AILMENT_PKRS, which is what the party menu does too.
