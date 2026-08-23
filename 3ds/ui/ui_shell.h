@@ -14,11 +14,14 @@
 #define UI_TABBAR_H   48
 #define UI_CONTENT_H  (CTR_BOTTOM_HEIGHT - UI_TABBAR_H)   // 192 = 24 tiles
 
+// Which of these are actually shown depends on what the player has unlocked;
+// bottom_screen.c mirrors BuildNormalStartMenu() (src/start_menu.c).
 enum UiTab
 {
     UI_TAB_PARTY,
     UI_TAB_BAG,
     UI_TAB_MAP,
+    UI_TAB_DEX,
     UI_TAB_COUNT
 };
 
@@ -46,10 +49,19 @@ void UiSetSelectedMon(u8 index);
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);
 
+// Advances the HP bar animation by one frame. Returns TRUE while any bar is
+// still moving, which the shell turns into a repaint request. Must be called
+// once per frame, not once per redraw, or the animation stalls whenever the
+// screen happens not to be repainting.
+bool8 UiPartyTick(void);
+
 void UiBagDraw(void);
 void UiBagTouch(const CtrTouchState *t);
 
 void UiMapDraw(void);
 void UiMapTouch(const CtrTouchState *t);
+
+void UiDexDraw(void);
+void UiDexTouch(const CtrTouchState *t);
 
 #endif // CTR_UI_SHELL_H

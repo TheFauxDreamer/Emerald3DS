@@ -15,6 +15,8 @@
 #include "item.h"
 #include "pokemon.h"
 #include "overworld.h"
+#include "battle.h"            // struct DisableStruct, for the header below
+#include "battle_controllers.h"
 #include "script.h"
 #include "constants/items.h"
 #include "constants/species.h"
@@ -35,7 +37,7 @@
 static u8  sPocket = POCKET_ITEMS;   // pocket ids are 1-based
 static u16 sScroll;
 
-enum { MSG_NONE, MSG_USED, MSG_NO_EFFECT, MSG_NOT_NOW, MSG_NO_TARGET };
+enum { MSG_NONE, MSG_USED, MSG_NO_EFFECT, MSG_NOT_NOW, MSG_NO_TARGET, MSG_QUEUED };
 static u8 sMessage;
 
 static const char *const sPocketNames[POCKET_COUNT] =
@@ -77,15 +79,32 @@ static void TryUseItem(u16 item)
 {
     struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
 
-    if (!CanUseItemNow())
-    {
-        sMessage = MSG_NOT_NOW;
-        return;
-    }
-
     if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
     {
         sMessage = MSG_NO_TARGET;
+        return;
+    }
+
+    // In battle the effect must NOT be applied directly. It has to go through
+    // the engine's action queue so that it costs a turn and the opponent gets
+    // to respond, which is what the d-pad route does. Only legal while the
+    // player is choosing an action, exactly as with the d-pad.
+    if (gMain.inBattle)
+    {
+        if (!Ctr3dsPlayerIsChoosingAction())
+        {
+            sMessage = MSG_NOT_NOW;
+            return;
+        }
+
+        Ctr3dsQueueBattleItem(item, UiSelectedMon());
+        sMessage = MSG_QUEUED;
+        return;
+    }
+
+    if (!CanUseItemNow())
+    {
+        sMessage = MSG_NOT_NOW;
         return;
     }
 
@@ -126,6 +145,7 @@ static void DrawMessage(void)
         [MSG_NO_EFFECT] = "It had no effect.",
         [MSG_NOT_NOW]   = "Not while busy.",
         [MSG_NO_TARGET] = "Pick a Pokemon first.",
+        [MSG_QUEUED]    = "Using it this turn.",
     };
     u8 label[32];
 

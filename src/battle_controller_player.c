@@ -120,6 +120,54 @@ static void PlayerDoMoveAnimation(void);
 static void Task_StartSendOutAnim(u8);
 static void EndDrawPartyStatusSummary(void);
 
+#if PLATFORM_3DS
+// ---- second-screen battle items --------------------------------------------
+//
+// The touch screen is an ALTERNATIVE route to the same battle action, never a
+// replacement. Every hook below is a pure early return, so with nothing queued
+// the d-pad path through the bag and party menus behaves exactly as it always
+// did.
+//
+// Using an item takes three separate questions from the engine: choose an
+// action, then an item, then a target. Queueing all three up front lets the
+// touch screen answer them without the top-screen menus opening at all.
+static void HandleInputChooseAction(void);
+static void PlayerBufferExecCompleted(void);
+
+static u16   sCtr3dsPendingItem;
+static u8    sCtr3dsPendingTarget;
+static bool8 sCtr3dsHasTarget;
+
+static void Ctr3dsClearPending(void)
+{
+    sCtr3dsPendingItem = ITEM_NONE;
+    sCtr3dsPendingTarget = 0;
+    sCtr3dsHasTarget = FALSE;
+}
+
+// "Only at certain times" means exactly this: the player's controller is
+// sitting in action selection, which is when the d-pad could pick BAG too.
+bool8 Ctr3dsPlayerIsChoosingAction(void)
+{
+    return gMain.inBattle
+        && gBattlerControllerFuncs[gActiveBattler] == HandleInputChooseAction;
+}
+
+void Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
+{
+    if (!Ctr3dsPlayerIsChoosingAction())
+        return;
+
+    sCtr3dsPendingItem = item;
+    sCtr3dsPendingTarget = partySlot;
+    sCtr3dsHasTarget = TRUE;
+
+    // Identical to picking BAG with the d-pad; see HandleInputChooseAction.
+    BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_ITEM, 0);
+    PlayerBufferExecCompleted();
+}
+#endif // PLATFORM_3DS
+
 static void (*const sPlayerBufferCommands[CONTROLLER_CMDS_COUNT])(void) =
 {
     [CONTROLLER_GETMONDATA]               = PlayerHandleGetMonData,
@@ -2576,6 +2624,12 @@ static void PlayerHandleChooseAction(void)
 {
     s32 i;
 
+#if PLATFORM_3DS
+    // Bounds the lifetime of a touch-screen queue to a single selection: a
+    // queue that was never consumed must not fire on a later turn.
+    Ctr3dsClearPending();
+#endif
+
     gBattlerControllerFuncs[gActiveBattler] = HandleChooseActionAfterDma3;
     BattleTv_ClearExplosionFaintCause();
     BattlePutTextOnWindow(gText_BattleMenu, B_WIN_ACTION_MENU);
@@ -2654,6 +2708,19 @@ static void PlayerHandleChooseItem(void)
 {
     s32 i;
 
+#if PLATFORM_3DS
+    // Already chosen on the touch screen: answer and skip opening the bag. The
+    // target stays queued for PlayerHandleChoosePokemon below.
+    if (sCtr3dsPendingItem != ITEM_NONE)
+    {
+        gSpecialVar_ItemId = sCtr3dsPendingItem;
+        sCtr3dsPendingItem = ITEM_NONE;
+        BtlController_EmitOneReturnValue(B_COMM_TO_ENGINE, gSpecialVar_ItemId);
+        PlayerBufferExecCompleted();
+        return;
+    }
+#endif
+
     BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 0x10, RGB_BLACK);
     gBattlerControllerFuncs[gActiveBattler] = OpenBagAndChooseItem;
     gBattlerInMenuId = gActiveBattler;
@@ -2668,6 +2735,20 @@ static void PlayerHandleChoosePokemon(void)
 
     for (i = 0; i < (int)ARRAY_COUNT(gBattlePartyCurrentOrder); i++)
         gBattlePartyCurrentOrder[i] = gBattleBufferA[gActiveBattler][4 + i];
+
+#if PLATFORM_3DS
+    // Target already chosen on the touch screen: answer with the party slot,
+    // the same value WaitForMonSelection sends after the party menu closes.
+    if (sCtr3dsHasTarget)
+    {
+        sCtr3dsHasTarget = FALSE;
+        BtlController_EmitChosenMonReturnValue(B_COMM_TO_ENGINE,
+                                               sCtr3dsPendingTarget,
+                                               gBattlePartyCurrentOrder);
+        PlayerBufferExecCompleted();
+        return;
+    }
+#endif
 
     if (gBattleTypeFlags & BATTLE_TYPE_ARENA && (gBattleBufferA[gActiveBattler][1] & 0xF) != PARTY_ACTION_CANT_SWITCH)
     {

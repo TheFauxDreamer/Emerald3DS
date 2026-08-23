@@ -334,4 +334,11 @@ void SetControllerToLinkOpponent(void);
 // link partner
 void SetControllerToLinkPartner(void);
 
+#if PLATFORM_3DS
+// Second-screen battle items. The touch screen is an alternative route to the
+// same action, never a replacement; see src/battle_controller_player.c.
+bool8 Ctr3dsPlayerIsChoosingAction(void);
+void Ctr3dsQueueBattleItem(u16 item, u8 partySlot);
+#endif
+
 #endif // GUARD_BATTLE_CONTROLLERS_H
