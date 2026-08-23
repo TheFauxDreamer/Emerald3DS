@@ -53,6 +53,9 @@ u16 UiThemeShadow(void);
 // A party/box mon icon: 32x32, 4bpp, 4x4 tiles in 1D sprite order.
 void UiMonIcon(int x, int y, u16 species, u32 personality);
 
+// A bag item icon: 32x32, drawn the way the game builds its own item sprites.
+void UiItemIcon(int x, int y, u16 itemId);
+
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 
 #endif // CTR_UI_DRAW_H

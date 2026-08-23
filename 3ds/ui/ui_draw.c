@@ -3,6 +3,8 @@
 #include "global.h"
 #include "text_window.h"
 #include "pokemon_icon.h"
+#include "item_icon.h"
+#include "decompress.h"
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
 #include "constants/characters.h"     // TEXT_COLOR_*
@@ -174,6 +176,42 @@ void UiMonIcon(int x, int y, u16 species, u32 personality)
     // 32x32 sprite, 1D mapping: 16 consecutive tiles, four per row.
     for (int t = 0; t < 16; t++)
         UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, gfx + t * 32, pal, TRUE);
+}
+
+// Item icons are stored LZ-compressed as 3x3 tiles and expanded into a 4x4
+// sprite, so this follows the game's own sequence: decompress, then let its
+// CopyItemIconPicTo4x4Buffer do the rearrangement (src/item_icon.c).
+//
+// Buffers are static rather than Alloc'd. This runs from the per-frame hook,
+// and churning the game's heap every repaint would be a poor neighbour.
+void UiItemIcon(int x, int y, u16 itemId)
+{
+    static u8  raw[0x120];     // 3x3 tiles, the size AllocItemIconTemporaryBuffers uses
+    static u8  tiles[0x200];   // 4x4 tiles
+    static u16 gbaPal[16];
+    u16 pal[16];
+
+    const void *pic    = GetItemIconPicOrPalette(itemId, 0);
+    const void *palSrc = GetItemIconPicOrPalette(itemId, 1);
+
+    if (pic == NULL || palSrc == NULL)
+        return;
+
+    // CopyItemIconPicTo4x4Buffer only writes three 3-tile rows, so the fourth
+    // column and row keep whatever was there. The game gets this from
+    // AllocZeroed; a reused static has to be cleared by hand or the previous
+    // item bleeds through.
+    for (u32 i = 0; i < sizeof(tiles); i++)
+        tiles[i] = 0;
+
+    LZDecompressWram((const u32 *)pic, raw);
+    CopyItemIconPicTo4x4Buffer(raw, tiles);
+    LZDecompressWram((const u32 *)palSrc, gbaPal);
+
+    UiLoadPal(pal, gbaPal, 16);
+
+    for (int t = 0; t < 16; t++)
+        UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, tiles + t * 32, pal, TRUE);
 }
 
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)

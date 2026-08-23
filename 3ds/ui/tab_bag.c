@@ -245,10 +245,12 @@ static void DrawDetails(void)
     if (item == ITEM_NONE)
         return;
 
-    UiText(RIGHT_X, PANEL_Y + 8, GetItemName(item), UiThemeText(), UiThemeShadow());
+    UiItemIcon(RIGHT_X, PANEL_Y + 6, item);
+    UiText(RIGHT_X + 40, PANEL_Y + 16, GetItemName(item),
+           UiThemeText(), UiThemeShadow());
 
     // Carries its own line breaks, which UiText honours.
-    UiText(RIGHT_X, PANEL_Y + 34, GetItemDescription(item),
+    UiText(RIGHT_X, PANEL_Y + 46, GetItemDescription(item),
            UiThemeText(), UiThemeShadow());
 
     if (sMessage != MSG_NONE)
