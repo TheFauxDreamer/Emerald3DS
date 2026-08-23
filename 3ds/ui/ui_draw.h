@@ -56,6 +56,18 @@ void UiMonIcon(int x, int y, u16 species, u32 personality);
 // A bag item icon: 32x32, drawn the way the game builds its own item sprites.
 void UiItemIcon(int x, int y, u16 itemId);
 
+// A status badge (PSN, SLP, BRN ...): 32x8, the party menu's own art. Takes an
+// AILMENT_* value, normally straight from GetMonAilment(). Draws nothing for
+// AILMENT_NONE or AILMENT_PKRS, which is what the party menu does too.
+void UiStatusIcon(int x, int y, u8 ailment);
+
+// A solid triangle with a 1px outline, pointing up or down. Both dimensions are
+// odd so the tip lands on a whole pixel.
+#define UI_ARROW_W 11
+#define UI_ARROW_H 7
+
+void UiArrow(int x, int y, bool8 up, u16 fill);
+
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 
 #endif // CTR_UI_DRAW_H

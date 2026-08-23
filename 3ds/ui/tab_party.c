@@ -12,8 +12,10 @@
 #include "battle.h"             // struct DisableStruct, for the headers below
 #include "battle_main.h"
 #include "battle_interface.h"   // GetHPBarLevel
+#include "party_menu.h"         // GetMonAilment
 #include "pokemon_summary_screen.h"
 #include "constants/species.h"
+#include "constants/party_menu.h"
 
 #include "../bridge.h"
 #include "ui_draw.h"
@@ -115,38 +117,48 @@ static void HpBar(int x, int y, int w, u32 hp, u32 maxHp)
     UiFillRect(x, y + 4, (int)filled, 4, dark);
 }
 
-// Two small squares, drawn only when the matchup is actually worth noticing.
-// Neutral is the common case and marking it would just add noise to five other
-// cells. Left square is offence (can this one hit it hard), right is risk (how
-// hard does it hit back).
-static void DrawMatchupBadges(int cx, int cy, struct Pokemon *mon)
+#define ARROW_GAP 3
+#define ARROW_PAIR_W (UI_ARROW_W * 2 + ARROW_GAP)
+
+// Two arrows, drawn only when the matchup is actually worth noticing. Neutral
+// is the common case and marking it would just add noise to five other cells.
+//
+// Direction carries the meaning and colour reinforces it: up and green is good
+// for you, down and red is bad for you. That reads at a glance in a way a flat
+// coloured square does not. The left arrow is offence (can this one hit it
+// hard), the right is risk (how hard does it hit back).
+//
+// `x` is where the nickname ended, so the pair follows the name rather than
+// floating in the corner. `xLimit` is the rightmost pixel they may occupy.
+static void DrawMatchupArrows(int x, int y, int xLimit, struct Pokemon *mon)
 {
     u16 off, risk;
 
     if (!UiMatchupActive())
         return;
 
+    // A long nickname would otherwise push these through the window frame.
+    if (x + ARROW_PAIR_W > xLimit)
+        x = xLimit - ARROW_PAIR_W;
+
     off  = UiMatchupOffence(mon);
     risk = UiMatchupRisk(mon);
 
     if (off != UI_MATCHUP_NA && off != TYPE_MUL_NORMAL)
     {
-        u16 c = (off > TYPE_MUL_NORMAL) ? UI_COL_HP_HIGH
-              : (off == 0)              ? UI_COL_HP_LOW
-              :                           UI_COL_HP_MID;
-
-        UiFillRect(cx + CELL_W - 28, cy + 8, 10, 10, c);
-        UiRect(cx + CELL_W - 28, cy + 8, 10, 10, UI_COL_DIM);
+        // Amber for a resisted move, red only for one that does nothing at all:
+        // the difference between "weak" and "pointless" is worth keeping.
+        if (off > TYPE_MUL_NORMAL)
+            UiArrow(x, y, TRUE, UI_COL_HP_HIGH);
+        else
+            UiArrow(x, y, FALSE, (off == 0) ? UI_COL_HP_LOW : UI_COL_HP_MID);
     }
 
     // Risk reads the other way round: a large multiplier against us is bad.
     if (risk != UI_MATCHUP_NA && risk != TYPE_MUL_NORMAL)
-    {
-        u16 c = (risk > TYPE_MUL_NORMAL) ? UI_COL_HP_LOW : UI_COL_HP_HIGH;
-
-        UiFillRect(cx + CELL_W - 15, cy + 8, 10, 10, c);
-        UiRect(cx + CELL_W - 15, cy + 8, 10, 10, UI_COL_DIM);
-    }
+        UiArrow(x + UI_ARROW_W + ARROW_GAP, y,
+                risk < TYPE_MUL_NORMAL,
+                (risk > TYPE_MUL_NORMAL) ? UI_COL_HP_LOW : UI_COL_HP_HIGH);
 }
 
 static void DrawCell(int index)
@@ -157,6 +169,7 @@ static void DrawCell(int index)
     u32 species, hp, maxHp, level;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[8];
+    int nameW;
 
     UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, CELL_H / 8);
 
@@ -166,8 +179,17 @@ static void DrawCell(int index)
 
     UiMonIcon(cx + 6, cy + 16, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
 
+    // The 32x8 strip under the mon icon is otherwise empty, and the badge is
+    // 32x8, so status lands next to the mon it belongs to without disturbing
+    // anything. The HP bar starts at cx + 42, well clear of it.
+    UiStatusIcon(cx + 6, cy + 48, GetMonAilment(mon));
+
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    UiText(cx + 42, cy + 8, name, UiThemeText(), UiThemeShadow());
+    nameW = UiText(cx + 42, cy + 8, name, UiThemeText(), UiThemeShadow());
+
+    // Centred in the 15px name row, immediately after the name.
+    DrawMatchupArrows(cx + 42 + nameW + 4, cy + 8 + (UI_GLYPH_H - UI_ARROW_H) / 2,
+                      cx + CELL_W - 8, mon);
 
     level = GetMonData(mon, MON_DATA_LEVEL);
     UiAscii(label, "Lv", sizeof(label));
@@ -181,8 +203,6 @@ static void DrawCell(int index)
     UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UiThemeText(), UiThemeShadow());
     HpBar(cx + 42, cy + 46, CELL_W - 52, hp, maxHp);
 
-    DrawMatchupBadges(cx, cy, mon);
-
     // The selected slot is what the BAG tab will act on, so it needs to be
     // unmistakable.
     if (index == UiSelectedMon())
@@ -195,7 +215,7 @@ static void DrawDetail(void)
     u32 species = GetMonData(mon, MON_DATA_SPECIES);
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[16];
-    int y;
+    int y, nameW;
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
@@ -209,7 +229,12 @@ static void DrawDetail(void)
     UiMonIcon(12, 12, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    UiText(52, 12, name, UiThemeText(), UiThemeShadow());
+    nameW = UiText(52, 12, name, UiThemeText(), UiThemeShadow());
+
+    // Same treatment as the grid: arrows follow the name. The limit is the BACK
+    // target's left edge rather than the window frame.
+    DrawMatchupArrows(52 + nameW + 4, 12 + (UI_GLYPH_H - UI_ARROW_H) / 2,
+                      CTR_BOTTOM_WIDTH - 52, mon);
 
     UiText(52, 30, UiAscii(label, "Lv", sizeof(label)), UI_COL_DIM, UiThemeShadow());
     UiNum(70, 30, (s32)GetMonData(mon, MON_DATA_LEVEL), UiThemeText(), UiThemeShadow());
@@ -222,7 +247,10 @@ static void DrawDetail(void)
     UiNum(44, y, (s32)sShownHp[UiSelectedMon()], UiThemeText(), UiThemeShadow());
     UiText(76, y, UiAscii(label, "/", sizeof(label)), UI_COL_DIM, UiThemeShadow());
     UiNum(86, y, (s32)GetMonData(mon, MON_DATA_MAX_HP), UiThemeText(), UiThemeShadow());
-    HpBar(140, y + 4, 160, sShownHp[UiSelectedMon()],
+
+    // Status belongs on the HP row; the bar gives up 20px to make room for it.
+    UiStatusIcon(120, y + 2, GetMonAilment(mon));
+    HpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
           GetMonData(mon, MON_DATA_MAX_HP));
 
     // Stats, two columns

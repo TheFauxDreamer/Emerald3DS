@@ -4,12 +4,15 @@
 #include "text_window.h"
 #include "pokemon_icon.h"
 #include "item_icon.h"
+#include "graphics.h"                 // gStatusGfx_Icons, gStatusPal_Icons
 #include "decompress.h"
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
 #include "constants/characters.h"     // TEXT_COLOR_*
+#include "constants/party_menu.h"     // AILMENT_*
 
 #include "ui_draw.h"
+#include "ui_shell.h"                 // UI_COL_SHADOW
 
 static u16 sFb[UI_W * UI_H];
 
@@ -212,6 +215,84 @@ void UiItemIcon(int x, int y, u16 itemId)
 
     for (int t = 0; t < 16; t++)
         UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, tiles + t * 32, pal, TRUE);
+}
+
+// The party menu's own ailment art, so PSN here is the same badge PSN is there.
+// One 32x64 sheet of eight 32x8 badges, four tiles each, in the order the anim
+// table declares (src/data/party_menu.h): PSN, PRZ, SLP, FRZ, BRN, PKRS, FNT,
+// blank. UpdatePartyMonAilmentGfx() selects with `status - 1`, so that is the
+// index arithmetic below.
+//
+// Index 0 of the sheet's palette is the transparency marker and every badge
+// carries its own colours in the remaining slots, so one palette covers all of
+// them and an ordinary transparent blit is all that is needed.
+void UiStatusIcon(int x, int y, u8 ailment)
+{
+    static u8   tiles[0x400];      // the size sSpriteSheet_StatusIcons declares
+    static u16  pal[16];
+    static bool8 loaded;
+
+    const u8 *icon;
+
+    // Matches UpdatePartyMonAilmentGfx(): the party menu hides the sprite for
+    // both of these rather than drawing anything.
+    if (ailment == AILMENT_NONE || ailment == AILMENT_PKRS || ailment > AILMENT_FNT)
+        return;
+
+    if (!loaded)
+    {
+        u16 gbaPal[16];
+
+        // The decompressor is bounded only by the size word in the data, so
+        // check it against the destinations rather than trust it. gbaPal in
+        // particular is on the stack.
+        if (GetDecompressedDataSize(gStatusGfx_Icons) > sizeof(tiles)
+         || GetDecompressedDataSize(gStatusPal_Icons) > sizeof(gbaPal))
+            return;
+
+        LZDecompressWram(gStatusGfx_Icons, tiles);
+        LZDecompressWram(gStatusPal_Icons, gbaPal);
+        UiLoadPal(pal, gbaPal, 16);
+        loaded = TRUE;
+    }
+
+    icon = tiles + (ailment - 1) * 4 * 32;
+
+    for (int t = 0; t < 4; t++)
+        UiBlit4bppTile(x + t * 8, y, icon + t * 32, pal, TRUE);
+}
+
+// Generated rather than stored. Row r counts from the tip and spans columns
+// (W/2 - r) to (W/2 + r); those two end columns are the outline and everything
+// between them is fill. The last row is the flat base, all outline.
+//
+// The outline is on every side deliberately. The player picks one of 20 window
+// frames and they run from near-white to near-black, so an arrow relying on its
+// fill colour alone would disappear against half of them.
+void UiArrow(int x, int y, bool8 up, u16 fill)
+{
+    const int mid = UI_ARROW_W / 2;
+
+    for (int r = 0; r < UI_ARROW_H; r++)
+    {
+        int py = y + (up ? r : (UI_ARROW_H - 1 - r));
+        int left, right;
+
+        if (r == UI_ARROW_H - 1)
+        {
+            UiFillRect(x, py, UI_ARROW_W, 1, UI_COL_SHADOW);
+            continue;
+        }
+
+        left  = mid - r;
+        right = mid + r;
+
+        UiFillRect(x + left,  py, 1, 1, UI_COL_SHADOW);
+        UiFillRect(x + right, py, 1, 1, UI_COL_SHADOW);
+
+        if (right - left > 1)
+            UiFillRect(x + left + 1, py, right - left - 1, 1, fill);
+    }
 }
 
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
