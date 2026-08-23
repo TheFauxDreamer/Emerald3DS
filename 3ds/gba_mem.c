@@ -43,6 +43,19 @@ void Ctr3dsInitGbaMemory(void)
     // Blank cart = erased flash. The save layer's checksums then decide there
     // is no save and offer a new game.
     memset(gCtrSaveFlash, 0xFF, sizeof(gCtrSaveFlash));
+
+    // A GBA powers on with every key RELEASED, and KEYINPUT is active-low: a
+    // CLEAR bit means pressed. The memset above leaves it 0, i.e. all ten
+    // buttons held -- and CtrSetKeyInput() cannot correct that in time,
+    // because it only runs from Rp2350PresentFrame() at the END of a frame,
+    // while ReadKeys() samples at the START of one.
+    //
+    // The first frame therefore read A+B+START+SELECT, the soft-reset combo,
+    // and src/main.c dived into rfu_REQ_stopMode() -> AgbRFU_SoftReset(),
+    // which dereferences gSTWIStatus. That is NULL here because InitRFU() is
+    // GBA-only (it sits in the #else branch RP2350 skips), so the port crashed
+    // on boot reading null+0xA, the offset of STWIStatus::timerSelect.
+    *(vu16 *)(REG_BASE + REG_OFFSET_KEYINPUT) = KEYS_MASK;
 }
 
 // Hand the PPU its four region bases. rp2350/ppu.c is host-side and

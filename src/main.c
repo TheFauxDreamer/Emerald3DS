@@ -190,8 +190,13 @@ void WasmRunFrame(void)
      && JOY_HELD_RAW(A_BUTTON)
      && JOY_HELD_RAW(B_START_SELECT) == B_START_SELECT)
     {
+#if !(WASM || RP2350)
+        // Shutting the wireless adapter down before resetting only makes sense
+        // where one exists. Neither of these platforms calls InitRFU(), so
+        // gSTWIStatus is NULL and both calls dereference it.
         rfu_REQ_stopMode();
         rfu_waitREQComplete();
+#endif
         DoSoftReset();
     }
 
