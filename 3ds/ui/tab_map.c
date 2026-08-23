@@ -13,9 +13,9 @@ void UiMapDraw(void)
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
     UiText(16, 16, UiAscii(label, "MAP", sizeof(label)),
-           UI_COL_TEXT, UI_COL_SHADOW);
+           UiThemeText(), UiThemeShadow());
     UiText(16, 40, UiAscii(label, "Coming soon", sizeof(label)),
-           UI_COL_DIM, UI_COL_SHADOW);
+           UI_COL_DIM, UiThemeShadow());
 }
 
 void UiMapTouch(const CtrTouchState *t)

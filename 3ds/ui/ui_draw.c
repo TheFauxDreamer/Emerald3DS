@@ -3,6 +3,8 @@
 #include "global.h"
 #include "text_window.h"
 #include "pokemon_icon.h"
+#include "menu.h"                     // gStandardMenuPalette
+#include "constants/characters.h"     // TEXT_COLOR_*
 
 #include "ui_draw.h"
 
@@ -86,17 +88,34 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
     }
 }
 
-// graphics/text_window/1.png is 24x24 -- a 3x3 nine-slice, tiles in row-major
-// order. Corners are drawn once, edges and centre repeat.
+// The player picks one of 20 borders in Options -> Frame; honouring it is what
+// makes the second screen read as part of the game rather than an overlay.
+// GetWindowFrameTilesPal() is the game's own accessor and is bounds-checked
+// (src/text_window.c), so a corrupt setting falls back to frame 0 rather than
+// reading past the table.
+//
+// Every frame is a 3x3 nine-slice: the game loads 0x120 bytes = 9 tiles, in
+// row-major order, with a 16-colour palette. Corners are drawn once; edges and
+// centre repeat.
+u8 UiFrameId(void)
+{
+    return gSaveBlock2Ptr->optionsWindowFrameType;
+}
+
 void UiWindowFrame(int tx, int ty, int wTiles, int hTiles)
 {
+    // Keyed on the frame id, not a one-shot flag: the player can change the
+    // setting at any time and a stale palette would silently mismatch the tiles.
     static u16 pal[16];
-    static int palReady;
+    static int cachedId = -1;
 
-    if (!palReady)
+    u8 frameId = UiFrameId();
+    const struct TilesPal *frame = GetWindowFrameTilesPal(frameId);
+
+    if (cachedId != (int)frameId)
     {
-        UiLoadPal(pal, gTextWindowFrame1_Pal, 16);
-        palReady = 1;
+        UiLoadPal(pal, frame->pal, 16);
+        cachedId = (int)frameId;
     }
 
     if (wTiles < 2 || hTiles < 2)
@@ -109,12 +128,26 @@ void UiWindowFrame(int tx, int ty, int wTiles, int hTiles)
         for (int col = 0; col < wTiles; col++)
         {
             int sx = (col == 0) ? 0 : (col == wTiles - 1 ? 2 : 1);
-            const u8 *tile = gTextWindowFrame1_Gfx + (sy * 3 + sx) * 32;
+            const u8 *tile = frame->tiles + (sy * 3 + sx) * 32;
 
             // Opaque: the frame is the background, nothing shows through it.
             UiBlit4bppTile((tx + col) * 8, (ty + row) * 8, tile, pal, FALSE);
         }
     }
+}
+
+// Text drawn ON a frame must use the game's own menu colours, not a fixed
+// white: the 20 frames run from light to dark, and Emerald prints dark-on-light
+// on all of them. These are the exact indices its menus use
+// (include/constants/characters.h) out of gStandardMenuPalette (src/menu.c).
+u16 UiThemeText(void)
+{
+    return UiBgr555ToRgb565(gStandardMenuPalette[TEXT_COLOR_DARK_GRAY]);
+}
+
+u16 UiThemeShadow(void)
+{
+    return UiBgr555ToRgb565(gStandardMenuPalette[TEXT_COLOR_LIGHT_GRAY]);
 }
 
 void UiMonIcon(int x, int y, u16 species, u32 personality)

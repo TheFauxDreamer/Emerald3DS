@@ -36,11 +36,17 @@ void UiMarkDirty(void)          { sNeedsRepaint = 1; }
 u8   UiSelectedMon(void)        { return sSelectedMon; }
 void UiSetSelectedMon(u8 index) { sSelectedMon = index; }
 
-// Redrawing 320x240 every frame is pointless for a mostly-static UI, so the
-// party state the display depends on is hashed and compared instead.
-static u32 PartyStateHash(void)
+// Redrawing 320x240 every frame is pointless for a mostly-static UI, so
+// everything the display depends on is hashed and compared instead. That is
+// not just the party: the player can change the window border in Options at any
+// time, and without it in here the screen would keep the old frame until
+// something unrelated happened to dirty it.
+static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
+
+    hash ^= UiFrameId();
+    hash *= 16777619u;
 
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
@@ -81,7 +87,7 @@ static void DrawCentered(int y, const char *ascii, u16 color)
 
     UiAscii(label, ascii, sizeof(label));
     UiText((CTR_BOTTOM_WIDTH - UiTextWidth(label)) / 2, y, label,
-           color, UI_COL_SHADOW);
+           color, UiThemeShadow());
 }
 
 static void DrawIdle(void)
@@ -89,7 +95,7 @@ static void DrawIdle(void)
     UiClear(UI_COL_BG);
     UiWindowFrame(2, 5, 36, 14);
 
-    DrawCentered(72, "POKEMON EMERALD", UI_COL_TEXT);
+    DrawCentered(72, "POKEMON EMERALD", UiThemeText());
     DrawCentered(96, "3DS", UI_COL_ACCENT);
     DrawCentered(140, "Your team appears here", UI_COL_DIM);
 }
@@ -180,9 +186,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         }
     }
 
-    // Party state can change without any touch at all -- taking damage, an
-    // evolution, a level-up -- so it is polled rather than pushed.
-    u32 hash = PartyStateHash();
+    // This state can change without any touch at all -- taking damage, an
+    // evolution, a level-up, or the player changing the border in Options -- so
+    // it is polled rather than pushed.
+    u32 hash = UiStateHash();
     if (hash != sLastStateHash)
     {
         sLastStateHash = hash;

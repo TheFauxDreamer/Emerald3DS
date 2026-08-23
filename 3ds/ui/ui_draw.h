@@ -36,9 +36,19 @@ void UiRect(int x, int y, int w, int h, u16 color);   // 1px outline
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal565,
                     int transparent0);
 
-// Emerald's 3x3 nine-slice window frame (graphics/text_window/1.png), tiled to
-// fill w x h tiles. Coordinates and size are in 8px tiles.
+// A 3x3 nine-slice window frame in whichever of the 20 borders the player chose
+// in Options -> Frame. Coordinates and size are in 8px tiles.
 void UiWindowFrame(int tx, int ty, int wTiles, int hTiles);
+
+// The player's current frame choice. Fold this into any redraw trigger, or the
+// screen keeps the old border until something else happens to dirty it.
+u8 UiFrameId(void);
+
+// Text colours for anything drawn ON a frame -- the same ones Emerald's own
+// menus print with, so they stay legible across all 20 borders. Do not use a
+// fixed colour there: the frames run from light to dark.
+u16 UiThemeText(void);
+u16 UiThemeShadow(void);
 
 // A party/box mon icon: 32x32, 4bpp, 4x4 tiles in 1D sprite order.
 void UiMonIcon(int x, int y, u16 species, u32 personality);

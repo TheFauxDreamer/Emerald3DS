@@ -64,17 +64,17 @@ static void DrawCell(int index)
     UiMonIcon(cx + 6, cy + 16, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    UiText(cx + 42, cy + 8, name, UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(cx + 42, cy + 8, name, UiThemeText(), UiThemeShadow());
 
     level = GetMonData(mon, MON_DATA_LEVEL);
     UiAscii(label, "Lv", sizeof(label));
-    UiText(cx + 42, cy + 26, label, UI_COL_DIM, UI_COL_SHADOW);
-    UiNum(cx + 60, cy + 26, (s32)level, UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(cx + 42, cy + 26, label, UI_COL_DIM, UiThemeShadow());
+    UiNum(cx + 60, cy + 26, (s32)level, UiThemeText(), UiThemeShadow());
 
     hp    = GetMonData(mon, MON_DATA_HP);
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
-    UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UI_COL_TEXT, UI_COL_SHADOW);
+    UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UiThemeText(), UiThemeShadow());
     HpBar(cx + 42, cy + 46, CELL_W - 52, hp, maxHp);
 
     // The selected slot is what the BAG tab will act on, so it needs to be
@@ -96,26 +96,26 @@ static void DrawDetail(void)
     if (species == SPECIES_NONE)
     {
         UiText(16, 16, UiAscii(label, "Empty slot", sizeof(label)),
-               UI_COL_DIM, UI_COL_SHADOW);
+               UI_COL_DIM, UiThemeShadow());
         return;
     }
 
     UiMonIcon(12, 12, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    UiText(52, 12, name, UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(52, 12, name, UiThemeText(), UiThemeShadow());
 
-    UiText(52, 30, UiAscii(label, "Lv", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
-    UiNum(70, 30, (s32)GetMonData(mon, MON_DATA_LEVEL), UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(52, 30, UiAscii(label, "Lv", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+    UiNum(70, 30, (s32)GetMonData(mon, MON_DATA_LEVEL), UiThemeText(), UiThemeShadow());
 
-    UiText(110, 30, gSpeciesNames[species], UI_COL_DIM, UI_COL_SHADOW);
+    UiText(110, 30, gSpeciesNames[species], UI_COL_DIM, UiThemeShadow());
 
     // HP
     y = 52;
-    UiText(12, y, UiAscii(label, "HP", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
-    UiNum(44, y, (s32)GetMonData(mon, MON_DATA_HP), UI_COL_TEXT, UI_COL_SHADOW);
-    UiText(76, y, UiAscii(label, "/", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
-    UiNum(86, y, (s32)GetMonData(mon, MON_DATA_MAX_HP), UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(12, y, UiAscii(label, "HP", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+    UiNum(44, y, (s32)GetMonData(mon, MON_DATA_HP), UiThemeText(), UiThemeShadow());
+    UiText(76, y, UiAscii(label, "/", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+    UiNum(86, y, (s32)GetMonData(mon, MON_DATA_MAX_HP), UiThemeText(), UiThemeShadow());
     HpBar(140, y + 4, 160, GetMonData(mon, MON_DATA_HP),
           GetMonData(mon, MON_DATA_MAX_HP));
 
@@ -135,14 +135,14 @@ static void DrawDetail(void)
             int sx = 12 + (i % 3) * 66;
             int sy = 72 + (i / 3) * 18;
             UiText(sx, sy, UiAscii(label, names[i], sizeof(label)),
-                   UI_COL_DIM, UI_COL_SHADOW);
-            UiNum(sx + 34, sy, fields[i], UI_COL_TEXT, UI_COL_SHADOW);
+                   UI_COL_DIM, UiThemeShadow());
+            UiNum(sx + 34, sy, fields[i], UiThemeText(), UiThemeShadow());
         }
     }
 
     // Ability / nature / held item
     y = 112;
-    UiText(12, y, UiAscii(label, "ABILITY", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
+    UiText(12, y, UiAscii(label, "ABILITY", sizeof(label)), UI_COL_DIM, UiThemeShadow());
     {
         // Deliberately NOT GetMonAbility(): it routes through
         // GetAbilityBySpecies(), which writes gLastUsedAbility -- a global the
@@ -150,22 +150,22 @@ static void DrawDetail(void)
         // an ability must not perturb that. This is the same lookup, read-only.
         u8 abilityNum = (u8)GetMonData(mon, MON_DATA_ABILITY_NUM);
         u8 ability = gSpeciesInfo[species].abilities[abilityNum ? 1 : 0];
-        UiText(80, y, gAbilityNames[ability], UI_COL_TEXT, UI_COL_SHADOW);
+        UiText(80, y, gAbilityNames[ability], UiThemeText(), UiThemeShadow());
     }
 
     y += 16;
-    UiText(12, y, UiAscii(label, "NATURE", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
-    UiText(80, y, gNatureNamePointers[GetNature(mon)], UI_COL_TEXT, UI_COL_SHADOW);
+    UiText(12, y, UiAscii(label, "NATURE", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+    UiText(80, y, gNatureNamePointers[GetNature(mon)], UiThemeText(), UiThemeShadow());
 
     y += 16;
     {
         u16 item = (u16)GetMonData(mon, MON_DATA_HELD_ITEM);
-        UiText(12, y, UiAscii(label, "ITEM", sizeof(label)), UI_COL_DIM, UI_COL_SHADOW);
+        UiText(12, y, UiAscii(label, "ITEM", sizeof(label)), UI_COL_DIM, UiThemeShadow());
         if (item != ITEM_NONE)
-            UiText(80, y, GetItemName(item), UI_COL_TEXT, UI_COL_SHADOW);
+            UiText(80, y, GetItemName(item), UiThemeText(), UiThemeShadow());
         else
             UiText(80, y, UiAscii(label, "none", sizeof(label)),
-                   UI_COL_DIM, UI_COL_SHADOW);
+                   UI_COL_DIM, UiThemeShadow());
     }
 
     // Moves, two columns
@@ -175,13 +175,13 @@ static void DrawDetail(void)
         if (move == MOVE_NONE)
             continue;
 
-        UiText(180, 72 + i * 16, gMoveNames[move], UI_COL_TEXT, UI_COL_SHADOW);
+        UiText(180, 72 + i * 16, gMoveNames[move], UiThemeText(), UiThemeShadow());
     }
 
     // Back target, top-right.
     UiRect(CTR_BOTTOM_WIDTH - 46, 8, 38, 22, UI_COL_DIM);
     UiText(CTR_BOTTOM_WIDTH - 40, 12, UiAscii(label, "BACK", sizeof(label)),
-           UI_COL_ACCENT, UI_COL_SHADOW);
+           UI_COL_ACCENT, UiThemeShadow());
 }
 
 void UiPartyDraw(void)

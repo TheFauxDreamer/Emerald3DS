@@ -150,7 +150,7 @@ top screen through hardware the bottom screen does not own, and expect to be
 entered from their own menu's context. Calling one will appear to work and then
 fight the top screen for BG layers and tasks.
 
-## Stage 3 — BAG and item use
+## Stage 3 — BAG and item use — IMPLEMENTED
 
 The only stage that mutates game state, so the gate is the design.
 
@@ -162,8 +162,8 @@ The only stage that mutates game state, so the gate is the design.
   - `gMain.callback2 == CB2_Overworld` (`include/overworld.h:131`)
   - `!ArePlayerFieldControlsLocked()` (`include/script.h:36`)
   - `!ScriptContext_IsEnabled()` (`include/script.h:38`)
-  - not in battle — **confirm the exact flag first**; `gMain.inBattle` did not
-    grep cleanly in `include/main.h`.
+  - `!gMain.inBattle` (`include/main.h:39`, a 1-bit field; `VBlankIntr()`
+    itself uses it)
 - Apply `PokemonUseItemEffects(mon, item, partyIndex, 0, FALSE)`. Note the
   **inverted return**: `FALSE` means the item *did* have an effect. Only then
   `RemoveBagItem(item, 1)`.
@@ -220,6 +220,40 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
   surfaces as a confusing `u8`/`u16` clash. Note `3ds/ui/` headers are prefixed
   `ui_` precisely because `text.h` would otherwise shadow the game's
   `include/text.h`.
+
+---
+
+## The busy-wait hazard, and the audit
+
+This port has **no interrupts**: `VBlankIntr()` is called explicitly once per
+frame from `WasmRunFrame()`. Any of the game's `while (TRUE)` init loops that
+waits on state only advanced inside `VBlankIntr()` therefore spins forever,
+freezing everything — second screen included, since `Rp2350PresentFrame()` is
+downstream of the same loop. It leaves nothing in the log, so it has to be found
+by reading.
+
+That is what froze the party menu: `AllocPartyMenuBgGfx()` case 1 polls
+`IsDma3ManagerBusyWithBgCopy()`, and the DMA3 queue is only drained by
+`ProcessDma3Requests()` inside `VBlankIntr()`. Fixed by making DMA3 synchronous
+under `#if WASM || RP2350` in `src/dma3_manager.c` — with no hardware to wait
+on there is nothing to defer, so requests transfer immediately and never occupy
+a queue slot. That covers all 189 call sites of the busy-checks, not just one.
+
+A sweep for other instances came back clean:
+
+| Loop | Waits on | Status |
+|---|---|---|
+| `party_menu.c:553` | `IsDma3ManagerBusyWithBgCopy()` directly | was the bug, fixed at source |
+| `berry_tag_screen.c:201` | via `FreeTempTileDataBuffersIfPossible()` | already safe |
+| `pokeblock.c:506` | via `FreeTempTileDataBuffersIfPossible()` | already safe |
+| `credits.c:429` | nothing, self-advancing | safe |
+| `battle_tower.c:2318/2528` | bounded RNG retry | safe |
+| `VBlankIntrWait()` x2 | no-op stub, `rp2350/bios.c:198` | `ereader_helpers.c` only, unreachable |
+
+`FreeTempTileDataBuffersIfPossible()` (`src/menu.c:1760`) already carried an
+upstream `#if WASM || RP2350` inline-drain for this same problem — evidence the
+lineage hit it too, but patched only the one helper it noticed. That workaround
+is now redundant, but harmless, and it documents the hazard. Leave it.
 
 ---
 
