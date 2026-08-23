@@ -125,6 +125,9 @@ static u32 UiStateHash(void)
     // The matchup badges depend on who we are facing, so the opponent has to be
     // in here or they would go stale when it switches.
     top[3] = UiMatchupOpponentKey();
+    // Only while that tab is up: counting walks every dex entry.
+    if (sTab == UI_TAB_DEX)
+        top[3] ^= UiDexStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {

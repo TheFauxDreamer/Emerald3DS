@@ -64,4 +64,8 @@ void UiMapTouch(const CtrTouchState *t);
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
 
+// Cheap identity of the dex counts, for the shell's repaint hash. Walks the
+// whole dex, so the shell only asks while the DEX tab is on screen.
+u32 UiDexStateKey(void);
+
 #endif // CTR_UI_SHELL_H
