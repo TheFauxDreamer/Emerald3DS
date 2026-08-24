@@ -228,11 +228,23 @@ void UiItemIcon(int x, int y, u16 itemId)
 // here: it is an LZ77UnCompWram plus DrawSpindaSpots, with no allocation and no
 // OAM. It also resolves the Unown letter, which is why the personality matters.
 //
+// The buffer is MAX_MON_PIC_FRAMES frames, NOT one. Six species (Poochyena,
+// Marshtomp, Swablu, Blaziken, Walrein, Rayquaza) ship a 64x256 front sheet of
+// four animation frames that decompresses to 8192 bytes, and the size in
+// gMonFrontPicTable is the size of ONE frame, so it does not bound the write.
+// The game sizes its own destinations the same way, at
+// MON_PIC_SIZE * MAX_MON_PIC_FRAMES (src/battle_gfx_sfx_util.c:1297).
+//
+// Getting this wrong is not a quiet overrun: at 2048 bytes it ran 6 KB past the
+// end and repainted the neighbouring statics in this file, one of which is the
+// cached window-frame palette. The symptom was every other tab's border and
+// background changing colour, differently for each Pokedex entry viewed.
+//
 // Cached on species. A dex cursor moving down a list repaints the whole screen
-// each step, and re-expanding 2 KB every time would be pure waste.
+// each step, and re-expanding the sheet every time would be pure waste.
 void UiMonPic(int x, int y, u16 species)
 {
-    static u8  pic[MON_PIC_SIZE];
+    static u8  pic[MON_PIC_SIZE * MAX_MON_PIC_FRAMES];
     static u16 pal[16];
     static u16 cachedSpecies = SPECIES_NONE;
 
@@ -243,7 +255,10 @@ void UiMonPic(int x, int y, u16 species)
     {
         u16 gbaPal[16];
 
-        if (GetDecompressedDataSize(gMonPaletteTable[species].data) > sizeof(gbaPal))
+        // Both destinations checked against the size the data actually claims,
+        // rather than trusting the tables to agree with the buffers.
+        if (GetDecompressedDataSize(gMonFrontPicTable[species].data) > sizeof(pic)
+         || GetDecompressedDataSize(gMonPaletteTable[species].data) > sizeof(gbaPal))
             return;
 
         // Unown and Spinda are the only two whose art depends on a stored
@@ -260,6 +275,8 @@ void UiMonPic(int x, int y, u16 species)
         cachedSpecies = species;
     }
 
+    // Frame 0 only. Tiles are row-major, so the first 64 are the top 64x64 of
+    // the sheet, which is the still pose for the animated species too.
     for (int t = 0; t < 64; t++)
         UiBlit4bppTile(x + (t % 8) * 8, y + (t / 8) * 8, pic + t * 32, pal, TRUE);
 }
