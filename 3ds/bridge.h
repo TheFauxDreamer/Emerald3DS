@@ -77,6 +77,22 @@ uint16_t Rp2350SaveProgramSector(uint16_t sectorNum, uint8_t *src);
 uint16_t Rp2350SaveProgramByte(uint16_t sectorNum, uint32_t offset, uint8_t data);
 void     Rp2350SaveSync(void);
 
+// Fast-forward. The game's superloop always runs one logical frame per
+// Rp2350PresentFrame() call; this sets how many of those happen per DISPLAYED
+// frame, so 2 means the game advances twice as fast.
+//
+// It works because CtrVideoPresent() is both the software rasteriser and the
+// VBlank wait: skipping it on the intermediate frames drops the cost and the
+// 60 Hz pacing together. Clamped to CTR_SPEED_MIN..CTR_SPEED_MAX.
+//
+// This is a request, not a guarantee. If the console cannot keep up the game
+// simply runs slower than asked, which is a slowdown, not a fault.
+#define CTR_SPEED_MIN 1
+#define CTR_SPEED_MAX 4
+
+void Ctr3dsSetSpeed(int multiplier);
+int  Ctr3dsGetSpeed(void);
+
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
 // this instead (under PLATFORM_3DS). That file is game-side and includes this

@@ -229,6 +229,196 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ---
 
+# Part C: Local wireless (Cable Club over UDS)
+
+## Context
+
+The port has no link at all. `IsWirelessAdapterConnected()` is hardcoded to
+`FALSE` (`src/link.c:239`), and the cable path, while still compiled, is dead:
+`SerialCB` and `Timer3Intr` are reachable only through `gIntrTable`, and this
+port has no interrupts. So `gLink` never advances past its handshake and the
+Cable Club counter cannot be used.
+
+That costs trading, link battles, record mixing, the Berry Blender and link
+contests, which is most of the reason to play Emerald next to someone else.
+
+Goal: two to four 3DS consoles in the same room can use the Cable Club, over
+3DS local wireless (UDS), with a Host/Join panel on the touch screen.
+
+Scope decision: Cable Club only, not the Union Room. The RFU stack
+(`link_rfu_2.c`, `link_rfu_3.c`, `librfu_*.c`, roughly 7,500 lines of NI/UNI
+packet state machine) stays dead. That is consistent rather than arbitrary,
+because the game already reports no wireless adapter and therefore does not
+offer the Wireless Club in the first place.
+
+## Why the cable path is the right seam
+
+The GBA cable link is a fixed 4-player shared bus that moves **one 16-byte
+command per player per frame**, and `src/link.c` already isolates that:
+
+- `LinkMain1()` (line 1896) calls `EnqueueSendCmd()` / `DequeueRecvCmds()`,
+  which only touch `gLink.sendQueue` and `gLink.recvQueue`.
+- `SerialCB()` (line 2146) is the only thing that fills those queues, via
+  `DoRecv()` / `DoSend()`, eight u16 at a time.
+
+So the queues are the transport boundary. `CMD_LENGTH` is 8 and
+`MAX_LINK_PLAYERS` is 4, so a full frame of link traffic is 4 x 16 = 64 bytes,
+or 3.8 KB/s. `UDS_DATAFRAME_MAXSIZE` is 0x5C6, so one command fits in a single
+frame with room to spare.
+
+Everything above the queues stays untouched: `LinkMain2`, the block-transfer
+layer, `cable_club.c`, `trade.c`, `battle_controller_link_*.c`,
+`contest_link.c`.
+
+## Feasibility, already checked
+
+- **Service access is granted.** `3ds/emerald3ds.rsf` lists `nwm::UDS` under
+  `ServiceAccessControl` and `nwm` under `Dependency`. It arrived with the
+  homebrew template rather than by design, but it means no packaging change.
+- **The emulator supports it.** Azahar inherits Citra's UDS implementation, and
+  every call this needs is fully implemented rather than stubbed:
+  `BeginHostingNetwork`, `ConnectToNetwork`, `Bind`, `SendTo`, `PullPacket`,
+  `GetConnectionStatus`, `GetNodeInformation`, `RecvBeaconBroadcastData` (which
+  backs `udsScanBeacons`) and `SetApplicationData`. Two Azahar instances in one
+  multiplayer room can test this without hardware, which matters because nothing
+  in this port has ever run on a real console.
+
+## C.1: Transport, host side (`3ds/host/link.c`, new)
+
+libctru UDS, per `<3ds/services/uds.h>`:
+
+- `udsInit(0x3000, username)`, then `udsGenerateDefaultNetworkStruct(&net,
+  WLANCOMM_ID, 0, 4)` with a private `wlancommID` (`0x454D3344`, "EM3D") so only
+  this port's builds see each other, capped at `MAX_LINK_PLAYERS`.
+- Host: `udsCreateNetwork(...)`, plus `udsSetApplicationData` carrying the host's
+  trainer name so the join list can show it.
+- Client: `udsScanBeacons(...)` into a 0x4000 buffer, then
+  `udsConnectNetwork(..., UDSCONTYPE_Client, ...)`.
+- Per frame: `udsSendTo(UDS_BROADCAST_NETWORKNODEID, channel,
+  UDS_SENDFLAG_Default, cmd, 16)`, drained with `udsPullPacket()`.
+- `udsGetConnectionStatus()` supplies `total_nodes` and `cur_NetworkNodeID`.
+
+**Identity mapping.** UDS node IDs are 1-based with the host at 1; the GBA's are
+0-based with the master at 0. So `localId = NetworkNodeID - 1` and
+`isMaster = (NetworkNodeID == 1) ? LINK_MASTER : LINK_SLAVE`.
+
+**Lockstep is the hard part.** A cable is synchronous: every console's frame is
+gated on the master's transfer, so they cannot drift. UDS is not. The transport
+therefore runs a **one-frame jitter buffer plus a bounded wait**: frame N sends
+the local command and consumes frame N-1's, and if a peer's command has not
+arrived, block in `udsWaitDataAvailable()` up to a deadline of roughly half a
+frame before giving up. Blocking belongs host-side, where the wait primitives
+exist. Missing a deadline is not fatal and must not be treated as such: it maps
+onto the lag path the game already has.
+
+## C.2: Game side (one fenced block in `src/link.c`)
+
+Under `#if PLATFORM_3DS`, replace the SIO transport and nothing else. Declare the
+bridge functions in game types in `include/link.h`, the way
+`include/gba/flash_internal.h` declares `Rp2350Save*`, rather than pulling
+`bridge.h` into `src/`.
+
+- `LinkVSync()` (line 2094) becomes the pump. It already runs once per frame from
+  `VBlankIntr()` (`src/main.c:427`) whenever `gWirelessCommType == 0` and
+  `gLinkVSyncDisabled` is clear, which is exactly the cable case.
+- Drive `gLink.state` from UDS connection status instead of the SIO handshake:
+  `LINK_STATE_HANDSHAKE` completes when `total_nodes` matches and holds steady
+  for a few frames, then goes straight to `LINK_STATE_CONN_ESTABLISHED`.
+  `LINK_STATE_INIT_TIMER` exists only to start timer 3, which has no meaning
+  here.
+- Reproduce `DoSend`/`DoRecv` at whole-command granularity rather than one u16 at
+  a time: pop one entry from `gLink.sendQueue`, push each peer's command into
+  `gLink.recvQueue`. Keep the `receivedNothing` and `queueFull` bookkeeping,
+  since the layers above read both.
+- `EnableSerial`, `DisableSerial`, `StartTransfer`, `InitTimer`, `StopTimer` and
+  `CheckMasterOrSlave` become UDS equivalents or no-ops. `SerialCB` and
+  `Timer3Intr` keep their signatures, because `gIntrTable` still references them,
+  but do nothing.
+- **Failure path**: on disconnect or a missed deadline, set `gLink.lag` to
+  `LAG_MASTER` / `LAG_SLAVE`. That is the existing route to
+  `LINK_STAT_ERROR_LAG_*` (`include/link.h:34-39`), so a dropped connection
+  surfaces as Emerald's own link error screen and recovers, rather than hanging
+  mid-trade.
+
+The checksum logic in `DoRecv` is a cable artefact: it validates the shared bus.
+UDS frames are already checked, so leave `gLink.badChecksum` clear rather than
+inventing a checksum to satisfy it.
+
+## C.3: LINK tab on the bottom screen
+
+`UI_TAB_LINK` added to `enum UiTab` and to `sTabs[]` (`3ds/ui/bottom_screen.c:56`)
+with flag `0`, always available, like BAG. The tab bar already divides by the
+visible count, so a fifth tab needs no layout change.
+
+New `3ds/ui/tab_link.c` following the established shape (`UiLinkDraw`,
+`UiLinkTouch`, entry points in `ui_shell.h`), on `UiWindowFrame` like every other
+tab:
+
+- HOST button, SCAN button, and a list of nearby games showing the host's trainer
+  name and node count from the beacon appdata.
+- Once connected, the connected players and a DISCONNECT button.
+- Errors shown as text rather than silently swallowed.
+
+Doing the pairing explicitly here is also what avoids the "who hosts" race that
+an automatic scan-then-host would suffer from.
+
+## C: Files
+
+- `3ds/host/link.c` (new), plus `HOST_SRCS` in `3ds/Makefile:42`.
+- `3ds/bridge.h`: the transport seam, stdint only, next to the existing
+  `Ctr3dsGetClock` block.
+- `src/link.c`: one `#if PLATFORM_3DS` block over the transport functions.
+- `include/link.h`: bridge declarations in game types.
+- `3ds/ui/tab_link.c` (new), `3ds/ui/ui_shell.h`, `3ds/ui/bottom_screen.c`.
+- No change to `emerald3ds.rsf`.
+
+## C: Verification
+
+```sh
+CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
+```
+
+devkitPro is not installed on the development machine, so the ARM build and the
+`nm` duplicate-symbol check run in CI only. Locally: host `-Wall -Wextra` syntax
+checks, and confirm the cable path is untouched in the other two configs by
+preprocessing `src/link.c` with and without `-DPLATFORM_3DS=1` and diffing the
+SIO symbols, the way the RTC change was checked.
+
+**Pass compiler flags literally, never through a shell variable.** zsh does not
+word-split unquoted `$var`, and that has produced false results twice in this
+repo already.
+
+Two Azahar instances in one multiplayer room, both on the same build:
+
+- HOST on one, SCAN on the other; the host's trainer name should appear.
+- Connect, walk both into the Cable Club, confirm the player count and that
+  `IsLinkMaster()` is true on exactly one side.
+- Trade a mon and confirm both saves reflect it after a reload. This is the real
+  test: trading is the longest block transfer and the least forgiving of drift.
+- A link battle, which tests latency rather than throughput.
+- Record mixing, a four-way transfer if enough instances are available.
+- Kill one instance mid-trade and confirm the other shows Emerald's own link
+  error and returns to the overworld rather than hanging.
+
+## C: Risks
+
+- **Lockstep drift is the thing most likely to bite.** Blocking on a peer stalls
+  the whole frame, including audio, so a bad connection will crackle before it
+  desyncs. The bounded wait keeps that finite; the jitter buffer keeps it rare.
+- Nothing in this port has run on real hardware, and UDS on hardware behaves in
+  ways an emulator will not reproduce, particularly around wireless being
+  disabled and around the sleep switch.
+- Cross-play with a real GBA is impossible and must not be implied anywhere in
+  the UI. This is Emerald3DS talking to Emerald3DS.
+- Save corruption is conceivable if a trade is interrupted at the wrong moment.
+  Test the disconnect case against a copied save first.
+- **Internet play is deliberately out of scope.** The transport interface in
+  `bridge.h` is shaped so a relay could replace UDS behind it, but the missing
+  pieces are a matchmaking server and NAT traversal, not the game-side work.
+  That is its own project.
+
+---
+
 ## The busy-wait hazard, and the audit
 
 This port has **no interrupts**: `VBlankIntr()` is called explicitly once per

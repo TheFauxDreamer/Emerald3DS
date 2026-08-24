@@ -22,6 +22,7 @@ enum UiTab
     UI_TAB_BAG,
     UI_TAB_MAP,
     UI_TAB_DEX,
+    UI_TAB_EXTRA,
     UI_TAB_COUNT
 };
 
@@ -76,6 +77,11 @@ void UiMapTouch(const CtrTouchState *t);
 
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
+
+// Port features that are not part of the original game (fast-forward, and
+// whatever follows it). Nothing here touches game state.
+void UiExtraDraw(void);
+void UiExtraTouch(const CtrTouchState *t);
 
 // Cheap identity of the dex counts, for the shell's repaint hash. Walks the
 // whole dex, so the shell only asks while the DEX tab is on screen.

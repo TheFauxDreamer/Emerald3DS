@@ -159,6 +159,27 @@ void Ctr3dsGetClock(CtrClock *out)
     *out = cached;
 }
 
+// Fast-forward state. Deliberately not persisted: booting straight into 4x
+// because of a setting left on days ago would be a nasty surprise.
+static int sSpeed   = 1;   // game frames per displayed frame
+static int sSubFrame;      // 0 .. sSpeed-1, wraps on the displayed frame
+
+void Ctr3dsSetSpeed(int multiplier)
+{
+    if (multiplier < CTR_SPEED_MIN) multiplier = CTR_SPEED_MIN;
+    if (multiplier > CTR_SPEED_MAX) multiplier = CTR_SPEED_MAX;
+
+    sSpeed = multiplier;
+    // Start the next group cleanly, so lowering the speed cannot leave the
+    // counter above the new limit and stall presentation for a frame.
+    sSubFrame = 0;
+}
+
+int Ctr3dsGetSpeed(void)
+{
+    return sSpeed;
+}
+
 void Rp2350PresentFrame(void)
 {
     // The first frames are what matter: reaching frame 1 at all rules out a
@@ -171,31 +192,52 @@ void Rp2350PresentFrame(void)
             CtrTrace("emerald3ds: present frame %u\n", frame);
     }
 
-    // HOME menu / power. Do this first so a close request is honoured even if
-    // the frame below would misbehave.
+    // HOME menu / power. Every game frame, not just displayed ones, so a close
+    // request is still honoured promptly while fast-forwarding.
     if (!aptMainLoop() && !sQuitting) {
         sQuitting = 1;
         longjmp(sQuitJmp, 1);
     }
 
-    hidScanInput();
+    // Input is physical: it can only change once per DISPLAYED frame, because
+    // that is the rate the hardware updates at. Sampling it once per game frame
+    // instead would be worse than pointless -- hidScanInput() computes press
+    // edges by diffing against the previous scan, so the extra scans would
+    // consume the edge and sample_touch()/CtrBottomUpdate() would miss taps.
+    //
+    // Holding the value across the group is also what makes fast-forward feel
+    // right: one real press becomes one JOY_NEW followed by held frames.
+    static uint16_t keys;
+    if (sSubFrame == 0) {
+        hidScanInput();
+        keys = sample_keys();
+
+        CtrTouchState touch;
+        sample_touch(&touch);
+        CtrBottomUpdate(&touch);
+    }
 
     // Buttons for the NEXT frame's ReadKeys() (src/main.c), matching how the
     // GBA's key register is sampled between frames.
-    CtrSetKeyInput(sample_keys());
+    CtrSetKeyInput(keys);
 
-    CtrTouchState touch;
-    sample_touch(&touch);
-    CtrBottomUpdate(&touch);
-
+    // Every game frame. The mixer produces a frame's worth of samples and drops
+    // them when the ring is full, which is exactly the fast-forward case: audio
+    // stays at pitch and thins out rather than blocking and undoing the speedup.
     CtrAudioFrame();
 
-    // Rasterise + present. C3D_FrameEnd blocks on VBlank, which is what paces
-    // the game to 60 Hz -- no manual frame pacing needed.
-    CtrVideoPresent();
+    if (++sSubFrame >= sSpeed) {
+        sSubFrame = 0;
 
-    // Writes the save image out once the burst of sector writes has stopped.
-    CtrSaveFlush(0);
+        // Rasterise + present. C3D_FrameEnd blocks on VBlank, which is what
+        // paces the game to 60 Hz. Skipping this call is the whole mechanism:
+        // it drops the software rasterise (the expensive part) and the pacing
+        // together, so the intermediate frames cost only game logic.
+        CtrVideoPresent();
+
+        // Writes the save image out once the burst of sector writes has stopped.
+        CtrSaveFlush(0);
+    }
 }
 
 int main(int argc, char **argv)

@@ -59,6 +59,8 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
     [UI_TAB_BAG]   = { "BAG",   0                    },
     [UI_TAB_MAP]   = { "MAP",   FLAG_SYS_POKENAV_GET },
     [UI_TAB_DEX]   = { "DEX",   FLAG_SYS_POKEDEX_GET },
+    // Not a game feature, so nothing to unlock: always available.
+    [UI_TAB_EXTRA] = { "EXTRA", 0                    },
 };
 
 static bool8 TabUnlocked(u32 tab)
@@ -205,6 +207,7 @@ static void Redraw(void)
     case UI_TAB_BAG:   UiBagDraw();   break;
     case UI_TAB_MAP:   UiMapDraw();   break;
     case UI_TAB_DEX:   UiDexDraw();   break;
+    case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
     DrawTabBar(vis, n);
@@ -255,6 +258,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         case UI_TAB_BAG:   UiBagTouch(touch);   break;
         case UI_TAB_MAP:   UiMapTouch(touch);   break;
         case UI_TAB_DEX:   UiDexTouch(touch);   break;
+        case UI_TAB_EXTRA: UiExtraTouch(touch); break;
         }
     }
 
