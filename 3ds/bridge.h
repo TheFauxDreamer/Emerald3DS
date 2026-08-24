@@ -134,6 +134,65 @@ typedef struct {
 
 void Ctr3dsGetClock(CtrClock *out);
 
+// ---- local wireless: the Cable Club over 3DS UDS ----
+//
+// The GBA cable link is a fixed shared bus that moves exactly ONE 16-byte
+// command per player per frame, and src/link.c isolates that behind
+// gLink.sendQueue / gLink.recvQueue. This is that pipe and nothing more: 64
+// bytes a frame for four players, about 3.8 KB/s.
+//
+// Cross-play with a real GBA is impossible. This is Emerald3DS talking to
+// Emerald3DS, and the UI must not imply otherwise.
+
+#define CTR_LINK_CMD_BYTES    16   // CMD_LENGTH (8) * sizeof(u16)
+#define CTR_LINK_MAX_PLAYERS  4    // MAX_LINK_PLAYERS; UDS itself allows 16
+#define CTR_LINK_NAME_LEN     24   // host name shown in the join list
+
+// What the pairing UI and the transport both poll.
+#define CTR_LINK_IDLE       0
+#define CTR_LINK_SCANNING   1
+#define CTR_LINK_HOSTING    2   // network up, may be alone
+#define CTR_LINK_JOINING    3
+#define CTR_LINK_CONNECTED  4   // two or more nodes present
+#define CTR_LINK_FAILED     5
+
+typedef struct {
+    uint8_t state;        // CTR_LINK_*
+    uint8_t playerCount;  // nodes present, 1..CTR_LINK_MAX_PLAYERS
+    uint8_t localId;      // 0-based; 0 is the host, i.e. the GBA's master
+    uint8_t isHost;
+} CtrLinkStatus;
+
+// Pairing, driven from the LINK tab. All are non-blocking; poll the status.
+void Ctr3dsLinkHost(void);
+void Ctr3dsLinkScan(void);
+void Ctr3dsLinkJoin(int index);
+void Ctr3dsLinkStop(void);
+void Ctr3dsLinkGetStatus(CtrLinkStatus *out);
+
+// Results of the last Ctr3dsLinkScan(). `name` is plain ASCII, not the game's
+// encoding, because it comes from the host console rather than from Emerald.
+int  Ctr3dsLinkScanCount(void);
+void Ctr3dsLinkScanName(int index, char *out, int outSize);
+int  Ctr3dsLinkScanPlayers(int index);
+
+// Scalar view of the same status, for src/link.c. The game side declares these
+// in include/link.h in game types rather than including this header, the way
+// include/gba/flash_internal.h declares Rp2350Save*; keeping CtrLinkStatus out
+// of src/ means there is no struct definition to drift between the two worlds.
+int  Ctr3dsLinkIsConnected(void);
+int  Ctr3dsLinkPlayerCount(void);
+int  Ctr3dsLinkLocalId(void);
+
+// One frame of link traffic. `sendCmd` is CTR_LINK_CMD_BYTES; `recvCmds` is
+// CTR_LINK_MAX_PLAYERS * CTR_LINK_CMD_BYTES, indexed by 0-based player id.
+//
+// Returns 1 when a complete set for this frame arrived, 0 when it did not, in
+// which case the caller reports lag rather than treating it as fatal. A cable
+// is synchronous and UDS is not, so this blocks briefly waiting for peers: that
+// stall IS the lockstep, and is what stops the two consoles drifting apart.
+int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+
 // Mix one frame of PCM. Implemented game-side in rp2350/m4a_1.c.
 int Rp2350MixFrame(int8_t *out, int n);
 

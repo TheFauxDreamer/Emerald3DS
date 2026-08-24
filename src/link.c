@@ -1991,6 +1991,14 @@ u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENG
 
 static void CheckMasterOrSlave(void)
 {
+#if PLATFORM_3DS
+    // On a cable the master is whichever console has SD asserted and SI clear,
+    // which is decided by where it sits in the chain. There is no chain here:
+    // the console that created the network is node 1, and node 1 is the master.
+    // REG_SIOCNT reads as zeros on this port, so the original test would elect
+    // everyone a slave and the handshake would never complete.
+    gLink.isMaster = (Ctr3dsLinkLocalId() == 0) ? LINK_MASTER : LINK_SLAVE;
+#else
     u32 terminals;
 
     terminals = *(vu32 *)REG_ADDR_SIOCNT & (SIO_MULTI_SD | SIO_MULTI_SI);
@@ -2002,6 +2010,7 @@ static void CheckMasterOrSlave(void)
     {
         gLink.isMaster = LINK_SLAVE;
     }
+#endif
 }
 
 static void InitTimer(void)
@@ -2091,8 +2100,118 @@ static void DequeueRecvCmds(u16 (*recvCmds)[CMD_LENGTH])
 
 // link_intr.c
 
+#if PLATFORM_3DS
+// The whole SIO transport in one function.
+//
+// On hardware the queues are filled by SerialCB, eight u16 at a time, driven by
+// the serial interrupt and timer 3. This port has no interrupts at all, so
+// SerialCB and Timer3Intr are unreachable and the cable path is dead code. What
+// remains is this, called once per frame from VBlankIntr (src/main.c) whenever
+// gWirelessCommType is 0, which is exactly the cable case.
+//
+// It moves a WHOLE command per player per frame instead of one u16 per
+// transfer, because that is the unit the wireless transport carries and the
+// unit LinkMain1 consumes. Nothing above the queues can tell the difference.
+static void Ctr3dsLinkPump(void)
+{
+    u16 send[CMD_LENGTH];
+    u16 recv[MAX_LINK_PLAYERS][CMD_LENGTH];
+    u8 i, j, players;
+    u8 index;
+    u16 nonzero = 0;
+
+    if (!Ctr3dsLinkIsConnected())
+    {
+        // Losing the link mid-session is the game's own lag case, which it
+        // already knows how to surface and recover from. Anything harsher
+        // would strand the player mid-trade.
+        if (gLink.state == LINK_STATE_CONN_ESTABLISHED)
+            gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
+        return;
+    }
+
+    players = (u8)Ctr3dsLinkPlayerCount();
+    if (players > MAX_LINK_PLAYERS)
+        players = MAX_LINK_PLAYERS;
+
+    gLink.localId = (u8)Ctr3dsLinkLocalId();
+    gLink.playerCount = players;
+    gLink.isMaster = (gLink.localId == 0) ? LINK_MASTER : LINK_SLAVE;
+
+    // LINK_STATE_INIT_TIMER exists only to start timer 3 for the master's
+    // transfer cadence, which has no meaning over wireless, so the handshake
+    // completes straight into CONN_ESTABLISHED once the peers are present.
+    if (gLink.state == LINK_STATE_HANDSHAKE)
+    {
+        gLink.state = LINK_STATE_CONN_ESTABLISHED;
+        gLink.lag = 0;
+    }
+
+    if (gLink.state != LINK_STATE_CONN_ESTABLISHED)
+        return;
+
+    if (gLink.sendQueue.count > 0)
+    {
+        for (j = 0; j < CMD_LENGTH; j++)
+            send[j] = gLink.sendQueue.data[j][gLink.sendQueue.pos];
+    }
+    else
+    {
+        for (j = 0; j < CMD_LENGTH; j++)
+            send[j] = 0;
+    }
+
+    if (!Ctr3dsLinkExchange(send, recv))
+    {
+        // A frame the peers did not deliver in time. Same treatment as a
+        // late cable transfer: report lag and try again next frame, keeping
+        // the send queue intact so nothing is lost.
+        gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
+        return;
+    }
+
+    gLink.lag = 0;
+
+    if (gLink.sendQueue.count > 0)
+    {
+        gLink.sendQueue.count--;
+        if (++gLink.sendQueue.pos >= QUEUE_CAPACITY)
+            gLink.sendQueue.pos = 0;
+    }
+
+    if (gLink.recvQueue.count >= QUEUE_CAPACITY)
+    {
+        gLink.queueFull = QUEUE_FULL_RECV;
+        return;
+    }
+
+    index = gLink.recvQueue.pos + gLink.recvQueue.count;
+    if (index >= QUEUE_CAPACITY)
+        index -= QUEUE_CAPACITY;
+
+    for (i = 0; i < players; i++)
+    {
+        for (j = 0; j < CMD_LENGTH; j++)
+        {
+            nonzero |= recv[i][j];
+            gLink.recvQueue.data[i][j][index] = recv[i][j];
+        }
+    }
+
+    // Matching DoRecv: an all-zero set is "nothing happened this frame" and
+    // must not be queued, or the receiver drowns in empty commands.
+    if (nonzero)
+        gLink.recvQueue.count++;
+
+    gLastRecvQueueCount = gLink.recvQueue.count;
+}
+#endif // PLATFORM_3DS
+
 void LinkVSync(void)
 {
+#if PLATFORM_3DS
+    Ctr3dsLinkPump();
+#else
     if (gLink.isMaster)
     {
         switch (gLink.state)
@@ -2135,6 +2254,7 @@ void LinkVSync(void)
             }
         }
     }
+#endif // PLATFORM_3DS
 }
 
 void Timer3Intr(void)

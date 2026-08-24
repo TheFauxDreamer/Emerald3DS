@@ -28,6 +28,7 @@ void CtrAudioFrame(void);
 void CtrSaveLoad(void);
 void CtrSaveFlush(int force);
 void CtrSettingsLoad(void);
+void CtrLinkExit(void);
 #if CTR_BOOT_DIAG
 void CtrDiagSplash(void);
 #endif
@@ -288,6 +289,9 @@ int main(int argc, char **argv)
 
     // Unconditional flush: the deferred writeback may still be pending.
     CtrSaveFlush(1);
+    // Before the rest: leaving a UDS network up would keep the wireless
+    // hardware busy and strand any peer still connected to us.
+    CtrLinkExit();
     CtrAudioExit();
     CtrVideoExit();
     return 0;

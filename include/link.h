@@ -277,6 +277,25 @@ bool8 GetSioMultiSI(void);
 bool8 IsLinkConnectionEstablished(void);
 bool8 HasLinkErrorOccurred(void);
 void ResetSerial(void);
+#if PLATFORM_3DS
+// The cable transport, carried over 3DS local wireless. Implemented host-side
+// in 3ds/host/link.c and declared here in game types rather than by including
+// 3ds/bridge.h, exactly as include/gba/flash_internal.h declares Rp2350Save*.
+//
+// One command per player per frame is the whole contract; everything above
+// gLink.sendQueue / gLink.recvQueue is untouched by this port.
+// Guarded because 3ds/ui/*.c see this value through bridge.h instead. The two
+// must agree; the guard stops a redefinition warning if a TU ever sees both.
+#ifndef CTR_LINK_CMD_BYTES
+#define CTR_LINK_CMD_BYTES 16   // CMD_LENGTH * sizeof(u16)
+#endif
+
+int Ctr3dsLinkIsConnected(void);
+int Ctr3dsLinkPlayerCount(void);
+int Ctr3dsLinkLocalId(void);
+int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+#endif
+
 u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENGTH]);
 void LinkVSync(void);
 void Timer3Intr(void);
