@@ -87,8 +87,12 @@ void     Rp2350SaveSync(void);
 //
 // This is a request, not a guarantee. If the console cannot keep up the game
 // simply runs slower than asked, which is a slowdown, not a fault.
+//
+// Any whole multiplier in this range works; the bounds are only a clamp. Which
+// values are actually offered is the UI's business (3ds/ui/tab_extra.c), so a
+// button shortcut could pick a different set without touching the host.
 #define CTR_SPEED_MIN 1
-#define CTR_SPEED_MAX 4
+#define CTR_SPEED_MAX 8
 
 void Ctr3dsSetSpeed(int multiplier);
 int  Ctr3dsGetSpeed(void);

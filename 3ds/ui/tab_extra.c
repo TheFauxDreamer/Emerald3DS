@@ -14,9 +14,13 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 
+// Doubling steps rather than 1/2/3/4: past 2x the interesting question is
+// "much faster", and 3x sits too close to 2x to be worth a button.
+static const u8 sSpeeds[] = { 1, 2, 4, 8 };
+#define SPEED_COUNT   ARRAY_COUNT(sSpeeds)
+
 // Four buttons across the content area: 4 * 60 + 3 * 12 = 276, centred in 320
 // leaves 22 either side, comfortably inside the 8px window frame.
-#define SPEED_COUNT   (CTR_SPEED_MAX - CTR_SPEED_MIN + 1)
 #define BTN_W         60
 #define BTN_H         36
 #define BTN_GAP       12
@@ -26,7 +30,7 @@
 static void DrawSpeedButton(int index)
 {
     int x = BTN_X(index);
-    int speed = CTR_SPEED_MIN + index;
+    int speed = sSpeeds[index];
     int active = (speed == Ctr3dsGetSpeed());
     u8 label[8];
     char text[4];
@@ -41,6 +45,7 @@ static void DrawSpeedButton(int index)
         UiRect(x + 3, BTN_Y + 3, BTN_W - 6, BTN_H - 6, UI_COL_ACCENT);
     }
 
+    // Every offered speed is a single digit, so no wider label is needed.
     text[0] = (char)('0' + speed);
     text[1] = 'x';
     text[2] = '\0';
@@ -60,8 +65,8 @@ void UiExtraDraw(void)
     UiText(16, 16, UiAscii(label, "GAME SPEED", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    for (int i = 0; i < SPEED_COUNT; i++)
-        DrawSpeedButton(i);
+    for (u32 i = 0; i < SPEED_COUNT; i++)
+        DrawSpeedButton((int)i);
 
     UiText(16, 100, UiAscii(label, "Runs the game faster. The picture", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -76,12 +81,12 @@ void UiExtraTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
-    for (int i = 0; i < SPEED_COUNT; i++)
+    for (u32 i = 0; i < SPEED_COUNT; i++)
     {
-        if (!UiHit(t, BTN_X(i), BTN_Y, BTN_W, BTN_H))
+        if (!UiHit(t, BTN_X((int)i), BTN_Y, BTN_W, BTN_H))
             continue;
 
-        Ctr3dsSetSpeed(CTR_SPEED_MIN + i);
+        Ctr3dsSetSpeed(sSpeeds[i]);
         UiMarkDirty();
         return;
     }
