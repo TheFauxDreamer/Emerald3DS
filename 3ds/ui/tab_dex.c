@@ -46,7 +46,13 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define PIC_Y          16
 #define SEEN_Y         112
 #define OWN_Y          136
-#define COUNT_RIGHT    104
+
+// The left pane's interior, which is what the sprite above is centred in
+// (PIC_X is 8 + (96 - 64) / 2). The counts are centred in the same span, so
+// the column reads as one centred stack.
+#define LEFT_IN_X      8
+#define LEFT_IN_W      (LEFT_TW * 8 - 16)   // 96
+#define COUNT_GAP      10
 
 #define LIST_X         (RIGHT_TX * 8)          // 112
 #define LIST_Y         14
@@ -238,7 +244,6 @@ static int CursorStep(void)
 static void DrawSelectedPane(void)
 {
     u16 national = RowToNationalNum(sCursor);
-    u8 label[12];
     u16 seen, caught;
 
     UiWindowFrame(0, 0, LEFT_TW, PANEL_TH);
@@ -259,13 +264,35 @@ static void DrawSelectedPane(void)
         caught = GetHoennPokedexCount(FLAG_GET_CAUGHT);
     }
 
-    UiText(16, SEEN_Y, UiAscii(label, "SEEN", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-    UiNumRight(COUNT_RIGHT, SEEN_Y, (s32)seen, UiThemeText(), UiThemeShadow());
+    // One block for both rows, not two independent lines. The labels differ in
+    // width and the counts differ in digits, so each row measured on its own
+    // would centre to a different x and the two would look ragged. Measuring
+    // the widest of each column keeps the rows aligned with each other AND the
+    // whole block centred under the sprite.
+    {
+        u8 seenLabel[8], ownLabel[8];
+        int labelW, numW, total, x;
 
-    UiText(16, OWN_Y, UiAscii(label, "OWN", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-    UiNumRight(COUNT_RIGHT, OWN_Y, (s32)caught, UiThemeText(), UiThemeShadow());
+        UiAscii(seenLabel, "SEEN", sizeof(seenLabel));
+        UiAscii(ownLabel,  "OWN",  sizeof(ownLabel));
+
+        labelW = UiTextWidth(seenLabel);
+        if (UiTextWidth(ownLabel) > labelW)
+            labelW = UiTextWidth(ownLabel);
+
+        numW = UiNumWidth((s32)seen);
+        if (UiNumWidth((s32)caught) > numW)
+            numW = UiNumWidth((s32)caught);
+
+        total = labelW + COUNT_GAP + numW;
+        x = LEFT_IN_X + (LEFT_IN_W - total) / 2;
+
+        UiText(x, SEEN_Y, seenLabel, UI_COL_DIM, UiThemeShadow());
+        UiNumRight(x + total, SEEN_Y, (s32)seen, UiThemeText(), UiThemeShadow());
+
+        UiText(x, OWN_Y, ownLabel, UI_COL_DIM, UiThemeShadow());
+        UiNumRight(x + total, OWN_Y, (s32)caught, UiThemeText(), UiThemeShadow());
+    }
 }
 
 static void DrawList(void)

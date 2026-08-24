@@ -32,6 +32,9 @@ int UiTextRight(int xRight, int y, const u8 *str, u16 fg, u16 shadow);
 int UiNum(int x, int y, s32 value, u16 fg, u16 shadow);
 int UiNumRight(int xRight, int y, s32 value, u16 fg, u16 shadow);
 
+// Width UiNum() would use, for centring a label and value as one block.
+int UiNumWidth(s32 value);
+
 // ASCII -> game encoding for static labels. Writes at most dstSize bytes
 // including EOS, and returns dst.
 u8 *UiAscii(u8 *dst, const char *ascii, int dstSize);

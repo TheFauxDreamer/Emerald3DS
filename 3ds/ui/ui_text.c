@@ -270,6 +270,16 @@ int UiNumRight(int xRight, int y, s32 value, u16 fg, u16 shadow)
     return UiTextRight(xRight, y, buf, fg, shadow);
 }
 
+// How wide UiNum() would draw this value, for laying out around it. Goes
+// through the same NumToStr as the drawing calls rather than counting digits,
+// so it cannot disagree with what actually lands on screen.
+int UiNumWidth(s32 value)
+{
+    u8 buf[16];
+    NumToStr(buf, value);
+    return UiTextWidth(buf);
+}
+
 u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
 {
     int i = 0;
