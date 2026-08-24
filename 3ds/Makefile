@@ -39,7 +39,7 @@ APP_ICON        := $(CTRULIB)/default_icon.png
 # rp2350/ppu.c is host-side: it includes only <stdint.h> and its own header, and
 # takes the GBA region pointers at runtime via ppu_set_memory(). That is what
 # lets the same byte-exact rasteriser serve both this port and the RP2350 one.
-HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c
+HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c host/link.c
 OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 
 # Must match 3ds/build_objs.sh's ARCH exactly, or the game archive and libctru

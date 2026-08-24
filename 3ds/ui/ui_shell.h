@@ -23,6 +23,7 @@ enum UiTab
     UI_TAB_MAP,
     UI_TAB_DEX,
     UI_TAB_EXTRA,
+    UI_TAB_LINK,
     UI_TAB_COUNT
 };
 
@@ -77,6 +78,11 @@ void UiMapTouch(const CtrTouchState *t);
 
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
+
+// Pairing for the Cable Club over local wireless. Pairing only: once connected,
+// the game's own Cable Club does the rest.
+void UiLinkDraw(void);
+void UiLinkTouch(const CtrTouchState *t);
 
 // Port features that are not part of the original game (fast-forward, and
 // whatever follows it). Nothing here touches game state.
