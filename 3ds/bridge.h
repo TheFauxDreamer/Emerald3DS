@@ -97,6 +97,24 @@ void     Rp2350SaveSync(void);
 void Ctr3dsSetSpeed(int multiplier);
 int  Ctr3dsGetSpeed(void);
 
+// Top-screen scale. The GBA frame is 240x160 and the top screen is 400x240, so
+// only 1.5x fills the height exactly; the other two trade borders against
+// fidelity. Unlike the speed above, this one is remembered across launches
+// (3ds/host/settings.c): it is a display preference, not a mode you can be
+// surprised by.
+//
+// FILL stretches horizontally by 11%, because the GBA is 3:2 and the panel is
+// 5:3. There is no aspect-correct way to fill it without cropping the picture,
+// so the trade is deliberate and the UI says so.
+#define CTR_TOP_SCALE_1X     0   // 240x160, pixel-perfect, wide borders
+#define CTR_TOP_SCALE_1_5X   1   // 360x240, fills the height, 20px bars
+#define CTR_TOP_SCALE_FILL   2   // 400x240, no borders, 11% wider
+#define CTR_TOP_SCALE_COUNT  3
+#define CTR_TOP_SCALE_DEFAULT CTR_TOP_SCALE_1_5X
+
+void Ctr3dsSetTopScale(int mode);
+int  Ctr3dsGetTopScale(void);
+
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
 // this instead (under PLATFORM_3DS). That file is game-side and includes this

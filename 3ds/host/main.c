@@ -27,6 +27,7 @@ void CtrAudioExit(void);
 void CtrAudioFrame(void);
 void CtrSaveLoad(void);
 void CtrSaveFlush(int force);
+void CtrSettingsLoad(void);
 #if CTR_BOOT_DIAG
 void CtrDiagSplash(void);
 #endif
@@ -251,6 +252,10 @@ int main(int argc, char **argv)
     Ctr3dsInitGbaMemory();
     CtrTrace("emerald3ds: gba memory ready\n");
     CtrSaveLoad();
+
+    // Display preferences. Before CtrVideoInit() so the very first frame is
+    // already at the scale the player chose, with no visible snap.
+    CtrSettingsLoad();
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {

@@ -14,8 +14,10 @@
 //   2. The GPU reads these buffers directly, so they must live in linear memory
 //      and the ARM11 cache must be flushed before each transfer.
 //
-// Scaling: 240x160 * 1.5 = 360x240, which fills the top screen's full height
-// exactly, with a 20 px pillarbox each side. Nearest-neighbour keeps it sharp.
+// Scaling is selectable at runtime from the EXTRA tab (see kTopScales below).
+// The default 1.5x gives 360x240, filling the top screen's height exactly with a
+// 20 px pillarbox each side. Nearest-neighbour keeps GBA pixels sharp in every
+// mode.
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -25,14 +27,55 @@
 #include "trace.h"
 #include "../../rp2350/ppu.h"
 
+void CtrSettingsSave(void);   // 3ds/host/settings.c
+
 #define TOP_TEX_W  256
 #define TOP_TEX_H  256
 #define BOT_TEX_W  512
 #define BOT_TEX_H  256
 
-#define GBA_SCALE  1.5f
-#define GBA_DRAW_X ((400.0f - CTR_GBA_WIDTH  * GBA_SCALE) / 2.0f)   // 20.0
-#define GBA_DRAW_Y ((240.0f - CTR_GBA_HEIGHT * GBA_SCALE) / 2.0f)   //  0.0
+#define TOP_SCREEN_W 400.0f
+#define TOP_SCREEN_H 240.0f
+
+// X and Y are separate because FILL is the only way to cover a 5:3 panel with
+// 3:2 content, and it does so by stretching horizontally. C2D_DrawImageAt has
+// always taken two scales, so this costs nothing.
+static const struct { float sx, sy; } kTopScales[CTR_TOP_SCALE_COUNT] = {
+    [CTR_TOP_SCALE_1X]   = { 1.0f, 1.0f },
+    [CTR_TOP_SCALE_1_5X] = { 1.5f, 1.5f },
+    [CTR_TOP_SCALE_FILL] = { TOP_SCREEN_W / CTR_GBA_WIDTH,
+                             TOP_SCREEN_H / CTR_GBA_HEIGHT },
+};
+
+static int sTopScale = CTR_TOP_SCALE_DEFAULT;
+
+// Set without persisting. CtrSettingsLoad() uses this: writing the file back
+// out during the load that produced it would be pointless churn, and would turn
+// a read-only SD card into a write attempt on every boot.
+void Ctr3dsApplyTopScale(int mode)
+{
+    if (mode < 0 || mode >= CTR_TOP_SCALE_COUNT)
+        mode = CTR_TOP_SCALE_DEFAULT;
+
+    sTopScale = mode;
+}
+
+int Ctr3dsGetTopScale(void)
+{
+    return sTopScale;
+}
+
+void Ctr3dsSetTopScale(int mode)
+{
+    int before = sTopScale;
+
+    Ctr3dsApplyTopScale(mode);
+
+    // Only touch the card when something actually changed: re-tapping the
+    // active button should not cost a write.
+    if (sTopScale != before)
+        CtrSettingsSave();
+}
 
 // Linear in, tiled out, no scaling, no vertical flip.
 #define TEX_TRANSFER_FLAGS                                   \
@@ -212,9 +255,11 @@ void CtrVideoPresent(void)
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
 #if CTR_BOOT_DIAG
-    // Liveness, visible without the log: the GBA image is 360 px on a 400 px
-    // screen, so this shows as a 20 px bar down each side. Cycling bars mean the
-    // frame loop is running; a permanently black screen means it is not.
+    // Liveness, visible without the log: cycling bars mean the frame loop is
+    // running, a permanently black screen means it is not. How much shows
+    // depends on the scale mode -- 20 px each side at the default 1.5x, a wide
+    // border at 1x, and nothing at all in FILL, where the image covers the
+    // whole panel.
     {
         static unsigned tick;
         tick++;
@@ -227,8 +272,16 @@ void CtrVideoPresent(void)
     C2D_TargetClear(sTopTarget, C2D_Color32(0, 0, 0, 0xFF));
 #endif
     C2D_SceneBegin(sTopTarget);
-    C2D_DrawImageAt(sTopImage, GBA_DRAW_X, GBA_DRAW_Y, 0.0f, NULL,
-                    GBA_SCALE, GBA_SCALE);
+    {
+        // Derived, not tabulated: the offset is always whatever centres the
+        // scaled image, so the two can never disagree.
+        float sx = kTopScales[sTopScale].sx;
+        float sy = kTopScales[sTopScale].sy;
+        float x  = (TOP_SCREEN_W - CTR_GBA_WIDTH  * sx) / 2.0f;
+        float y  = (TOP_SCREEN_H - CTR_GBA_HEIGHT * sy) / 2.0f;
+
+        C2D_DrawImageAt(sTopImage, x, y, 0.0f, NULL, sx, sy);
+    }
 
     C2D_TargetClear(sBotTarget, C2D_Color32(0, 0, 0, 0xFF));
     C2D_SceneBegin(sBotTarget);
