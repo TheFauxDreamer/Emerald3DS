@@ -24,7 +24,10 @@
 #define SETTINGS_PATH SETTINGS_DIR "/settings.bin"
 
 #define SETTINGS_MAGIC   0x53443345u   // 'E3DS' little-endian
-#define SETTINGS_VERSION 2   // v2 added the turbo bindings
+// v3 changed what a binding VALUE means (CTR_BIND_MOD joined the speeds), so a
+// v2 file must be discarded rather than reinterpreted: it would otherwise load
+// as "nothing is the modifier" and silently lose the Y default.
+#define SETTINGS_VERSION 3
 
 // Fixed-size and explicitly padded, so the on-disk layout does not depend on
 // how the compiler chooses to align it.
@@ -33,14 +36,14 @@ struct CtrSettings {
     uint16_t version;
     uint8_t  topScale;
     uint8_t  reserved;
-    uint8_t  turbo[CTR_TURBO_COUNT];   // v2; speed per button, 0 = unbound
+    uint8_t  turbo[CTR_TURBO_COUNT];   // CTR_BIND_OFF / a speed / CTR_BIND_MOD
 };
 
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
 extern void Ctr3dsApplyTopScale(int mode);
 extern int  Ctr3dsGetTurboBind(int button);
-extern void Ctr3dsApplyTurboBind(int button, int speed);
+extern void Ctr3dsApplyTurboBind(int button, int value);
 
 void CtrSettingsLoad(void)
 {
@@ -61,13 +64,10 @@ void CtrSettingsLoad(void)
     if (s.topScale < CTR_TOP_SCALE_COUNT)
         Ctr3dsApplyTopScale((int)s.topScale);
 
-    for (int i = 0; i < CTR_TURBO_COUNT; i++) {
-        int v = s.turbo[i];
-
-        // 0 is unbound; anything else must be a speed the gate can use.
-        if (v == 0 || (v >= CTR_SPEED_MIN && v <= CTR_SPEED_MAX))
-            Ctr3dsApplyTurboBind(i, v);
-    }
+    // Ctr3dsApplyTurboBind rejects anything that is not a valid binding, so a
+    // corrupt byte leaves that button on its default rather than being trusted.
+    for (int i = 0; i < CTR_TURBO_COUNT; i++)
+        Ctr3dsApplyTurboBind(i, s.turbo[i]);
 }
 
 void CtrSettingsSave(void)

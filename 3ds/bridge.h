@@ -110,17 +110,23 @@ int  Ctr3dsGetSpeed(void);
 #define CTR_TURBO_ZR     3
 #define CTR_TURBO_COUNT  4
 
-// `speed` is a multiplier in CTR_SPEED_MIN..CTR_SPEED_MAX, or 0 for unbound.
-void Ctr3dsSetTurboBind(int button, int speed);
+// A button is bound to exactly one thing: nothing, a turbo speed, or the touch
+// UI modifier. One value, so the two uses cannot both claim a button.
+#define CTR_BIND_OFF  0
+#define CTR_BIND_MOD  0xFF   // outside the speed range on purpose
+
+// `value` is CTR_BIND_OFF, a multiplier in CTR_SPEED_MIN..CTR_SPEED_MAX, or
+// CTR_BIND_MOD. Anything else is rejected.
+void Ctr3dsSetTurboBind(int button, int value);
 int  Ctr3dsGetTurboBind(int button);
 
-// Is a touch-UI modifier key held? X or Y, because sample_keys() maps neither
-// to the GBA: a modifier that IS a GBA button leaks into whatever the game is
-// doing on the top screen while you use the touch screen, and L is worse than
-// leaking, since the L=A option turns it into an A press (src/main.c:363).
+// Is a button bound to CTR_BIND_MOD currently held?
 //
-// These are also turbo-bindable. Holding one then does both, which is harmless:
-// the modifier only means anything while a touch-UI control is being tapped.
+// The modifier is always one of these four, never a GBA button: the game keeps
+// running on the top screen while the touch screen is in use, so a GBA button
+// held as a modifier is delivered to it as well. L would be worst of all, since
+// the L=A option turns it into an A press (src/main.c:363) and jumping a list
+// would talk to whatever is standing in front of you.
 int  Ctr3dsUiModifierHeld(void);
 
 // Top-screen scale. The GBA frame is 240x160 and the top screen is 400x240, so

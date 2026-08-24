@@ -27,9 +27,13 @@ static const u8 sScales[] = {
 static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
 #define SCALE_COUNT   ARRAY_COUNT(sScales)
 
-// Buttons a bound key can cycle through. 0 is unbound, and tapping wraps back
-// to it, so every state is reachable with one finger and no long press.
-static const u8 sTurboSteps[] = { 0, 2, 4, 8 };
+// What a button can be bound to, in tap order. MOD sits in the same cycle as
+// the speeds rather than in a separate control, which is what makes the two
+// mutually exclusive: a button holds one value, so binding a speed necessarily
+// stops it being the modifier and there is no way to ask for both.
+//
+// Tapping wraps back to unbound, so every state is reachable with one finger.
+static const u8 sTurboSteps[] = { CTR_BIND_OFF, 2, 4, 8, CTR_BIND_MOD };
 static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
 
 // All three rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred in
@@ -96,38 +100,46 @@ void UiExtraDraw(void)
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
 
-    UiText(16, 114, UiAscii(label, "TURBO HOLD", sizeof(label)),
+    UiText(16, 114, UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < CTR_TURBO_COUNT; i++)
     {
-        int speed = Ctr3dsGetTurboBind((int)i);
-        char text[8];
+        int bind = Ctr3dsGetTurboBind((int)i);
+        char text[10];
         int n = 0;
 
-        // "X 4x", or "X -" when nothing is bound.
+        // "X 4x", "X MOD", or "X -" when nothing is bound.
         text[n++] = sTurboNames[i][0];
         if (sTurboNames[i][1] != '\0')
             text[n++] = sTurboNames[i][1];
         text[n++] = ' ';
-        if (speed == 0)
+
+        if (bind == CTR_BIND_OFF)
         {
             text[n++] = '-';
         }
+        else if (bind == CTR_BIND_MOD)
+        {
+            text[n++] = 'M';
+            text[n++] = 'O';
+            text[n++] = 'D';
+        }
         else
         {
-            text[n++] = (char)('0' + speed);
+            text[n++] = (char)('0' + bind);
             text[n++] = 'x';
         }
         text[n] = '\0';
 
         DrawButton(TRB_X((int)i), TRB_Y, TRB_W,
-                   UiAscii(label, text, sizeof(label)), speed != 0);
+                   UiAscii(label, text, sizeof(label)), bind != CTR_BIND_OFF);
     }
 
-    // ZL and ZR simply do not exist on an Old 3DS, so a binding there would
-    // otherwise look broken rather than unsupported.
-    UiText(16, 164, UiAscii(label, "ZL and ZR are New 3DS only.", sizeof(label)),
+    // MOD needs saying: it is not obvious that one of these buttons is what
+    // makes the Pokedex arrows jump. ZL and ZR do not exist on an Old 3DS, so
+    // a binding there would otherwise look broken rather than unsupported.
+    UiText(16, 164, UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 }
 

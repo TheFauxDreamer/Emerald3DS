@@ -166,8 +166,16 @@ static int sSpeed     = 1;  // game frames per displayed frame, in effect now
 static int sBaseSpeed = 1;  // what GAME SPEED chose; turbo overrides it while held
 static int sSubFrame;       // 0 .. sSpeed-1, wraps on the displayed frame
 
-// Speed a held button applies, 0 for unbound. Indexed by CTR_TURBO_*.
-static uint8_t sTurbo[CTR_TURBO_COUNT];
+// What each button is bound to: CTR_BIND_OFF, a speed, or CTR_BIND_MOD.
+// Indexed by CTR_TURBO_*.
+//
+// Y defaults to the modifier so the touch UI's jump-by-5 works out of the box.
+// One value per button is what makes turbo and the modifier mutually exclusive:
+// binding a speed to a button necessarily stops it being the modifier, and
+// there is no combination that quietly does both.
+static uint8_t sTurbo[CTR_TURBO_COUNT] = {
+    [CTR_TURBO_Y] = CTR_BIND_MOD,
+};
 
 // The 3DS keys the GBA has no use for. Order must match CTR_TURBO_*.
 static const uint32_t kTurboKeys[CTR_TURBO_COUNT] = {
@@ -206,21 +214,25 @@ int Ctr3dsGetSpeed(void)
 // the load that produced it would be pointless churn, and would turn a
 // read-only SD card into a write attempt on every boot. Mirrors
 // Ctr3dsApplyTopScale in video.c.
-void Ctr3dsApplyTurboBind(int button, int speed)
+static int bind_is_valid(int value)
 {
-    if (button < 0 || button >= CTR_TURBO_COUNT)
-        return;
-    if (speed != 0 && (speed < CTR_SPEED_MIN || speed > CTR_SPEED_MAX))
-        return;
-
-    sTurbo[button] = (uint8_t)speed;
+    return value == CTR_BIND_OFF || value == CTR_BIND_MOD
+        || (value >= CTR_SPEED_MIN && value <= CTR_SPEED_MAX);
 }
 
-void Ctr3dsSetTurboBind(int button, int speed)
+void Ctr3dsApplyTurboBind(int button, int value)
+{
+    if (button < 0 || button >= CTR_TURBO_COUNT || !bind_is_valid(value))
+        return;
+
+    sTurbo[button] = (uint8_t)value;
+}
+
+void Ctr3dsSetTurboBind(int button, int value)
 {
     int before = Ctr3dsGetTurboBind(button);
 
-    Ctr3dsApplyTurboBind(button, speed);
+    Ctr3dsApplyTurboBind(button, value);
 
     if (Ctr3dsGetTurboBind(button) != before)
         CtrSettingsSave();
@@ -238,7 +250,13 @@ int Ctr3dsGetTurboBind(int button)
 // is the same fresh hidScanInput() the touch state came from.
 int Ctr3dsUiModifierHeld(void)
 {
-    return (hidKeysHeld() & (KEY_X | KEY_Y)) != 0;
+    uint32_t held = hidKeysHeld();
+
+    for (int i = 0; i < CTR_TURBO_COUNT; i++)
+        if (sTurbo[i] == CTR_BIND_MOD && (held & kTurboKeys[i]))
+            return 1;
+
+    return 0;
 }
 
 // Fastest bound button currently held, else the resting speed. Fastest rather
@@ -248,8 +266,11 @@ static int effective_speed(uint32_t held)
 {
     int best = 0;
 
+    // CTR_BIND_MOD is deliberately outside the speed range, so a modifier
+    // button can never be mistaken for a very fast turbo.
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
-        if (sTurbo[i] != 0 && (held & kTurboKeys[i]) && sTurbo[i] > best)
+        if (sTurbo[i] != CTR_BIND_OFF && sTurbo[i] != CTR_BIND_MOD
+            && (held & kTurboKeys[i]) && sTurbo[i] > best)
             best = sTurbo[i];
 
     return best ? best : sBaseSpeed;
