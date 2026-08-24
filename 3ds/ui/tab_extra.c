@@ -27,18 +27,27 @@ static const u8 sScales[] = {
 static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
 #define SCALE_COUNT   ARRAY_COUNT(sScales)
 
-// Both rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred in 320,
-// which leaves 22 either side and clears the 8px window frame comfortably.
-#define BTN_H         30
+// Buttons a bound key can cycle through. 0 is unbound, and tapping wraps back
+// to it, so every state is reachable with one finger and no long press.
+static const u8 sTurboSteps[] = { 0, 2, 4, 8 };
+static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
+
+// All three rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred in
+// 320, which leaves 22 either side and clears the 8px window frame comfortably.
+#define BTN_H         26
 #define BTN_GAP       12
 
 #define SPD_W         60
-#define SPD_Y         32
+#define SPD_Y         28
 #define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
 
 #define SCL_W         84
-#define SCL_Y         92
+#define SCL_Y         80
 #define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
+
+#define TRB_W         60
+#define TRB_Y         132
+#define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
 
 // The selected button gets a doubled inset outline as well as accent text.
 // Colour alone is easy to miss against the lighter window frames.
@@ -62,7 +71,7 @@ void UiExtraDraw(void)
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
-    UiText(16, 12, UiAscii(label, "GAME SPEED", sizeof(label)),
+    UiText(16, 10, UiAscii(label, "GAME SPEED", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SPEED_COUNT; i++)
@@ -79,7 +88,7 @@ void UiExtraDraw(void)
                    sSpeeds[i] == Ctr3dsGetSpeed());
     }
 
-    UiText(16, 72, UiAscii(label, "SCREEN SIZE", sizeof(label)),
+    UiText(16, 62, UiAscii(label, "SCREEN SIZE", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SCALE_COUNT; i++)
@@ -87,11 +96,38 @@ void UiExtraDraw(void)
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
 
-    // The two settings behave differently on purpose, and the stretch in FILL
-    // is a deliberate trade, so say both rather than let them look like faults.
-    UiText(16, 132, UiAscii(label, "Speed resets to 1x on start.", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-    UiText(16, 150, UiAscii(label, "FILL stretches the picture 11%.", sizeof(label)),
+    UiText(16, 114, UiAscii(label, "TURBO HOLD", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    for (u32 i = 0; i < CTR_TURBO_COUNT; i++)
+    {
+        int speed = Ctr3dsGetTurboBind((int)i);
+        char text[8];
+        int n = 0;
+
+        // "X 4x", or "X -" when nothing is bound.
+        text[n++] = sTurboNames[i][0];
+        if (sTurboNames[i][1] != '\0')
+            text[n++] = sTurboNames[i][1];
+        text[n++] = ' ';
+        if (speed == 0)
+        {
+            text[n++] = '-';
+        }
+        else
+        {
+            text[n++] = (char)('0' + speed);
+            text[n++] = 'x';
+        }
+        text[n] = '\0';
+
+        DrawButton(TRB_X((int)i), TRB_Y, TRB_W,
+                   UiAscii(label, text, sizeof(label)), speed != 0);
+    }
+
+    // ZL and ZR simply do not exist on an Old 3DS, so a binding there would
+    // otherwise look broken rather than unsupported.
+    UiText(16, 164, UiAscii(label, "ZL and ZR are New 3DS only.", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 }
 
@@ -115,6 +151,27 @@ void UiExtraTouch(const CtrTouchState *t)
         if (UiHit(t, SCL_X((int)i), SCL_Y, SCL_W, BTN_H))
         {
             Ctr3dsSetTopScale(sScales[i]);
+            UiMarkDirty();
+            return;
+        }
+    }
+
+    for (u32 i = 0; i < CTR_TURBO_COUNT; i++)
+    {
+        if (UiHit(t, TRB_X((int)i), TRB_Y, TRB_W, BTN_H))
+        {
+            // Cycle to the next step, wrapping through 0. Searching for the
+            // current value rather than storing an index keeps the button and
+            // the host in agreement even if one is changed elsewhere.
+            int cur = Ctr3dsGetTurboBind((int)i);
+            u32 step = 0;
+
+            for (u32 k = 0; k < ARRAY_COUNT(sTurboSteps); k++)
+                if (sTurboSteps[k] == cur)
+                    step = k;
+
+            step = (step + 1) % ARRAY_COUNT(sTurboSteps);
+            Ctr3dsSetTurboBind((int)i, sTurboSteps[step]);
             UiMarkDirty();
             return;
         }

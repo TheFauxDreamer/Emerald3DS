@@ -162,23 +162,90 @@ void Ctr3dsGetClock(CtrClock *out)
 
 // Fast-forward state. Deliberately not persisted: booting straight into 4x
 // because of a setting left on days ago would be a nasty surprise.
-static int sSpeed   = 1;   // game frames per displayed frame
-static int sSubFrame;      // 0 .. sSpeed-1, wraps on the displayed frame
+static int sSpeed     = 1;  // game frames per displayed frame, in effect now
+static int sBaseSpeed = 1;  // what GAME SPEED chose; turbo overrides it while held
+static int sSubFrame;       // 0 .. sSpeed-1, wraps on the displayed frame
 
-void Ctr3dsSetSpeed(int multiplier)
+// Speed a held button applies, 0 for unbound. Indexed by CTR_TURBO_*.
+static uint8_t sTurbo[CTR_TURBO_COUNT];
+
+// The 3DS keys the GBA has no use for. Order must match CTR_TURBO_*.
+static const uint32_t kTurboKeys[CTR_TURBO_COUNT] = {
+    KEY_X, KEY_Y, KEY_ZL, KEY_ZR
+};
+
+void CtrSettingsSave(void);   // 3ds/host/settings.c
+
+// Lowering the speed must restart the group, or a counter left above the new
+// limit stalls presentation for a frame. Shared by every path that changes it.
+static void set_speed(int multiplier)
 {
     if (multiplier < CTR_SPEED_MIN) multiplier = CTR_SPEED_MIN;
     if (multiplier > CTR_SPEED_MAX) multiplier = CTR_SPEED_MAX;
 
-    sSpeed = multiplier;
-    // Start the next group cleanly, so lowering the speed cannot leave the
-    // counter above the new limit and stall presentation for a frame.
-    sSubFrame = 0;
+    if (multiplier != sSpeed) {
+        sSpeed = multiplier;
+        sSubFrame = 0;
+    }
+}
+
+void Ctr3dsSetSpeed(int multiplier)
+{
+    set_speed(multiplier);
+    sBaseSpeed = sSpeed;   // the menu sets the RESTING speed
 }
 
 int Ctr3dsGetSpeed(void)
 {
-    return sSpeed;
+    // Reports the baseline, not the momentary override, so the EXTRA tab keeps
+    // showing what the player chose while a turbo button is held.
+    return sBaseSpeed;
+}
+
+// Set without persisting, for CtrSettingsLoad(). Writing the file back during
+// the load that produced it would be pointless churn, and would turn a
+// read-only SD card into a write attempt on every boot. Mirrors
+// Ctr3dsApplyTopScale in video.c.
+void Ctr3dsApplyTurboBind(int button, int speed)
+{
+    if (button < 0 || button >= CTR_TURBO_COUNT)
+        return;
+    if (speed != 0 && (speed < CTR_SPEED_MIN || speed > CTR_SPEED_MAX))
+        return;
+
+    sTurbo[button] = (uint8_t)speed;
+}
+
+void Ctr3dsSetTurboBind(int button, int speed)
+{
+    int before = Ctr3dsGetTurboBind(button);
+
+    Ctr3dsApplyTurboBind(button, speed);
+
+    if (Ctr3dsGetTurboBind(button) != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetTurboBind(int button)
+{
+    if (button < 0 || button >= CTR_TURBO_COUNT)
+        return 0;
+
+    return sTurbo[button];
+}
+
+// Fastest bound button currently held, else the resting speed. Fastest rather
+// than first so holding two never gives the slower of the two, which would feel
+// like the binding had been ignored.
+static int effective_speed(uint32_t held)
+{
+    int best = 0;
+
+    for (int i = 0; i < CTR_TURBO_COUNT; i++)
+        if (sTurbo[i] != 0 && (held & kTurboKeys[i]) && sTurbo[i] > best)
+            best = sTurbo[i];
+
+    return best ? best : sBaseSpeed;
 }
 
 void Rp2350PresentFrame(void)
@@ -212,6 +279,10 @@ void Rp2350PresentFrame(void)
     if (sSubFrame == 0) {
         hidScanInput();
         keys = sample_keys();
+
+        // Turbo is resolved here, with the rest of the input, because this is
+        // the only point in the group where the button state is fresh.
+        set_speed(effective_speed(hidKeysHeld()));
 
         CtrTouchState touch;
         sample_touch(&touch);

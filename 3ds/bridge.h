@@ -97,6 +97,23 @@ void     Rp2350SaveSync(void);
 void Ctr3dsSetSpeed(int multiplier);
 int  Ctr3dsGetSpeed(void);
 
+// Turbo bindings for the four 3DS buttons the GBA has no equivalent of, so
+// nothing else wants them. Holding a bound button overrides the speed above for
+// as long as it is held; the GAME SPEED selection stays the resting speed.
+//
+// ZL and ZR exist only on a New 3DS. On an Old 3DS they never register, so a
+// binding there does nothing at all, which the UI says rather than leaving it a
+// mystery.
+#define CTR_TURBO_X      0
+#define CTR_TURBO_Y      1
+#define CTR_TURBO_ZL     2
+#define CTR_TURBO_ZR     3
+#define CTR_TURBO_COUNT  4
+
+// `speed` is a multiplier in CTR_SPEED_MIN..CTR_SPEED_MAX, or 0 for unbound.
+void Ctr3dsSetTurboBind(int button, int speed);
+int  Ctr3dsGetTurboBind(int button);
+
 // Top-screen scale. The GBA frame is 240x160 and the top screen is 400x240, so
 // only 1.5x fills the height exactly; the other two trade borders against
 // fidelity. Unlike the speed above, this one is remembered across launches

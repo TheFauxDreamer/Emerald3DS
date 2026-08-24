@@ -145,16 +145,45 @@ static void Ctr3dsClearPending(void)
     sCtr3dsHasTarget = FALSE;
 }
 
+// Which battler is the player. Deliberately NOT gActiveBattler.
+//
+// gActiveBattler is the loop variable of the controller dispatch in
+// BattleMainCB1 (src/battle_main.c):
+//
+//     for (gActiveBattler = 0; gActiveBattler < gBattlersCount; gActiveBattler++)
+//         gBattlerControllerFuncs[gActiveBattler]();
+//
+// so once that loop returns it holds gBattlersCount, which is not a battler at
+// all. Everything in this block runs from the second screen's per-frame hook,
+// which fires AFTER BattleMainCB1 has returned, so gActiveBattler is never
+// valid here. Reading it was why the touch bag could never heal, and in a
+// double battle gBattlersCount is 4 against a MAX_BATTLERS_COUNT array, which
+// is out of bounds outright.
+static u8 Ctr3dsPlayerBattler(void)
+{
+    return GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+}
+
 // "Only at certain times" means exactly this: the player's controller is
 // sitting in action selection, which is when the d-pad could pick BAG too.
 bool8 Ctr3dsPlayerIsChoosingAction(void)
 {
-    return gMain.inBattle
-        && gBattlerControllerFuncs[gActiveBattler] == HandleInputChooseAction;
+    u8 battler;
+
+    if (!gMain.inBattle)
+        return FALSE;
+
+    battler = Ctr3dsPlayerBattler();
+    if (battler >= MAX_BATTLERS_COUNT)
+        return FALSE;
+
+    return gBattlerControllerFuncs[battler] == HandleInputChooseAction;
 }
 
 void Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
 {
+    u8 saved;
+
     if (!Ctr3dsPlayerIsChoosingAction())
         return;
 
@@ -162,9 +191,19 @@ void Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
     sCtr3dsPendingTarget = partySlot;
     sCtr3dsHasTarget = TRUE;
 
+    // Both calls below address gBattlerControllerFuncs, gBattleBufferB and
+    // gBitTable through gActiveBattler, and neither has a variant that takes a
+    // battler. Pointing it at the player for the duration is therefore the only
+    // way to use them from outside the dispatch loop -- and restoring it is not
+    // optional, because the engine resumes iterating with whatever it finds.
+    saved = gActiveBattler;
+    gActiveBattler = Ctr3dsPlayerBattler();
+
     // Identical to picking BAG with the d-pad; see HandleInputChooseAction.
     BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_ITEM, 0);
     PlayerBufferExecCompleted();
+
+    gActiveBattler = saved;
 }
 #endif // PLATFORM_3DS
 
