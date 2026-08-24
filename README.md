@@ -9,7 +9,7 @@ No emulator and no ROM. The [pret decompilation](https://github.com/pret/pokeeme
 is recompiled from ARMv4T to the 3DS's ARM11, and builds its own assets from
 source.
 
-> [!AI Disclaimer]
+> [!AI_Disclaimer]
 > **Written with AI assistance.** Much of this port, the second screen
 > especially, was produced with Claude. It is tested in an emulator and never on
 > hardware, so read it before trusting it with a save you care about.
