@@ -234,6 +234,13 @@ int Ctr3dsGetTurboBind(int button)
     return sTurbo[button];
 }
 
+// Modifier for the touch UI. Read at the same point as everything else, so it
+// is the same fresh hidScanInput() the touch state came from.
+int Ctr3dsUiModifierHeld(void)
+{
+    return (hidKeysHeld() & (KEY_X | KEY_Y)) != 0;
+}
+
 // Fastest bound button currently held, else the resting speed. Fastest rather
 // than first so holding two never gives the slower of the two, which would feel
 // like the binding had been ignored.

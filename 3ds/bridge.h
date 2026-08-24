@@ -114,6 +114,15 @@ int  Ctr3dsGetSpeed(void);
 void Ctr3dsSetTurboBind(int button, int speed);
 int  Ctr3dsGetTurboBind(int button);
 
+// Is a touch-UI modifier key held? X or Y, because sample_keys() maps neither
+// to the GBA: a modifier that IS a GBA button leaks into whatever the game is
+// doing on the top screen while you use the touch screen, and L is worse than
+// leaking, since the L=A option turns it into an A press (src/main.c:363).
+//
+// These are also turbo-bindable. Holding one then does both, which is harmless:
+// the modifier only means anything while a touch-UI control is being tapped.
+int  Ctr3dsUiModifierHeld(void);
+
 // Top-screen scale. The GBA frame is 240x160 and the top screen is 400x240, so
 // only 1.5x fills the height exactly; the other two trade borders against
 // fidelity. Unlike the speed above, this one is remembered across launches

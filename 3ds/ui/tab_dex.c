@@ -62,6 +62,14 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define PAGE_UP_X      (LIST_X + 30)
 #define PAGE_DN_X      (LIST_X + 120)
 
+// Holding X or Y makes an arrow jump instead of step. Deliberately not a GBA
+// button: the game keeps running on the top screen while the touch screen is in
+// use, so any GBA button held as a modifier is also delivered to it. L would be
+// the worst choice of all, because the L=A option turns it into an A press
+// (src/main.c:363) and jumping the list would talk to whatever is in front of
+// you. X and Y are mapped to nothing, so they reach the game at all.
+#define JUMP_ROWS      5
+
 // Entry screen.
 #define E_PIC_X        24
 #define E_PIC_Y        28
@@ -191,6 +199,42 @@ static void FormatDexNum(u8 *dst, u16 num)
 
 // ------------------------------------------------------------ list screen --
 
+// Move the cursor, dragging the visible window along only as far as it has to
+// go. Scrolling without moving the cursor would leave the selected mon (and the
+// sprite in the left pane) behind, which is what the arrows used to do.
+static void MoveCursor(int delta)
+{
+    u16 len = DexLength();
+    int next;
+
+    if (len == 0)
+        return;
+
+    next = (int)sCursor + delta;
+    if (next < 0)
+        next = 0;
+    if (next >= (int)len)
+        next = (int)len - 1;
+
+    if ((u16)next == sCursor)
+        return;
+
+    sCursor = (u16)next;
+
+    if (sCursor < sScroll)
+        sScroll = sCursor;
+    else if (sCursor >= sScroll + VISIBLE_ROWS)
+        sScroll = (u16)(sCursor - VISIBLE_ROWS + 1);
+
+    UiMarkDirty();
+}
+
+// One row, or JUMP_ROWS while the modifier is held.
+static int CursorStep(void)
+{
+    return Ctr3dsUiModifierHeld() ? JUMP_ROWS : 1;
+}
+
 static void DrawSelectedPane(void)
 {
     u16 national = RowToNationalNum(sCursor);
@@ -263,14 +307,16 @@ static void DrawList(void)
                    UI_COL_DIM, UiThemeShadow());
     }
 
-    if (sScroll > 0)
+    // Shown against the CURSOR now, not the scroll position: the arrows move the
+    // selection, so they stay live until the selection itself is at an end.
+    if (sCursor > 0)
     {
         UiRect(PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
         UiArrow(PAGE_UP_X + (PAGE_W - UI_ARROW_W) / 2,
                 PAGE_Y + (PAGE_H - UI_ARROW_H) / 2, TRUE, UI_COL_ACCENT);
     }
 
-    if (sScroll + VISIBLE_ROWS < len)
+    if (len > 0 && sCursor < len - 1)
     {
         UiRect(PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
         UiArrow(PAGE_DN_X + (PAGE_W - UI_ARROW_W) / 2,
@@ -366,6 +412,14 @@ void UiDexDraw(void)
     if (sScroll + VISIBLE_ROWS > len)
         sScroll = (len > VISIBLE_ROWS) ? (u16)(len - VISIBLE_ROWS) : 0;
 
+    // Clamping the two independently can leave the cursor outside the window,
+    // and an off-window cursor means the left pane shows a mon that is not in
+    // the list. Re-apply the same follow rule MoveCursor uses.
+    if (sCursor < sScroll)
+        sScroll = sCursor;
+    else if (sCursor >= sScroll + VISIBLE_ROWS)
+        sScroll = (u16)(sCursor - VISIBLE_ROWS + 1);
+
     if (sEntryOpen)
     {
         DrawEntry();
@@ -395,18 +449,15 @@ void UiDexTouch(const CtrTouchState *t)
 
     len = DexLength();
 
-    if (UiHit(t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H) && sScroll > 0)
+    if (UiHit(t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
-        sScroll--;
-        UiMarkDirty();
+        MoveCursor(-CursorStep());
         return;
     }
 
-    if (UiHit(t, PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H)
-     && sScroll + VISIBLE_ROWS < len)
+    if (UiHit(t, PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H))
     {
-        sScroll++;
-        UiMarkDirty();
+        MoveCursor(CursorStep());
         return;
     }
 
