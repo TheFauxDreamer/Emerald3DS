@@ -28,6 +28,17 @@
 #define CELL_W    (CTR_BOTTOM_WIDTH / COLS)     // 160
 #define CELL_H    (UI_CONTENT_H / ROWS)         // 64
 
+// Detail view: the stats block and the moves list share this row band, so their
+// widths are one decision, not two. A stat cell is an 18px label plus an 18px
+// three-digit value, and the longest move name is 72px (THUNDERSHOCK), which
+// leaves the moves column ending at 268 inside a 312px interior.
+#define STAT_X(col)     (12 + (col) * 60)
+#define STAT_Y          72
+#define STAT_ROW_H      18
+#define STAT_VALUE_DX   34
+#define MOVES_X         196
+#define MOVES_Y         72
+
 static bool8 sDetailOpen;
 
 // ------------------------------------------------------- HP bar animation --
@@ -253,7 +264,13 @@ static void DrawDetail(void)
     HpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
           GetMonData(mon, MON_DATA_MAX_HP));
 
-    // Stats, two columns
+    // Stats, two rows of three, and the moves list beside them.
+    //
+    // The pitch and the moves column are tied together: the third stat column's
+    // value sits at STAT_X(2) + STAT_VALUE_DX and runs 18px (three digits), so
+    // it must finish before MOVES_X. At the original 66px pitch it ended at 196
+    // against a moves column at 180, and SPA printed straight through the first
+    // move name.
     {
         static const char *const names[5] = { "ATK", "DEF", "SPA", "SPD", "SPE" };
         const s32 fields[5] = {
@@ -266,11 +283,11 @@ static void DrawDetail(void)
 
         for (int i = 0; i < 5; i++)
         {
-            int sx = 12 + (i % 3) * 66;
-            int sy = 72 + (i / 3) * 18;
+            int sx = STAT_X(i % 3);
+            int sy = STAT_Y + (i / 3) * STAT_ROW_H;
             UiText(sx, sy, UiAscii(label, names[i], sizeof(label)),
                    UI_COL_DIM, UiThemeShadow());
-            UiNum(sx + 34, sy, fields[i], UiThemeText(), UiThemeShadow());
+            UiNum(sx + STAT_VALUE_DX, sy, fields[i], UiThemeText(), UiThemeShadow());
         }
     }
 
@@ -309,7 +326,8 @@ static void DrawDetail(void)
         if (move == MOVE_NONE)
             continue;
 
-        UiText(180, 72 + i * 16, gMoveNames[move], UiThemeText(), UiThemeShadow());
+        UiText(MOVES_X, MOVES_Y + i * UI_LINE_H, gMoveNames[move],
+               UiThemeText(), UiThemeShadow());
     }
 
     // Back target, top-right.
