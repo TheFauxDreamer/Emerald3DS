@@ -10,11 +10,12 @@ is recompiled from ARMv4T to the 3DS's ARM11, and builds its own assets from
 source.
 
 > [!Note]
-> **Written with AI assistance.** Much of this port, the second screen
-> especially, was produced with Claude. It is tested in an emulator and never on
-> hardware, so read it before trusting it with a save you care about.
+> **Written with AI.** Bro I ain't gonna lie
+> I used AI out the wazoo cause I don't know the 
+> first thing about GBA decamps or 3DS home-brew
+> I just wanted to see what was possible
 
-## The second screen is the whole point
+## The second screen
 
 Every other way to play a GBA game on a 3DS, whether GBA Virtual Console or
 [open_agb_firm](https://github.com/profi200/open_agb_firm), hands the cartridge
