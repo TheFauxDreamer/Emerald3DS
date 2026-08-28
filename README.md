@@ -55,10 +55,12 @@ not, plus a second arrow for how dangerous the opponent is to it. Tap a mon for
 stats, ability, nature, held item and moves.
 
 **BAG.** Pockets, quantities, and a details pane with the item's sprite and
-description. Items work in the field, **and in battle**, where using one goes
-through the engine's action queue so it costs your turn exactly as the in-game
-bag does. The original menus are untouched; this is an alternative route to the
-same action, never a replacement.
+description. USE opens a picker of your team, so a Potion asks who it is for
+instead of guessing. Items work in the field, **and in battle**, where using one
+goes through the engine's action queue so it costs your turn exactly as the
+in-game bag does, and an item that would do nothing costs you nothing. The
+original menus are untouched; this is an alternative route to the same action,
+never a replacement.
 
 **DEX.** Emerald's Pokédex: the selected mon's sprite and the seen/owned counts
 on the left, the scrolling list on the right, and an entry screen with the

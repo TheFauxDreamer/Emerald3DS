@@ -6,6 +6,8 @@
 #include "item_icon.h"
 #include "graphics.h"                 // gStatusGfx_Icons, gStatusPal_Icons
 #include "data.h"                     // gMonFrontPicTable, gMonPaletteTable
+#include "battle.h"                   // struct DisableStruct, for the header below
+#include "battle_interface.h"         // GetHPBarLevel
 #include "decompress.h"
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
@@ -419,6 +421,42 @@ void UiArrow(int x, int y, bool8 up, u16 fill)
         if (right - left > 1)
             UiFillRect(x + left + 1, py, right - left - 1, 1, fill);
     }
+}
+
+// The party grid, the party detail view and the BAG tab's target picker all draw
+// this, so it lives here rather than in whichever tab happened to want it first.
+// `hp` is a parameter rather than read from the mon so a caller can pass an
+// animated value: the party tab slides its bars, the picker shows the truth.
+void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp)
+{
+    u16 light, dark;
+    u32 filled;
+
+    UiFillRect(x, y, w, 8, UI_COL_HP_BACK);
+
+    if (maxHp == 0)
+        return;
+
+    // The game's own thresholds via its own function, rather than a
+    // reimplementation of the 50/20 percent split that could disagree at the
+    // boundaries: GetHPBarLevel compares a ROUNDED pixel count from
+    // GetScaledHPFraction, not the exact ratio.
+    switch (GetHPBarLevel((s16)hp, (s16)maxHp))
+    {
+    case HP_BAR_FULL:
+    case HP_BAR_GREEN:  light = UI_COL_HP_HIGH_L; dark = UI_COL_HP_HIGH; break;
+    case HP_BAR_YELLOW: light = UI_COL_HP_MID_L;  dark = UI_COL_HP_MID;  break;
+    default:            light = UI_COL_HP_LOW_L;  dark = UI_COL_HP_LOW;  break;
+    }
+
+    filled = (hp * (u32)w) / maxHp;
+    // Any surviving HP should show at least a sliver rather than reading as 0.
+    if (filled == 0 && hp > 0)
+        filled = 1;
+
+    // Light over dark, the way the game's own two-tone bar reads.
+    UiFillRect(x, y, (int)filled, 4, light);
+    UiFillRect(x, y + 4, (int)filled, 4, dark);
 }
 
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
