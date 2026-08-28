@@ -337,8 +337,15 @@ void SetControllerToLinkPartner(void);
 #if PLATFORM_3DS
 // Second-screen battle items. The touch screen is an alternative route to the
 // same action, never a replacement; see src/battle_controller_player.c.
+enum
+{
+    CTR3DS_ITEM_QUEUED,      // registered as this turn's action
+    CTR3DS_ITEM_NO_EFFECT,   // the game's "it won't have any effect"; turn untouched
+    CTR3DS_ITEM_NOT_NOW,     // wrong moment, or items are barred in this battle
+};
+
 bool8 Ctr3dsPlayerIsChoosingAction(void);
-void Ctr3dsQueueBattleItem(u16 item, u8 partySlot);
+u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot);
 #endif
 
 #endif // GUARD_BATTLE_CONTROLLERS_H

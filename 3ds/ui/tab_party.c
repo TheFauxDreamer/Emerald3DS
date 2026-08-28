@@ -11,7 +11,6 @@
 #include "data.h"
 #include "battle.h"             // struct DisableStruct, for the headers below
 #include "battle_main.h"
-#include "battle_interface.h"   // GetHPBarLevel
 #include "party_menu.h"         // GetMonAilment
 #include "pokemon_summary_screen.h"
 #include "constants/species.h"
@@ -94,38 +93,6 @@ bool8 UiPartyTick(void)
     }
 
     return moving;
-}
-
-static void HpBar(int x, int y, int w, u32 hp, u32 maxHp)
-{
-    u16 light, dark;
-    u32 filled;
-
-    UiFillRect(x, y, w, 8, UI_COL_HP_BACK);
-
-    if (maxHp == 0)
-        return;
-
-    // The game's own thresholds via its own function, rather than a
-    // reimplementation of the 50/20 percent split that could disagree at the
-    // boundaries: GetHPBarLevel compares a ROUNDED pixel count from
-    // GetScaledHPFraction, not the exact ratio.
-    switch (GetHPBarLevel((s16)hp, (s16)maxHp))
-    {
-    case HP_BAR_FULL:
-    case HP_BAR_GREEN:  light = UI_COL_HP_HIGH_L; dark = UI_COL_HP_HIGH; break;
-    case HP_BAR_YELLOW: light = UI_COL_HP_MID_L;  dark = UI_COL_HP_MID;  break;
-    default:            light = UI_COL_HP_LOW_L;  dark = UI_COL_HP_LOW;  break;
-    }
-
-    filled = (hp * (u32)w) / maxHp;
-    // Any surviving HP should show at least a sliver rather than reading as 0.
-    if (filled == 0 && hp > 0)
-        filled = 1;
-
-    // Light over dark, the way the game's own two-tone bar reads.
-    UiFillRect(x, y, (int)filled, 4, light);
-    UiFillRect(x, y + 4, (int)filled, 4, dark);
 }
 
 #define ARROW_GAP 3
@@ -212,9 +179,10 @@ static void DrawCell(int index)
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
     UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UiThemeText(), UiThemeShadow());
-    HpBar(cx + 42, cy + 46, CELL_W - 52, hp, maxHp);
+    UiHpBar(cx + 42, cy + 46, CELL_W - 52, hp, maxHp);
 
-    // The selected slot is what the BAG tab will act on, so it needs to be
+    // The selected slot is what this tab's detail view opens on, and what the
+    // BAG tab's target picker starts highlighted, so it needs to be
     // unmistakable.
     if (index == UiSelectedMon())
         UiRect(cx + 2, cy + 2, CELL_W - 4, CELL_H - 4, UI_COL_ACCENT);
@@ -261,8 +229,8 @@ static void DrawDetail(void)
 
     // Status belongs on the HP row; the bar gives up 20px to make room for it.
     UiStatusIcon(120, y + 2, GetMonAilment(mon));
-    HpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
-          GetMonData(mon, MON_DATA_MAX_HP));
+    UiHpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
+            GetMonData(mon, MON_DATA_MAX_HP));
 
     // Stats, two rows of three, and the moves list beside them.
     //

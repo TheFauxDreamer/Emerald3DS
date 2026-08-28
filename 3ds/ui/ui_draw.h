@@ -81,6 +81,12 @@ void UiStatusIcon(int x, int y, u8 ailment);
 
 void UiArrow(int x, int y, bool8 up, u16 fill);
 
+// A two-tone HP bar, 8px tall, coloured by the game's own GetHPBarLevel so it
+// changes colour at exactly the same points the battle bar does. `hp` is passed
+// in rather than read from the mon: the party tab animates it, the BAG tab's
+// target picker shows the real value.
+void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp);
+
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 
 #endif // CTR_UI_DRAW_H

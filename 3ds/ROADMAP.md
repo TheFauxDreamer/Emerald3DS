@@ -152,18 +152,26 @@ fight the top screen for BG layers and tasks.
 
 ## Stage 3: BAG and item use (WORKING)
 
-Verified in Azahar: a Potion used from the touch screen heals the selected party
-Pokemon correctly, and the safety gate holds. Items do nothing during a battle,
-which is the intended behaviour: in-battle use was deliberately left out, because
-it has to go through the battle engine's action queue rather than mutating the
-mon directly.
+Verified in Azahar: a Potion used from the touch screen heals the Pokemon the
+player picks, in the field and in battle, and the safety gate holds.
 
 The only stage that mutates game state, so the gate is the design.
 
 - List the current pocket with `BagGetItemIdByPocketPosition()` and
   `BagGetQuantityByPocketPosition()`; names via `GetItemName()`, flavour text via
   `GetItemDescription()`. Pocket switcher across the top.
-- Flow: pick a mon in PARTY → BAG → tap item → apply to the selected mon.
+- Flow: BAG → tap item → tap USE → a target picker opens over the tab → tap the
+  Pokemon. Items that target nobody (balls, X items, the escape items in battle)
+  skip the picker.
+- **Which items the picker is offered for** is decided by the game's own tables,
+  not a list of ids: `GetItemBattleUsage()` in battle, `GetItemEffectType()`
+  in the field. Two field classes are deliberately refused rather than applied,
+  and both are correctness rather than tidiness: `ITEM_EFFECT_EVO_STONE`, because
+  `PokemonUseItemEffects()` calls `BeginEvolutionScene()` and would seize
+  `gMain.callback2` mid-frame, and `ITEM_EFFECT_RAISE_LEVEL`, because the
+  new-move check lives in `ItemUseCB_RareCandy()` and not in the table effect.
+  Items needing a move chosen as well as a mon (Ether, PP Up, PP Max) are refused
+  for the same reason: this UI has no move list.
 - **Safety gate**, re-checked immediately before mutation:
   - `gMain.callback2 == CB2_Overworld` (`include/overworld.h:131`)
   - `!ArePlayerFieldControlsLocked()` (`include/script.h:36`)
@@ -174,6 +182,15 @@ The only stage that mutates game state, so the gate is the design.
   **inverted return**: `FALSE` means the item *did* have an effect. Only then
   `RemoveBagItem(item, 1)`.
 - If the gate fails, say so on screen rather than silently ignoring the tap.
+- **In battle** the same effect is applied through
+  `Ctr3dsQueueBattleItem()` (`src/battle_controller_player.c`), which then emits
+  `B_ACTION_USE_ITEM` so the item costs a turn exactly as the d-pad route does.
+  Applying it there and not in the battle script is not a shortcut: the engine
+  never asks who an item targets, and `BattleScript_PlayerUsesItem` is a no-op
+  precisely because the vanilla party menu has already done the healing by the
+  time it runs. An item that would have no effect returns
+  `CTR3DS_ITEM_NO_EFFECT` and does **not** spend the turn, matching the vanilla
+  bag bouncing back to its item list.
 
 Why this point is safe: `CtrBottomUpdate` runs from `Rp2350PresentFrame()`, at
 the end of `WasmRunFrame()` *after* `VBlankIntr()`, so the frame's callbacks have
@@ -205,8 +222,9 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 - **Stage 3 is the real test.** Damage a Pokémon, use a Potion from the touch
   screen, then open Emerald's own party menu: HP must match and the bag count
-  must have decremented. Then verify the gate by tapping the same item during a
-  battle and mid-cutscene and confirm nothing happens.
+  must have decremented. Repeat in a battle: the top-screen healthbox must
+  update and the turn must then pass. Verify the gate by tapping USE mid-cutscene
+  and while the opponent is acting, and confirm nothing happens.
 - **Stage 4**: walk between areas, including indoors and caves, and confirm the
   name tracks.
 - **Regression each stage**: top screen unaffected, and
