@@ -1357,6 +1357,82 @@ static bool8 RegionMap_IsMapSecIdInNextRow(u16 y)
     return FALSE;
 }
 
+#if PLATFORM_3DS
+// ---- second-screen region map ----------------------------------------------
+//
+// The 3DS port's bottom screen draws this map itself, into its own RGB565
+// framebuffer, so it needs the art and the player's position but none of the BG
+// layers, sprites or tasks that everything else in this file exists to drive.
+// These three accessors are the whole seam. Nothing here writes game state.
+
+void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 **pal)
+{
+    *gfxLZ = sRegionMapBg_GfxLZ;
+    *tilemapLZ = sRegionMapBg_TilemapLZ;
+    *pal = sRegionMapBg_Pal;
+}
+
+// Uncompressed 4bpp, 4 tiles, and its own 16-colour palette. Gender-picked the
+// same way CreateRegionMapPlayerIcon does it.
+void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal)
+{
+    if (gSaveBlock2Ptr->playerGender == FEMALE)
+    {
+        *gfx = sRegionMapPlayerIcon_MayGfx;
+        *pal = sRegionMapPlayerIcon_MayPal;
+    }
+    else
+    {
+        *gfx = sRegionMapPlayerIcon_BrendanGfx;
+        *pal = sRegionMapPlayerIcon_BrendanPal;
+    }
+}
+
+// Where the player is, in the same absolute map-tile coordinates the cursor
+// uses: x in [MAPCURSOR_X_MIN, MAPCURSOR_X_MAX], y likewise.
+//
+// This runs the game's OWN InitMapBasedOnPlayerLocation against a scratch struct
+// rather than reimplementing it on the second screen, and that is deliberate.
+// That function is 150 lines of map-type dispatch -- towns, routes, underwater,
+// caves via the escape warp, secret bases via the dynamic warp, indoor maps whose
+// mapsec is MAPSEC_DYNAMIC -- followed by the multi-tile band arithmetic and
+// hardcoded fixups for Routes 114, 121 and 126, the Marine Cave and the SS Tidal.
+// A copy of that would be subtly wrong on the day it was written and would then
+// drift. It is also pure computation: it reads gSaveBlock1Ptr and gMapHeader and
+// writes only mapSecId, playerIsInCave and cursorPosX/Y, so unlike the rest of
+// this file it is safe to call from outside a region map screen.
+//
+// The three steps below are exactly LoadRegionMapGfx's case 5, in its order:
+// position first, then the special-place correction, then the position within the
+// mapsec that the landmark tables are keyed on.
+//
+// sRegionMap is saved and restored because the top screen may legitimately have a
+// real map open; the engine resumes with whatever it finds there.
+void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
+                                 u8 *posWithinMapSec, bool8 *inCave)
+{
+    // Zero-initialised, and that is load-bearing rather than incidental:
+    // GetPositionOfCursorWithinMapSec below reads ->zoomed to decide which pair
+    // of cursor fields to walk back from, and the second screen never zooms.
+    static struct RegionMap sScratch;
+    struct RegionMap *saved = sRegionMap;
+
+    sRegionMap = &sScratch;
+
+    InitMapBasedOnPlayerLocation();
+    sRegionMap->mapSecId = CorrectSpecialMapSecId_Internal(sRegionMap->mapSecId);
+    GetPositionOfCursorWithinMapSec();
+
+    *x = sScratch.cursorPosX;
+    *y = sScratch.cursorPosY;
+    *mapSecId = sScratch.mapSecId;
+    *posWithinMapSec = sScratch.posWithinMapSec;
+    *inCave = sScratch.playerIsInCave;
+
+    sRegionMap = saved;
+}
+#endif // PLATFORM_3DS
+
 static void SpriteCB_CursorMapFull(struct Sprite *sprite)
 {
     if (sRegionMap->cursorMovementFrameCounter != 0)

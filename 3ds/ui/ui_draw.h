@@ -36,6 +36,12 @@ void UiRect(int x, int y, int w, int h, u16 color);   // 1px outline
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal565,
                     int transparent0);
 
+// One 8x8 8bpp tile, 64 bytes. `pal565` must have 256 entries, not 16: an 8bpp
+// GBA background has no palette-bank field, so each byte is an absolute index
+// into the whole BG palette. See the note above the definition.
+void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal565,
+                    int transparent0);
+
 // A 3x3 nine-slice window frame in whichever of the 20 borders the player chose
 // in Options -> Frame. Coordinates and size are in 8px tiles.
 void UiWindowFrame(int tx, int ty, int wTiles, int hTiles);

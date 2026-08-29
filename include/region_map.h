@@ -117,4 +117,23 @@ void SetRegionMapDataForZoom(void);
 
 extern const struct RegionMapLocation gRegionMapEntries[];
 
+#if PLATFORM_3DS
+// The second screen draws this map itself and needs the art and the player's
+// position without any of the BG/sprite machinery around them. See the
+// PLATFORM_3DS block in src/region_map.c.
+void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 **pal);
+void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal);
+
+// Absolute map-tile coordinates, the same ones GetRegionMapSecIdAt takes.
+void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
+                                 u8 *posWithinMapSec, bool8 *inCave);
+
+// The map's own bounds, so the second screen can address it without copying the
+// numbers out of src/region_map.c.
+#define CTR_MAPCURSOR_X_MIN 1
+#define CTR_MAPCURSOR_Y_MIN 2
+#define CTR_MAP_WIDTH       28
+#define CTR_MAP_HEIGHT      15
+#endif
+
 #endif //GUARD_REGION_MAP_H

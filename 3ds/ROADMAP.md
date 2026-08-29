@@ -199,12 +199,63 @@ finished and the next has not started.
 Item use changes the save; the deferred flush in `3ds/host/save.c` covers it.
 Ensure the party hash changes so the grid repaints.
 
-## Stage 4: MAP
+## Stage 4: MAP (WORKING)
 
-Location readout, no new graphics decoding: current area via
-`GetMapNameGeneric()` with `GetCurrentRegionMapSectionId()`, player coordinates,
-and nearby landmarks via `GetLandmarkName()`. A rendered region map with a
-player marker is a follow-on once the 4bpp blit path has proven itself.
+Emerald's own region map art, drawn at 1:1, with a marker where the player is and
+tap-a-place-for-its-name. Read-only throughout: unlike BAG, nothing here writes
+game state.
+
+Three properties of the art are not obvious from the asset files, and each one
+produces a plausible-looking wrong picture if you guess it. They cost real time to
+establish, so they are recorded here:
+
+- **The background is 8bpp**, not 4bpp (`-num_tiles 233`, 14,912 bytes
+  decompressed). `UiBlit4bppTile` cannot draw it; `UiBlit8bppTile` was added
+  alongside it for this.
+- **Its tilemap is an AFFINE one: ONE BYTE per entry, 64x64.** BG2 is set up with
+  `BG_ATTR_SCREENSIZE 2` and `BG_ATTR_PALETTEMODE 1`, and affine screen size 2 is
+  64x64 tiles at a byte each -- exactly the 4096 bytes `map.bin` decompresses to.
+  So there are no 16-bit screen entries, no flip bits and no palette-bank field:
+  the tile id is simply the byte. Reading it as a normal text-mode tilemap yields
+  noise.
+- **Tile bytes are ABSOLUTE palette indices in 112..143**, because the game loads
+  the map's 32 colours at `BG_PLTT_ID(7)`. An 8bpp BG has no palette-bank field to
+  add an offset, so the index is baked into the pixel. Hence a 256-entry palette
+  with only that slice filled.
+
+The drawn artwork is **31 x 19 tiles = 248 x 152 px** (larger than the 28x15
+MAPSEC grid at offset 1,2 -- the northern coast, Dewford's islands and the eastern
+edge all sit outside it). That centres in the 320x192 content area with 36px each
+side and leaves exactly 40px for the caption. 2x would be 496x304 and fits in
+neither dimension, so 1x is the only scale, and it is also the pixel-perfect one.
+
+- Assets and the player's position come from the `PLATFORM_3DS` block in
+  `src/region_map.c`; they are file-static there. Same pattern as
+  `Ctr3dsLiveWindowFrameType()` in `src/option_menu.c`.
+- **The player's position runs the game's own `InitMapBasedOnPlayerLocation()`
+  against a scratch `struct RegionMap`**, rather than being reimplemented. That
+  function is 150 lines of map-type dispatch (towns, routes, underwater, caves via
+  the escape warp, secret bases via the dynamic warp, indoor maps whose mapsec is
+  `MAPSEC_DYNAMIC`) plus multi-tile band arithmetic and hardcoded fixups for Routes
+  114, 121 and 126, the Marine Cave and the SS Tidal. A copy would be subtly wrong
+  on day one and would then drift. It is safe to call because it is *pure
+  computation*: it reads `gSaveBlock1Ptr` and `gMapHeader` and writes only
+  `mapSecId`, `playerIsInCave` and `cursorPosX/Y`. `sRegionMap` is saved and
+  restored around it, because the top screen may have a real map open.
+- Names via `GetMapNameGeneric()`, landmarks via `GetLandmarkName()` keyed on the
+  `posWithinMapSec` the same accessor returns. Both are already game-encoded.
+- Tapping uses the public `GetRegionMapSecIdAt()`, which takes absolute map-tile
+  coordinates -- which is what dividing a touch position by 8 gives directly.
+
+**`UiMapStateKey()` is not optional.** Nothing else in `UiStateHash` tracks where
+the player is, so without it the map goes stale while they walk. It is naturally
+coarse: the cursor position only moves when the player crosses a band boundary
+within a mapsec, so walking one stretch of route costs no repaints.
+
+Not built: flying (it would have to drive the field warp flow from the per-frame
+hook, which is the thing "The limit" above warns about), the indoor icon blink
+(one cosmetic effect for a new per-frame tick entry point), fly-destination icons
+and the city zoom.
 
 ## Stage 5: DEX
 
@@ -225,8 +276,12 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
   must have decremented. Repeat in a battle: the top-screen healthbox must
   update and the turn must then pass. Verify the gate by tapping USE mid-cutscene
   and while the opponent is acting, and confirm nothing happens.
-- **Stage 4**: walk between areas, including indoors and caves, and confirm the
-  name tracks.
+- **Stage 4**: open MAP and compare it against the PokeNav's own map on the top
+  screen -- they must be the same image. Then walk between areas, including
+  indoors and caves, and confirm the marker and the name track. Walk the length of
+  a tall mapsec (Route 110) and confirm the marker moves down it rather than
+  sticking at one end; that is what running the game's own position function
+  buys.
 - **Regression each stage**: top screen unaffected, and
   `~/Library/Application Support/Azahar/sdmc/3ds/emerald3ds/pokeemerald.sav`
   still updates after an in-game save.

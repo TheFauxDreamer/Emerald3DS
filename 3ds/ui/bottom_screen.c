@@ -118,7 +118,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[4];
+    u32 top[5];
     top[0] = UiFrameId();
     top[1] = sInGame;
     top[2] = (u32)FlagGet(FLAG_SYS_POKEMON_GET)
@@ -127,9 +127,18 @@ static u32 UiStateHash(void)
     // The matchup badges depend on who we are facing, so the opponent has to be
     // in here or they would go stale when it switches.
     top[3] = UiMatchupOpponentKey();
-    // Only while that tab is up: counting walks every dex entry.
+
+    // Tab-conditional state, in a slot of its own rather than XORed onto the
+    // always-live matchup key above: two keys sharing a slot can cancel. Only
+    // one of these can ever be live, and each is asked for only while its tab is
+    // up, because both walk data the other tabs have no reason to touch --
+    // counting the dex means every entry, and the map position means the whole
+    // of InitMapBasedOnPlayerLocation.
+    top[4] = 0;
     if (sTab == UI_TAB_DEX)
-        top[3] ^= UiDexStateKey();
+        top[4] = UiDexStateKey();
+    else if (sTab == UI_TAB_MAP)
+        top[4] = UiMapStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {

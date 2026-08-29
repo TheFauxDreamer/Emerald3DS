@@ -98,6 +98,39 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
     }
 }
 
+// One 8x8 8bpp tile: 64 bytes, one byte per pixel, row-major. Simpler than the
+// 4bpp path -- no nibble to unpack -- but the palette is NOT 16 entries.
+//
+// An 8bpp GBA background has no palette-bank field in its map, so the byte IS an
+// absolute index into the whole 256-entry BG palette. The region map's tiles
+// therefore carry values around 112, because the game loads its 32 colours at
+// BG_PLTT_ID(7) (src/region_map.c). `pal` must be sized to match: give it 256
+// entries and fill the slice the art actually uses.
+void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparent0)
+{
+    for (int row = 0; row < 8; row++)
+    {
+        int py = y + row;
+        if (py < 0 || py >= UI_H)
+            continue;
+
+        const u8 *src = tile + row * 8;
+        u16 *dst = &sFb[py * UI_W];
+
+        for (int col = 0; col < 8; col++)
+        {
+            int px = x + col;
+            if (px < 0 || px >= UI_W)
+                continue;
+
+            if (src[col] == 0 && transparent0)
+                continue;
+
+            dst[px] = pal[src[col]];
+        }
+    }
+}
+
 // The player picks one of 20 borders in Options -> Frame; honouring it is what
 // makes the second screen read as part of the game rather than an overlay.
 // GetWindowFrameTilesPal() is the game's own accessor and is bounds-checked

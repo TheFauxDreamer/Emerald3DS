@@ -67,7 +67,11 @@ on the left, the scrolling list on the right, and an entry screen with the
 sprite, footprint, category, and height and weight in the game's own imperial
 format. Unseen entries stay anonymous, as they should.
 
-**MAP.** Not built yet.
+**MAP.** Hoenn's region map, the game's own art at 1:1, with your marker where
+you actually are: on the right stretch of a long route, and on the cave mouth or
+the town door when you are inside one. Tap anywhere to read that place's name;
+tap the sea to go back to following yourself. The caption names the landmark you
+are standing on when there is one.
 
 **EXTRA.** Things the original game has no concept of. Fast-forward at 1x, 2x,
 4x or 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or
@@ -91,7 +95,7 @@ means an emulator only.
 | Top screen | ✅ Software PPU, selectable scale |
 | Real-time clock | ✅ Backed by the console clock, so berries and time-of-day work |
 | Bottom: party, bag, Pokédex, extras | ✅ |
-| Bottom: map | ❌ Placeholder |
+| Bottom: map | ✅ Region map, player marker, tap for names |
 | Battle items from the touch screen | ✅ |
 | Audio | ⚠️ Needs a DSP firmware dump; some sample types silent |
 | Link cable / wireless | 🚧 On the `local-wireless` branch, unbuilt and untested |
