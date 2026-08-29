@@ -29,13 +29,16 @@
 // as "nothing is the modifier" and silently lose the Y default.
 #define SETTINGS_VERSION 3
 
-// Fixed-size and explicitly padded, so the on-disk layout does not depend on
-// how the compiler chooses to align it.
+// Fixed-size, with every byte spoken for, so the on-disk layout does not depend
+// on how the compiler chooses to align it.
 struct CtrSettings {
     uint32_t magic;
     uint16_t version;
     uint8_t  topScale;
-    uint8_t  reserved;
+    // Was explicit padding, always written as 0. Claiming it costs no version
+    // bump precisely because of that: every v3 file in existence has a zero
+    // here, which is the same as the default this field wants.
+    uint8_t  showAllTabs;
     uint8_t  turbo[CTR_TURBO_COUNT];   // CTR_BIND_OFF / a speed / CTR_BIND_MOD
 };
 
@@ -44,6 +47,8 @@ extern int  Ctr3dsGetTopScale(void);
 extern void Ctr3dsApplyTopScale(int mode);
 extern int  Ctr3dsGetTurboBind(int button);
 extern void Ctr3dsApplyTurboBind(int button, int value);
+extern int  Ctr3dsGetShowAllTabs(void);
+extern void Ctr3dsApplyShowAllTabs(int on);
 
 void CtrSettingsLoad(void)
 {
@@ -64,6 +69,9 @@ void CtrSettingsLoad(void)
     if (s.topScale < CTR_TOP_SCALE_COUNT)
         Ctr3dsApplyTopScale((int)s.topScale);
 
+    // Any non-zero byte means on, so a corrupt value cannot be out of range.
+    Ctr3dsApplyShowAllTabs(s.showAllTabs != 0);
+
     // Ctr3dsApplyTurboBind rejects anything that is not a valid binding, so a
     // corrupt byte leaves that button on its default rather than being trusted.
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
@@ -77,7 +85,7 @@ void CtrSettingsSave(void)
     s.magic    = SETTINGS_MAGIC;
     s.version  = SETTINGS_VERSION;
     s.topScale = (uint8_t)Ctr3dsGetTopScale();
-    s.reserved = 0;
+    s.showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         s.turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
 

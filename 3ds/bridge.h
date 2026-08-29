@@ -147,6 +147,16 @@ int  Ctr3dsUiModifierHeld(void);
 void Ctr3dsSetTopScale(int mode);
 int  Ctr3dsGetTopScale(void);
 
+// Show every bottom-screen tab, including the ones the save has not unlocked.
+//
+// A testing aid, not a cheat: the tabs are gated on the same flags the start
+// menu uses, so before the PokeNav there is normally no way to look at the MAP
+// tab at all. Nothing it reveals writes game state -- PARTY, MAP and DEX are
+// read-only -- so the worst it can do is show you a Pokedex you have not been
+// given yet. Persisted, so a test session survives a relaunch.
+void Ctr3dsSetShowAllTabs(int on);
+int  Ctr3dsGetShowAllTabs(void);
+
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
 // this instead (under PLATFORM_3DS). That file is game-side and includes this

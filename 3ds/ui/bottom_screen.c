@@ -65,6 +65,12 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
 
 static bool8 TabUnlocked(u32 tab)
 {
+    // The EXTRA tab's testing override. Deliberately checked before the flag
+    // rather than folded into it, so the normal path is unchanged and the
+    // override reads as the exception it is.
+    if (Ctr3dsGetShowAllTabs())
+        return TRUE;
+
     return sTabs[tab].flag == 0 || FlagGet(sTabs[tab].flag);
 }
 
@@ -123,7 +129,10 @@ static u32 UiStateHash(void)
     top[1] = sInGame;
     top[2] = (u32)FlagGet(FLAG_SYS_POKEMON_GET)
            | ((u32)FlagGet(FLAG_SYS_POKENAV_GET) << 1)
-           | ((u32)FlagGet(FLAG_SYS_POKEDEX_GET) << 2);
+           | ((u32)FlagGet(FLAG_SYS_POKEDEX_GET) << 2)
+           // Sits with the flags because it answers the same question they do:
+           // which tabs exist.
+           | ((u32)(Ctr3dsGetShowAllTabs() != 0) << 3);
     // The matchup badges depend on who we are facing, so the opponent has to be
     // in here or they would go stale when it switches.
     top[3] = UiMatchupOpponentKey();
