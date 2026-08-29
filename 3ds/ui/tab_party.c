@@ -38,6 +38,14 @@
 #define MOVES_X         196
 #define MOVES_Y         72
 
+// The detail view's way out. One definition, because the drawn rect and the hit
+// test in UiPartyTouch have to agree; the dex entry screen names its own the
+// same way.
+#define BACK_X          (CTR_BOTTOM_WIDTH - 46)
+#define BACK_Y          8
+#define BACK_W          38
+#define BACK_H          22
+
 static bool8 sDetailOpen;
 
 // ------------------------------------------------------- HP bar animation --
@@ -198,6 +206,14 @@ static void DrawDetail(void)
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
+    // Drawn first, before any content that might bail. The way out of a modal
+    // must not depend on what is inside it: an empty slot used to return below
+    // without ever reaching this, leaving a view whose only exit was an
+    // invisible rectangle the player had no reason to touch.
+    UiRect(BACK_X, BACK_Y, BACK_W, BACK_H, UI_COL_DIM);
+    UiText(BACK_X + 6, BACK_Y + 4, UiAscii(label, "BACK", sizeof(label)),
+           UI_COL_ACCENT, UiThemeShadow());
+
     if (species == SPECIES_NONE)
     {
         UiText(16, 16, UiAscii(label, "Empty slot", sizeof(label)),
@@ -213,7 +229,7 @@ static void DrawDetail(void)
     // Same treatment as the grid: arrows follow the name. The limit is the BACK
     // target's left edge rather than the window frame.
     DrawMatchupArrows(52 + nameW + 4, 12 + (UI_GLYPH_H - UI_ARROW_H) / 2,
-                      CTR_BOTTOM_WIDTH - 52, mon);
+                      BACK_X - 6, mon);
 
     UiText(52, 30, UiAscii(label, "Lv", sizeof(label)), UI_COL_DIM, UiThemeShadow());
     UiNum(70, 30, (s32)GetMonData(mon, MON_DATA_LEVEL), UiThemeText(), UiThemeShadow());
@@ -297,11 +313,6 @@ static void DrawDetail(void)
         UiText(MOVES_X, MOVES_Y + i * UI_LINE_H, gMoveNames[move],
                UiThemeText(), UiThemeShadow());
     }
-
-    // Back target, top-right.
-    UiRect(CTR_BOTTOM_WIDTH - 46, 8, 38, 22, UI_COL_DIM);
-    UiText(CTR_BOTTOM_WIDTH - 40, 12, UiAscii(label, "BACK", sizeof(label)),
-           UI_COL_ACCENT, UiThemeShadow());
 }
 
 void UiPartyDraw(void)
@@ -320,7 +331,7 @@ void UiPartyTouch(const CtrTouchState *t)
 
     if (sDetailOpen)
     {
-        if (UiHit(t, CTR_BOTTOM_WIDTH - 46, 8, 38, 22))
+        if (UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
         {
             sDetailOpen = FALSE;
             UiMarkDirty();
