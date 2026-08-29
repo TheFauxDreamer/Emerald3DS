@@ -419,6 +419,11 @@ void Rp2350PresentFrame(void)
     // request is still honoured promptly while fast-forwarding.
     if (!aptMainLoop() && !sQuitting) {
         sQuitting = 1;
+        // Before the longjmp, not only after it. This is the last moment the
+        // app is certainly still alive, and the flush costs nothing when the
+        // image is clean. main() flushes again after the jump; the second call
+        // returns immediately because this one cleared the dirty flag.
+        CtrSaveFlush(1);
         longjmp(sQuitJmp, 1);
     }
 
@@ -512,7 +517,10 @@ int main(int argc, char **argv)
         AgbMain();   // never returns; exits via longjmp above
     }
 
-    // Unconditional flush: the deferred writeback may still be pending.
+    // Unconditional flush: the deferred writeback may still be pending. Usually
+    // a no-op by now, because saves commit as they happen (CtrSaveCommit, from
+    // src/save.c) and the close path above flushes too. It stays as the last
+    // line of defence for writes that arrived outside a save.
     CtrSaveFlush(1);
     CtrAudioExit();
     CtrVideoExit();

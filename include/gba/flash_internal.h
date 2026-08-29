@@ -13,6 +13,9 @@ u16 Rp2350SaveEraseSector(u16 sectorNum);
 u16 Rp2350SaveProgramSector(u16 sectorNum, u8 *src);
 u16 Rp2350SaveProgramByte(u16 sectorNum, u32 offset, u8 data);
 void Rp2350SaveSync(void);
+// Forced flush, for the end of a save. Rp2350SaveSync above is deferred and is
+// called per sector during one; this is called once, when the save is done.
+void CtrSaveCommit(void);
 #elif RP2350
 // The GBA cart's 128 KB save flash is emulated in the LAST 128 KB of the
 // 16 MB QSPI flash (offset 0xFE0000) -- far above the ~13.4 MB game image,
