@@ -492,6 +492,54 @@ void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp)
     UiFillRect(x, y + 4, (int)filled, 4, dark);
 }
 
+// The cursor Emerald stamps beside the selected battle menu entry, the one that
+// sits next to FIGHT / BAG / POKEMON / RUN.
+//
+// Transcribed from tiles 1 and 2 of graphics/battle_interface/textbox.png, the
+// pair ActionSelectionCreateCursorAt copies into the menu window
+// (src/battle_controller_player.c). Transcribed rather than decompressed
+// because that sheet is 256 tiles and only two of them are wanted; UiPokeball
+// above sets the same precedent for a glyph this small. The blank rows above
+// and below it, and the blank column each side, are dropped here, so this is
+// the ink and nothing else.
+//
+// The two values are the source's own palette roles: 1 is index 9, the body,
+// and 2 is index 7, the shadow trailing its lower edge. In the battle textbox
+// palette those are a dark ink and a light shadow -- the same pair Emerald
+// prints menu text with -- so they map onto the theme colours here rather than
+// onto fixed ones. A fixed colour would disappear against half of the 20 window
+// frames, which is the same reason UiArrow carries an outline.
+static const u8 sChevron[UI_CHEVRON_H][UI_CHEVRON_W] =
+{
+    {1, 1, 0, 0, 0, 0},
+    {1, 1, 1, 0, 0, 0},
+    {1, 1, 1, 1, 0, 0},
+    {1, 1, 1, 1, 1, 0},
+    {1, 1, 1, 1, 1, 2},
+    {1, 1, 1, 1, 1, 2},
+    {1, 1, 1, 1, 2, 2},
+    {1, 1, 1, 2, 2, 0},
+    {1, 1, 2, 2, 0, 0},
+    {0, 2, 2, 0, 0, 0},
+};
+
+void UiChevron(int x, int y)
+{
+    u16 body = UiThemeText();
+    u16 shadow = UiThemeShadow();
+
+    for (int row = 0; row < UI_CHEVRON_H; row++)
+    {
+        for (int col = 0; col < UI_CHEVRON_W; col++)
+        {
+            u8 ink = sChevron[row][col];
+
+            if (ink != 0)
+                UiFillRect(x + col, y + row, 1, 1, (ink == 1) ? body : shadow);
+        }
+    }
+}
+
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
 {
     return t->x >= x && t->x < x + w && t->y >= y && t->y < y + h;

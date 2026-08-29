@@ -87,6 +87,15 @@ void UiStatusIcon(int x, int y, u8 ailment);
 
 void UiArrow(int x, int y, bool8 up, u16 fill);
 
+// The cursor Emerald puts beside the selected battle menu entry, in the player's
+// own menu colours. Ink only -- the blank rows and columns around it in the
+// source tiles are dropped -- so (x, y) is the glyph itself and centring it on a
+// row or a cell is exact.
+#define UI_CHEVRON_W 6
+#define UI_CHEVRON_H 10
+
+void UiChevron(int x, int y);
+
 // A two-tone HP bar, 8px tall, coloured by the game's own GetHPBarLevel so it
 // changes colour at exactly the same points the battle bar does. `hp` is passed
 // in rather than read from the mon: the party tab animates it, the BAG tab's

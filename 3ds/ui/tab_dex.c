@@ -58,9 +58,13 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define LIST_Y         14
 #define ROW_H          24
 #define VISIBLE_ROWS   6
-#define BALL_X         (LIST_X + 10)
-#define NUM_X          (LIST_X + 22)
-#define NAME_X         (LIST_X + 60)
+// A reserved cursor column at the pane's interior edge, then the columns that
+// were already here shifted right by it. Every row leaves the gap whether it is
+// selected or not, so the list does not shuffle sideways as the cursor moves.
+#define CURSOR_X       (LIST_X + 8)
+#define BALL_X         (LIST_X + 20)
+#define NUM_X          (LIST_X + 32)
+#define NAME_X         (LIST_X + 70)
 
 #define PAGE_Y         158
 #define PAGE_W         52
@@ -314,7 +318,7 @@ static void DrawList(void)
         national = RowToNationalNum(index);
 
         if (index == sCursor)
-            UiRect(LIST_X + 8, y - 3, RIGHT_TW * 8 - 24, ROW_H - 2, UI_COL_ACCENT);
+            UiChevron(CURSOR_X, y + (UI_GLYPH_H - UI_CHEVRON_H) / 2);
 
         // A ball only for caught, nothing for merely seen: the same three-state
         // readout the real list gives.

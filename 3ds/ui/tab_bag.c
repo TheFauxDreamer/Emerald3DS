@@ -1,9 +1,9 @@
 // BAG tab: pockets and item list on the left, details and Use on the right,
 // and a party target picker that opens over both when an item needs one.
 //
-// Tapping a row only HIGHLIGHTS it; using an item takes a second, deliberate
-// tap on Use. On a resistive panel that matters: a single-tap-to-use list makes
-// a mis-touch cost you a Full Restore.
+// Tapping a row only MOVES THE CURSOR to it; using an item takes a second,
+// deliberate tap on Use. On a resistive panel that matters: a single-tap-to-use
+// list makes a mis-touch cost you a Full Restore.
 //
 // This is the only place in the bottom-screen UI that MUTATES game state, so
 // the gates in CanUseItemNow(), ItemTargeting() and Ctr3dsQueueBattleItem() are
@@ -54,6 +54,13 @@
 
 #define LEFT_X        10
 #define LEFT_W        (LEFT_TW * 8 - 20)
+
+// The selected row is marked the way the game's own menus mark one: a cursor in
+// a reserved column, not a box drawn round the text. The column is the glyph
+// plus a 4px gap, and every row's text starts after it whether it is selected
+// or not, so the list does not shuffle sideways as the cursor moves.
+#define LIST_CURSOR_X (LEFT_X)
+#define LIST_TEXT_X   (LEFT_X + UI_CHEVRON_W + 4)
 #define LIST_Y        (PANEL_Y + 10)
 #define ROW_H         24
 #define VISIBLE_ROWS  5
@@ -87,6 +94,12 @@
 #define PICK_CELL_W   (CTR_BOTTOM_WIDTH / PICK_COLS)
 #define PICK_CELL_H   ((UI_CONTENT_H - PICK_HEAD_H) / PICK_ROWS)
 
+// Same three-column split as the PARTY tab's cells, and for the same reason:
+// cursor, then icon and status, then everything textual.
+#define PICK_CURSOR_X 8
+#define PICK_ICON_X   18
+#define PICK_TEXT_X   54
+
 #define PICK_CANCEL_W 56
 #define PICK_CANCEL_H 20
 #define PICK_CANCEL_X (CTR_BOTTOM_WIDTH - PICK_CANCEL_W - 8)
@@ -94,7 +107,7 @@
 
 static u8  sPocket = POCKET_ITEMS;   // pocket ids are 1-based
 static u16 sScroll;
-static u16 sCursor;                  // highlighted row, absolute
+static u16 sCursor;                  // row the cursor is on, absolute
 
 // The picker is modal over the whole content area, the same shape the PARTY
 // tab's detail view uses.
@@ -321,7 +334,7 @@ static void DrawList(void)
 
     if (count == 0)
     {
-        UiText(LEFT_X, LIST_Y, UiAscii(label, "Empty.", sizeof(label)),
+        UiText(LIST_TEXT_X, LIST_Y, UiAscii(label, "Empty.", sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
         return;
     }
@@ -337,12 +350,12 @@ static void DrawList(void)
 
         item = BagGetItemIdByPocketPosition(sPocket, pos);
 
-        // The highlight is what the Use button acts on, so it has to be
+        // The cursor is what the Use button acts on, so it has to be
         // unmistakable rather than a subtle tint.
         if (pos == sCursor)
-            UiRect(LEFT_X - 2, y - 3, LEFT_W + 4, ROW_H - 2, UI_COL_ACCENT);
+            UiChevron(LIST_CURSOR_X, y + (UI_GLYPH_H - UI_CHEVRON_H) / 2);
 
-        UiText(LEFT_X, y, GetItemName(item), UiThemeText(), UiThemeShadow());
+        UiText(LIST_TEXT_X, y, GetItemName(item), UiThemeText(), UiThemeShadow());
         UiNumRight(LEFT_X + LEFT_W, y,
                    (s32)BagGetQuantityByPocketPosition(sPocket, pos),
                    UI_COL_DIM, UiThemeShadow());
@@ -425,6 +438,11 @@ static void DrawPickCell(u8 slot)
 
     UiWindowFrame(cx / 8, cy / 8, PICK_CELL_W / 8, PICK_CELL_H / 8);
 
+    // Drawn before the checks below, so an empty or egg slot still shows where
+    // the cursor is rather than looking like the selection vanished.
+    if (slot == UiSelectedMon())
+        UiChevron(cx + PICK_CURSOR_X, cy + (PICK_CELL_H - UI_CHEVRON_H) / 2);
+
     if (species == SPECIES_NONE)
         return;
 
@@ -432,20 +450,21 @@ static void DrawPickCell(u8 slot)
     // icon nor its stats -- just enough to show the slot is taken.
     if (GetMonData(mon, MON_DATA_IS_EGG))
     {
-        UiText(cx + 12, cy + 16, UiAscii(label, "EGG", sizeof(label)),
+        UiText(cx + PICK_ICON_X, cy + 16, UiAscii(label, "EGG", sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
         return;
     }
 
-    UiMonIcon(cx + 6, cy + 8, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
-    UiStatusIcon(cx + 6, cy + 40, GetMonAilment(mon));
+    UiMonIcon(cx + PICK_ICON_X, cy + 8, (u16)species,
+              GetMonData(mon, MON_DATA_PERSONALITY));
+    UiStatusIcon(cx + PICK_ICON_X, cy + 40, GetMonAilment(mon));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    UiText(cx + 42, cy + 8, name, UiThemeText(), UiThemeShadow());
+    UiText(cx + PICK_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());
 
     UiAscii(label, "Lv", sizeof(label));
-    UiText(cx + 42, cy + 24, label, UI_COL_DIM, UiThemeShadow());
-    UiNum(cx + 60, cy + 24, (s32)GetMonData(mon, MON_DATA_LEVEL),
+    UiText(cx + PICK_TEXT_X, cy + 24, label, UI_COL_DIM, UiThemeShadow());
+    UiNum(cx + PICK_TEXT_X + 18, cy + 24, (s32)GetMonData(mon, MON_DATA_LEVEL),
           UiThemeText(), UiThemeShadow());
 
     // The true value, not the PARTY tab's animated one: choosing who to heal
@@ -455,10 +474,7 @@ static void DrawPickCell(u8 slot)
 
     UiNumRight(cx + PICK_CELL_W - 10, cy + 24, (s32)hp,
                UiThemeText(), UiThemeShadow());
-    UiHpBar(cx + 42, cy + 40, PICK_CELL_W - 52, hp, maxHp);
-
-    if (slot == UiSelectedMon())
-        UiRect(cx + 2, cy + 2, PICK_CELL_W - 4, PICK_CELL_H - 4, UI_COL_ACCENT);
+    UiHpBar(cx + PICK_TEXT_X, cy + 40, PICK_CELL_W - PICK_TEXT_X - 10, hp, maxHp);
 }
 
 static void DrawPicker(void)
@@ -609,7 +625,7 @@ void UiBagTouch(const CtrTouchState *t)
         return;
     }
 
-    // Selecting only moves the highlight. Using takes a second tap on USE.
+    // Selecting only moves the cursor. Using takes a second tap on USE.
     if (t->x < LEFT_TW * 8 && t->y >= LIST_Y && t->y < LIST_Y + VISIBLE_ROWS * ROW_H)
     {
         u16 pos = sScroll + (u16)((t->y - LIST_Y) / ROW_H);
