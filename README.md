@@ -75,9 +75,13 @@ are standing on when there is one.
 
 **EXTRA.** Things the original game has no concept of. Fast-forward at 1x, 2x,
 4x or 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or
-FILL (fills the panel, stretching 11%); and the four buttons the GBA has no use
+FILL (fills the panel, stretching 11%); the four buttons the GBA has no use
 for (X, Y, ZL and ZR) bindable to a hold-for-speed or to the touch UI's
-modifier key. Screen size and bindings persist; fast-forward deliberately
+modifier key; and **TABS: GAME / ALL**, which shows every tab regardless of what
+the save has unlocked. That last one is for testing the tabs themselves without
+first earning the Pokedex or the PokeNav in game; everything it reveals is
+read-only, so the worst it can do is show you a Pokedex you have not been given.
+Screen size, bindings and the tab override persist; fast-forward deliberately
 resets each launch.
 
 The whole thing follows your **Options → Frame** border choice, live, as you

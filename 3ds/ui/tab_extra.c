@@ -4,8 +4,9 @@
 // nothing in this file touches game state. It talks to the host through
 // bridge.h, the same way the RTC and the framebuffer do.
 //
-// Two sections so far. Both button rows deliberately span the same 22..298, so
-// the block reads as one control panel rather than two unrelated widgets.
+// The first three button rows deliberately span the same 22..298, so the block
+// reads as one control panel rather than three unrelated widgets. The fourth is
+// a testing override and is set apart: label beside its buttons, not above.
 
 #include "global.h"
 
@@ -36,22 +37,45 @@ static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
 static const u8 sTurboSteps[] = { CTR_BIND_OFF, 2, 4, 8, CTR_BIND_MOD };
 static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
 
-// All three rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred in
-// 320, which leaves 22 either side and clears the 8px window frame comfortably.
+// The first three rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred
+// in 320, which leaves 22 either side and clears the 8px window frame
+// comfortably.
 #define BTN_H         26
 #define BTN_GAP       12
 
+// Four rows do not fit at the old 52px pitch: a labelled row is 15 + 2 + 26 =
+// 43px, and four of those plus gaps overruns the 176px interior. So the last
+// row carries its label beside its buttons instead of above them, which is what
+// buys the ~35px, and the MOD note moves up onto the BUTTON HOLD label's line
+// where it belongs anyway.
+#define ROW1_LABEL_Y  8
+#define ROW2_LABEL_Y  58
+#define ROW3_LABEL_Y  108
+#define LABEL_TO_BTN  17
+
 #define SPD_W         60
-#define SPD_Y         28
+#define SPD_Y         (ROW1_LABEL_Y + LABEL_TO_BTN)
 #define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
 
 #define SCL_W         84
-#define SCL_Y         80
+#define SCL_Y         (ROW2_LABEL_Y + LABEL_TO_BTN)
 #define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
 
 #define TRB_W         60
-#define TRB_Y         132
+#define TRB_Y         (ROW3_LABEL_Y + LABEL_TO_BTN)
 #define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
+
+// The MOD note shares the BUTTON HOLD label's line. That label is 63px wide, so
+// 96 clears it, and the note is 163px, ending well inside the 311px interior.
+#define TRB_NOTE_X    96
+
+// Tab visibility. Label on the left, then the two states, then a reminder that
+// this exists for testing rather than as a way to skip the game.
+#define TAB_Y         157
+#define TAB_W         84
+#define TAB_LABEL_X   16
+#define TAB_X(i)      (60 + (i) * (TAB_W + 8))
+#define TAB_HINT_X    (TAB_X(1) + TAB_W + 12)
 
 // The selected button gets a doubled inset outline as well as accent text.
 // Colour alone is easy to miss against the lighter window frames.
@@ -75,7 +99,7 @@ void UiExtraDraw(void)
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
-    UiText(16, 10, UiAscii(label, "GAME SPEED", sizeof(label)),
+    UiText(16, ROW1_LABEL_Y, UiAscii(label, "GAME SPEED", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SPEED_COUNT; i++)
@@ -92,7 +116,7 @@ void UiExtraDraw(void)
                    sSpeeds[i] == Ctr3dsGetSpeed());
     }
 
-    UiText(16, 62, UiAscii(label, "SCREEN SIZE", sizeof(label)),
+    UiText(16, ROW2_LABEL_Y, UiAscii(label, "SCREEN SIZE", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SCALE_COUNT; i++)
@@ -100,8 +124,15 @@ void UiExtraDraw(void)
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
 
-    UiText(16, 114, UiAscii(label, "BUTTON HOLD", sizeof(label)),
+    UiText(16, ROW3_LABEL_Y, UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
+
+    // MOD needs saying: it is not obvious that one of these buttons is what
+    // makes the Pokedex arrows jump. ZL and ZR do not exist on an Old 3DS, so
+    // a binding there would otherwise look broken rather than unsupported.
+    UiText(TRB_NOTE_X, ROW3_LABEL_Y,
+           UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
 
     for (u32 i = 0; i < CTR_TURBO_COUNT; i++)
     {
@@ -136,10 +167,17 @@ void UiExtraDraw(void)
                    UiAscii(label, text, sizeof(label)), bind != CTR_BIND_OFF);
     }
 
-    // MOD needs saying: it is not obvious that one of these buttons is what
-    // makes the Pokedex arrows jump. ZL and ZR do not exist on an Old 3DS, so
-    // a binding there would otherwise look broken rather than unsupported.
-    UiText(16, 164, UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
+    // Tab visibility. GAME is the real behaviour; ALL is the testing override.
+    UiText(TAB_LABEL_X, TAB_Y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "TABS", sizeof(label)), UiThemeText(), UiThemeShadow());
+
+    DrawButton(TAB_X(0), TAB_Y, TAB_W, UiAscii(label, "GAME", sizeof(label)),
+               !Ctr3dsGetShowAllTabs());
+    DrawButton(TAB_X(1), TAB_Y, TAB_W, UiAscii(label, "ALL", sizeof(label)),
+               Ctr3dsGetShowAllTabs());
+
+    UiText(TAB_HINT_X, TAB_Y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "for testing", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 }
 
@@ -163,6 +201,16 @@ void UiExtraTouch(const CtrTouchState *t)
         if (UiHit(t, SCL_X((int)i), SCL_Y, SCL_W, BTN_H))
         {
             Ctr3dsSetTopScale(sScales[i]);
+            UiMarkDirty();
+            return;
+        }
+    }
+
+    for (u32 i = 0; i < 2; i++)
+    {
+        if (UiHit(t, TAB_X((int)i), TAB_Y, TAB_W, BTN_H))
+        {
+            Ctr3dsSetShowAllTabs((int)i);
             UiMarkDirty();
             return;
         }

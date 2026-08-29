@@ -246,6 +246,33 @@ int Ctr3dsGetTurboBind(int button)
     return sTurbo[button];
 }
 
+// Whether the bottom screen shows tabs the save has not unlocked. Lives here
+// rather than game-side because it has to survive a relaunch, and the settings
+// file is host-side; bottom_screen.c reads it through the bridge.
+static uint8_t sShowAllTabs;
+
+// Set without persisting, for CtrSettingsLoad(), the same split as
+// Ctr3dsApplyTurboBind above.
+void Ctr3dsApplyShowAllTabs(int on)
+{
+    sShowAllTabs = on ? 1 : 0;
+}
+
+void Ctr3dsSetShowAllTabs(int on)
+{
+    int before = sShowAllTabs;
+
+    Ctr3dsApplyShowAllTabs(on);
+
+    if (sShowAllTabs != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetShowAllTabs(void)
+{
+    return sShowAllTabs;
+}
+
 // Modifier for the touch UI. Read at the same point as everything else, so it
 // is the same fresh hidScanInput() the touch state came from.
 int Ctr3dsUiModifierHeld(void)
