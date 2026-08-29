@@ -302,6 +302,114 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ---
 
+# Part D: Gameplay tweaks (WORKING)
+
+EXTRA page 2: EXP All, a badge-based level cap, a species randomiser, and a
+persistent bag sort. All off by default.
+
+These are the port's first **cheats**, and that is a real departure. `bridge.h`
+frames the show-all-tabs override as "a testing aid, not a cheat" precisely
+because everything it reveals is read-only; `ui_shell.h` said of EXTRA that
+"nothing here touches game state". Page 2 breaks that, so it is kept behind a
+page turn rather than mixed into page 1, and both comments were rewritten rather
+than left to quietly go stale. Page 1 remains host-side only.
+
+## Shape
+
+All the behaviour is in **`3ds/tweaks.c`** (game-side; added to the file list in
+`build_objs.sh`). The hooks inside `src/` are each one extra clause on a
+condition the game already evaluates, or one extra statement, always
+`#if PLATFORM_3DS` fenced. The toggles themselves are host-side in
+`3ds/host/main.c` and persisted by `settings.c`, read through `bridge.h`, with
+`src/siirtc.c` as the precedent for game code reading a host setting.
+
+`settings.bin` rather than the save block, because a setting the player taps
+should stick even if the game is never saved afterwards. The version went to 4;
+a v3 file is **migrated**, not discarded, since the v4 fields are appended and
+every v3 offset is unchanged. Discarding would have silently reset the player's
+top scale and turbo binds as the price of an unrelated feature.
+
+## Facts worth recording
+
+Four things that cost real time and are not recoverable by reading the code:
+
+- **A level cap must gate exp, never the level field.** `CalculateMonStats`
+  (`src/pokemon.c:2840`) recomputes `MON_DATA_LEVEL` from `MON_DATA_EXP` every
+  time it runs, and it runs from `BoxMonToMon`, evolution, PC deposit and
+  withdraw, and item use. Anything that clamped the level would be silently
+  undone by the next unrelated call. Exp is the source of truth, so the gates
+  are at `Cmd_getexp`, Rare Candy, and the day care.
+- **`CreateBoxMon` is the deepest randomiser hook and is the wrong one.** The
+  Battle Pike and Battle Pyramid do not store a species in the species field of
+  their wild tables; they store a 1-based **index** into a second table, create
+  the mon with it, then read it back with `GetMonData(...) - 1`
+  (`src/battle_pike.c:1113`, `src/battle_pyramid.c:1360`). A random value there
+  is an out-of-bounds read. `CreateMonWithGenderNatureLetter` and `CreateMaleMon`
+  also loop on the caller's species gender ratio, which never terminates if the
+  result is genderless. Targeted hooks avoid both.
+- **Valid species are 1..411 with 252..276 excluded.** Those 25 slots are
+  `SPECIES_OLD_UNOWN_B..Z`, placeholders with real `gSpeciesInfo` entries but
+  named "?". `NUM_SPECIES` is 412, which is `SPECIES_EGG`, a sentinel: both
+  `gSpeciesInfo` and `gSpeciesNames` end at 411, so indexing by it overreads.
+  That leaves 386 usable, and the index arithmetic in `SpeciesFromIndex` skips
+  the hole without a table or a rejection loop.
+- **The randomiser needs no stored seed.** It is derived from
+  `gSaveBlock2Ptr->playerTrainerId`, which makes the mapping stable for one
+  playthrough, different between playthroughs, and unchanged by toggling the
+  option off and back on.
+- **Two hooks on one path will map twice, and the starter is that path.** The
+  mapping is not idempotent, so `map(map(x))` is a third species. The starter
+  reaches `ScriptGiveMon` from `CB2_GiveStarter` carrying a species
+  `GetStarterPokemon` has already mapped, so hooking `ScriptGiveMon` as well
+  would hand the player a different mon from the one whose sprite and cry they
+  just chose. The gift hook therefore sits on `ScrCmd_givemon`, the only other
+  caller, and `ScriptGiveMon` itself maps nothing. Any future hook needs the
+  same check: enumerate the callers first.
+
+## The softlock guard
+
+Two separate things, and only one of them needed code.
+
+Items are **never randomised**, so key items, HMs and badges are safe by
+construction rather than by guard.
+
+Field-move coverage is the real vector: Surf, Waterfall and Dive gate
+progression outright. So the mapping is **HM-preserving**. It computes the
+original species' mask over the seven progression HMs (Fly is excluded as a
+convenience, not a requirement), then rehashes up to 16 times until a candidate
+covers it, falling back to the original species if none does. The guarantee is
+easy to state: wherever the original gave you a mon that could learn a field HM,
+so does the randomiser. `CanSpeciesLearnTMHM` already existed for the lookup,
+indexed by `itemId - ITEM_TM01`.
+
+## Deliberately not hooked
+
+Eggs and breeding (species comes from the parents), in-game trades (the trade
+requires handing over a specific species), Wally's tutorial Ralts and loaned
+Zigzagoon (the tutorial script depends on them), and all Frontier and Tower
+parties. Event scripts that buffer a hardcoded species name before `givemon`
+will still print the original name; that is a cosmetic data-side mismatch in
+`data/scripts/*.inc` and is not worth chasing.
+
+## Notes
+
+- The bag sort rewrites the real pocket arrays, so the in-game bag and the BAG
+  tab agree and the order sticks in the save. This is benign precedent-wise:
+  the game already re-sorts the TM and berry pockets on every bag open. The
+  bottom-screen entry point (`Ctr3dsSortBagNow`) carries the same overworld
+  gate the BAG tab's item use does, because reordering a pocket while the
+  in-game bag is open would slide an item out from under its cursor.
+- **EXTRA now needs a state key.** Page 2's "cap NN" readout moves when a badge
+  is earned, which happens nowhere near the tab. Everything else there changes
+  only through the touch handler, which marks dirty itself, but the cap alone
+  is enough: without `UiExtraStateKey()` in `top[4]` the readout sits stale
+  until the tab is re-entered.
+- Paging cost no vertical space. Page 1 already filled its 176px interior
+  exactly, so the pager sits on the row-1 label line at y=8..24, abutting the
+  row-1 buttons at y=25, right-aligned to the interior edge at x=311.
+
+---
+
 # Part C: Local wireless (Cable Club over UDS)
 
 ## Context

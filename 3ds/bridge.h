@@ -157,6 +157,38 @@ int  Ctr3dsGetTopScale(void);
 void Ctr3dsSetShowAllTabs(int on);
 int  Ctr3dsGetShowAllTabs(void);
 
+// Gameplay tweaks, shown on page 2 of the EXTRA tab.
+//
+// These ARE cheats, unlike everything above, and the distinction is worth
+// keeping sharp. Fast-forward, top scale and the tab override all leave the
+// game playing exactly as Game Freak wrote it; every option below deliberately
+// does not. They live here rather than in the save block because a setting the
+// player taps should stick even if the game is never saved afterwards, and
+// settings.bin is written on the tap.
+//
+// The randomiser has no seed field on purpose: it is derived from the save's
+// own trainer ID, so a mapping is stable for one playthrough, differs between
+// playthroughs, and survives being toggled off and back on.
+#define CTR_CAP_OFF      0
+#define CTR_CAP_SOFT     1   // reduced exp past the cap
+#define CTR_CAP_HARD     2   // no exp at all past the cap
+
+#define CTR_BAGSORT_OFF  0   // leave the player's own order alone
+#define CTR_BAGSORT_TYPE 1   // ascending item id, which groups by category
+#define CTR_BAGSORT_NAME 2   // alphabetical
+
+void Ctr3dsSetExpAll(int on);
+int  Ctr3dsGetExpAll(void);
+
+void Ctr3dsSetLevelCap(int mode);   // CTR_CAP_*
+int  Ctr3dsGetLevelCap(void);
+
+void Ctr3dsSetRandomizer(int on);
+int  Ctr3dsGetRandomizer(void);
+
+void Ctr3dsSetBagSort(int mode);    // CTR_BAGSORT_*
+int  Ctr3dsGetBagSort(void);
+
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
 // this instead (under PLATFORM_3DS). That file is game-side and includes this

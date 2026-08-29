@@ -31,6 +31,7 @@
 #include "constants/species.h"
 
 #include "../bridge.h"
+#include "../tweaks.h"
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
@@ -593,6 +594,12 @@ void UiBagTouch(const CtrTouchState *t)
         if (i >= 0 && i < POCKET_COUNT && sPocket != i + 1)
         {
             sPocket = (u8)(i + 1);
+
+            // Keep the list in the order the player asked for. Cheap enough
+            // here (it runs on a pocket tap, never on a repaint) and it is the
+            // only place this tab can pick up items gained out in the field,
+            // which never go through the in-game bag's own sort.
+            Ctr3dsSortBagNow();
             sScroll = 0;
             sCursor = 0;
             sMessage = MSG_NONE;

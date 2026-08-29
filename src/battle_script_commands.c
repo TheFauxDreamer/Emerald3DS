@@ -52,6 +52,15 @@
 #include "constants/songs.h"
 #include "constants/trainers.h"
 
+#if PLATFORM_3DS
+// EXP All and the level cap, both toggled from the bottom screen's EXTRA tab.
+// The behaviour lives in 3ds/tweaks.c, so each of the five hooks below is
+// either one extra clause on a condition the game already evaluates or one
+// extra statement. None of them changes the vanilla path, which is why every
+// one is fenced rather than folded in.
+#include "../3ds/tweaks.h"
+#endif
+
 extern const u8 *const gBattleScriptsForMoveEffects[];
 
 #define DEFENDER_IS_PROTECTED ((gProtectStructs[gBattlerTarget].protected) && (gBattleMoves[gCurrentMove].flags & FLAG_PROTECT_AFFECTED))
@@ -3303,7 +3312,11 @@ static void Cmd_getexp(void)
                 else
                     holdEffect = GetItemHoldEffect(item);
 
-                if (holdEffect == HOLD_EFFECT_EXP_SHARE)
+                if (holdEffect == HOLD_EFFECT_EXP_SHARE
+#if PLATFORM_3DS
+                 || Ctr3dsExpAllOn()
+#endif
+                   )
                     viaExpShare++;
             }
 
@@ -3342,13 +3355,25 @@ static void Cmd_getexp(void)
             else
                 holdEffect = GetItemHoldEffect(item);
 
-            if (holdEffect != HOLD_EFFECT_EXP_SHARE && !(gBattleStruct->sentInPokes & 1))
+            if (holdEffect != HOLD_EFFECT_EXP_SHARE && !(gBattleStruct->sentInPokes & 1)
+#if PLATFORM_3DS
+             && !Ctr3dsExpAllOn()
+#endif
+               )
             {
                 *(&gBattleStruct->sentInPokes) >>= 1;
                 gBattleScripting.getexpState = 5;
                 gBattleMoveDamage = 0; // used for exp
             }
-            else if (GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL) == MAX_LEVEL)
+            // A HARD cap rides on the existing MAX_LEVEL gate rather than on a
+            // new one: reaching the cap has to mean exactly what reaching level
+            // 100 already means, or the two would drift apart. Note this also
+            // stops MonGainEVs below, which is intended for a challenge cap.
+            else if (GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL) == MAX_LEVEL
+#if PLATFORM_3DS
+                  || Ctr3dsHardCapBlocks(GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL))
+#endif
+                    )
             {
                 *(&gBattleStruct->sentInPokes) >>= 1;
                 gBattleScripting.getexpState = 5;
@@ -3371,7 +3396,11 @@ static void Cmd_getexp(void)
                     else
                         gBattleMoveDamage = 0;
 
-                    if (holdEffect == HOLD_EFFECT_EXP_SHARE)
+                    if (holdEffect == HOLD_EFFECT_EXP_SHARE
+#if PLATFORM_3DS
+                     || Ctr3dsExpAllOn()
+#endif
+                       )
                         gBattleMoveDamage += gExpShareExp;
                     if (holdEffect == HOLD_EFFECT_LUCKY_EGG)
                         gBattleMoveDamage = (gBattleMoveDamage * 150) / 100;
@@ -3395,6 +3424,16 @@ static void Cmd_getexp(void)
                     {
                         i = STRINGID_EMPTYSTRING4;
                     }
+
+#if PLATFORM_3DS
+                    // A SOFT cap scales here, after Lucky Egg / trainer /
+                    // traded have all applied and before the message is built
+                    // below, so the number the player is shown is the number
+                    // the mon actually receives.
+                    gBattleMoveDamage = (s32)Ctr3dsSoftCapExp(
+                        GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL),
+                        (u32)gBattleMoveDamage);
+#endif
 
                     // get exp getter battler
                     if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)

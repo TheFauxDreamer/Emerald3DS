@@ -1,12 +1,22 @@
 // EXTRA tab: port features that are not part of the original game.
 //
-// Everything here is a 3DS-side convenience rather than a change to Emerald, so
-// nothing in this file touches game state. It talks to the host through
-// bridge.h, the same way the RTC and the framebuffer do.
+// Two pages, and the split between them is the point rather than a way to fit
+// more in. PAGE 1 is host-side only: fast-forward, top-screen scale, button
+// binds, and the show-all-tabs testing override. None of it changes how Emerald
+// plays, which is what the rest of 3ds/ui/ is built on.
 //
-// The first three button rows deliberately span the same 22..298, so the block
-// reads as one control panel rather than three unrelated widgets. The fourth is
-// a testing override and is set apart: label beside its buttons, not above.
+// PAGE 2 is the exception, and is deliberately kept behind a page turn rather
+// than mixed in with page 1. Every option on it is a cheat: EXP All, a level
+// cap, a species randomiser, a bag sort order. The behaviour lives in
+// 3ds/tweaks.c; this file only draws the toggles and reads them back.
+//
+// Paging costs no vertical space at all. Page 1 already fills its 176px
+// interior exactly (four rows, y=8 to y=183), so the pager sits on the row-1
+// label line instead, whose right-hand side is empty on both pages.
+//
+// On both pages the first three button rows deliberately span the same 22..298,
+// so the block reads as one control panel rather than three unrelated widgets.
+// The fourth row is set apart: label beside its buttons, not above.
 
 #include "global.h"
 
@@ -14,6 +24,9 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+
+// Ctr3dsCurrentLevelCap(), for the live "cap NN" readout on page 2.
+#include "../tweaks.h"
 
 // Doubling steps rather than 1/2/3/4: past 2x the interesting question is
 // "much faster", and 3x sits too close to 2x to be worth a button.
@@ -53,16 +66,23 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define ROW3_LABEL_Y  108
 #define LABEL_TO_BTN  17
 
+// Named for the row rather than for whatever page 1 happens to put there, so
+// page 2 can share the grid without its code reading as if it were drawing
+// game speeds and screen scales.
+#define ROW1_BTN_Y    (ROW1_LABEL_Y + LABEL_TO_BTN)
+#define ROW2_BTN_Y    (ROW2_LABEL_Y + LABEL_TO_BTN)
+#define ROW3_BTN_Y    (ROW3_LABEL_Y + LABEL_TO_BTN)
+
 #define SPD_W         60
-#define SPD_Y         (ROW1_LABEL_Y + LABEL_TO_BTN)
+#define SPD_Y         ROW1_BTN_Y
 #define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
 
 #define SCL_W         84
-#define SCL_Y         (ROW2_LABEL_Y + LABEL_TO_BTN)
+#define SCL_Y         ROW2_BTN_Y
 #define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
 
 #define TRB_W         60
-#define TRB_Y         (ROW3_LABEL_Y + LABEL_TO_BTN)
+#define TRB_Y         ROW3_BTN_Y
 #define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
 
 // The MOD note shares the BUTTON HOLD label's line. That label is 63px wide, so
@@ -71,33 +91,59 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 
 // Tab visibility. Label on the left, then the two states, then a reminder that
 // this exists for testing rather than as a way to skip the game.
-#define TAB_Y         157
+#define ROW4_Y        157
+#define TAB_Y         ROW4_Y
 #define TAB_W         84
 #define TAB_LABEL_X   16
 #define TAB_X(i)      (60 + (i) * (TAB_W + 8))
 #define TAB_HINT_X    (TAB_X(1) + TAB_W + 12)
 
+// The pager, right-aligned to the interior edge at x=311 and sharing the row-1
+// label line. 17px tall at y=8 ends at y=24, exactly abutting the row-1 buttons
+// at y=25 without overlapping them, which is what makes it free.
+#define PGR_W         26
+#define PGR_H         17
+#define PGR_Y         ROW1_LABEL_Y
+#define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - (2 - (i)) * PGR_W - (1 - (i)) * 4)
+#define PAGE_COUNT    2
+
+// Page 2 rows 1 to 3 reuse the SCREEN SIZE geometry above unchanged. Row 4
+// carries its label beside its buttons, as page 1's does, and three 75px
+// buttons is what fits between the label and the edge.
+#define P2_HINT_X     96
+#define WIDE_W        SCL_W
+#define WIDE_X(i)     SCL_X(i)
+#define SORT_W        75
+#define SORT_X(i)     (70 + (i) * (SORT_W + 8))
+
+// Which page is showing. UI state only, deliberately not persisted: EXTRA
+// always opens on page 1, so the cheats are never what greets you.
+static u8 sPage;
+
 // The selected button gets a doubled inset outline as well as accent text.
 // Colour alone is easy to miss against the lighter window frames.
-static void DrawButton(int x, int y, int w, const u8 *label, int active)
+static void DrawButtonH(int x, int y, int w, int h, const u8 *label, int active)
 {
-    UiRect(x, y, w, BTN_H, UI_COL_DIM);
+    UiRect(x, y, w, h, UI_COL_DIM);
 
     if (active)
     {
-        UiRect(x + 2, y + 2, w - 4, BTN_H - 4, UI_COL_ACCENT);
-        UiRect(x + 3, y + 3, w - 6, BTN_H - 6, UI_COL_ACCENT);
+        UiRect(x + 2, y + 2, w - 4, h - 4, UI_COL_ACCENT);
+        UiRect(x + 3, y + 3, w - 6, h - 6, UI_COL_ACCENT);
     }
 
-    UiText(x + (w - UiTextWidth(label)) / 2, y + (BTN_H - UI_GLYPH_H) / 2,
+    UiText(x + (w - UiTextWidth(label)) / 2, y + (h - UI_GLYPH_H) / 2,
            label, active ? UI_COL_ACCENT : UiThemeText(), UiThemeShadow());
 }
 
-void UiExtraDraw(void)
+static void DrawButton(int x, int y, int w, const u8 *label, int active)
+{
+    DrawButtonH(x, y, w, BTN_H, label, active);
+}
+
+static void DrawPage1(void)
 {
     u8 label[40];
-
-    UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
     UiText(16, ROW1_LABEL_Y, UiAscii(label, "GAME SPEED", sizeof(label)),
            UiThemeText(), UiThemeShadow());
@@ -181,11 +227,121 @@ void UiExtraDraw(void)
            UI_COL_DIM, UiThemeShadow());
 }
 
-void UiExtraTouch(const CtrTouchState *t)
+static void DrawPage2(void)
 {
-    if (!t->justReleased)
-        return;
+    u8 label[40];
+    int cap = Ctr3dsCurrentLevelCap();
+    int mode;
 
+    UiText(16, ROW1_LABEL_Y, UiAscii(label, "EXP ALL", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    DrawButton(WIDE_X(0), ROW1_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               !Ctr3dsGetExpAll());
+    DrawButton(WIDE_X(1), ROW1_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
+               Ctr3dsGetExpAll());
+
+    UiText(16, ROW2_LABEL_Y, UiAscii(label, "LEVEL CAP", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    // The cap the player is currently under, so the row says what it is doing
+    // rather than only that it is on. Tracks badge progress, which is why EXTRA
+    // needs a state key in bottom_screen.c.
+    mode = Ctr3dsGetLevelCap();
+    if (mode != CTR_CAP_OFF)
+    {
+        int x = P2_HINT_X;
+
+        x += UiText(x, ROW2_LABEL_Y, UiAscii(label, "cap ", sizeof(label)),
+                    UI_COL_DIM, UiThemeShadow());
+        UiNum(x, ROW2_LABEL_Y, cap, UI_COL_DIM, UiThemeShadow());
+    }
+
+    DrawButton(WIDE_X(0), ROW2_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               mode == CTR_CAP_OFF);
+    DrawButton(WIDE_X(1), ROW2_BTN_Y, WIDE_W, UiAscii(label, "SOFT", sizeof(label)),
+               mode == CTR_CAP_SOFT);
+    DrawButton(WIDE_X(2), ROW2_BTN_Y, WIDE_W, UiAscii(label, "HARD", sizeof(label)),
+               mode == CTR_CAP_HARD);
+
+    UiText(16, ROW3_LABEL_Y, UiAscii(label, "RANDOMISER", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    // Worth saying: nothing already caught or already on screen changes, and
+    // the mapping is keyed on this save's trainer ID, so it is the same every
+    // launch and toggling it off and back on does not reshuffle anything.
+    UiText(P2_HINT_X, ROW3_LABEL_Y,
+           UiAscii(label, "new encounters only", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+
+    DrawButton(WIDE_X(0), ROW3_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               !Ctr3dsGetRandomizer());
+    DrawButton(WIDE_X(1), ROW3_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
+               Ctr3dsGetRandomizer());
+
+    UiText(TAB_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "BAG SORT", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    mode = Ctr3dsGetBagSort();
+
+    DrawButton(SORT_X(0), ROW4_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
+               mode == CTR_BAGSORT_OFF);
+    DrawButton(SORT_X(1), ROW4_Y, SORT_W, UiAscii(label, "TYPE", sizeof(label)),
+               mode == CTR_BAGSORT_TYPE);
+    DrawButton(SORT_X(2), ROW4_Y, SORT_W, UiAscii(label, "NAME", sizeof(label)),
+               mode == CTR_BAGSORT_NAME);
+}
+
+static void DrawPager(void)
+{
+    u8 label[8];
+    u32 i;
+
+    UiTextRight(PGR_X(0) - 4, PGR_Y + (PGR_H - UI_GLYPH_H) / 2,
+                UiAscii(label, "PAGE", sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+
+    for (i = 0; i < PAGE_COUNT; i++)
+    {
+        char text[2];
+
+        text[0] = (char)('1' + i);
+        text[1] = '\0';
+
+        DrawButtonH(PGR_X((int)i), PGR_Y, PGR_W, PGR_H,
+                    UiAscii(label, text, sizeof(label)), sPage == i);
+    }
+}
+
+void UiExtraDraw(void)
+{
+    UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
+
+    if (sPage == 0)
+        DrawPage1();
+    else
+        DrawPage2();
+
+    DrawPager();
+}
+
+// Page 2's "cap NN" readout moves when the player earns a badge, which happens
+// nowhere near this tab. Everything else here changes only through the touch
+// handler below, which marks dirty itself, but the cap alone is enough to need
+// a key: without one the readout would sit stale until the tab was re-entered.
+u32 UiExtraStateKey(void)
+{
+    return (u32)sPage
+         | ((u32)Ctr3dsCurrentLevelCap() << 4)
+         | ((u32)Ctr3dsGetLevelCap() << 12)
+         | ((u32)(Ctr3dsGetExpAll() != 0) << 14)
+         | ((u32)(Ctr3dsGetRandomizer() != 0) << 15)
+         | ((u32)Ctr3dsGetBagSort() << 16);
+}
+
+static void TouchPage1(const CtrTouchState *t)
+{
     for (u32 i = 0; i < SPEED_COUNT; i++)
     {
         if (UiHit(t, SPD_X((int)i), SPD_Y, SPD_W, BTN_H))
@@ -236,4 +392,86 @@ void UiExtraTouch(const CtrTouchState *t)
             return;
         }
     }
+}
+
+static void TouchPage2(const CtrTouchState *t)
+{
+    static const u8 sCapModes[]  = { CTR_CAP_OFF, CTR_CAP_SOFT, CTR_CAP_HARD };
+    static const u8 sSortModes[] = { CTR_BAGSORT_OFF, CTR_BAGSORT_TYPE, CTR_BAGSORT_NAME };
+
+    if (UiHit(t, WIDE_X(0), ROW1_BTN_Y, WIDE_W, BTN_H))
+    {
+        Ctr3dsSetExpAll(0);
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, WIDE_X(1), ROW1_BTN_Y, WIDE_W, BTN_H))
+    {
+        Ctr3dsSetExpAll(1);
+        UiMarkDirty();
+        return;
+    }
+
+    for (u32 i = 0; i < ARRAY_COUNT(sCapModes); i++)
+    {
+        if (UiHit(t, WIDE_X((int)i), ROW2_BTN_Y, WIDE_W, BTN_H))
+        {
+            Ctr3dsSetLevelCap(sCapModes[i]);
+            UiMarkDirty();
+            return;
+        }
+    }
+
+    if (UiHit(t, WIDE_X(0), ROW3_BTN_Y, WIDE_W, BTN_H))
+    {
+        Ctr3dsSetRandomizer(0);
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, WIDE_X(1), ROW3_BTN_Y, WIDE_W, BTN_H))
+    {
+        Ctr3dsSetRandomizer(1);
+        UiMarkDirty();
+        return;
+    }
+
+    for (u32 i = 0; i < ARRAY_COUNT(sSortModes); i++)
+    {
+        if (UiHit(t, SORT_X((int)i), ROW4_Y, SORT_W, BTN_H))
+        {
+            Ctr3dsSetBagSort(sSortModes[i]);
+
+            // Apply it straight away rather than waiting for the next bag
+            // open, so the button that was just tapped has a visible effect.
+            // Ctr3dsSortBagNow refuses unless the player is stood in the
+            // overworld with no script running.
+            Ctr3dsSortBagNow();
+
+            UiMarkDirty();
+            return;
+        }
+    }
+}
+
+void UiExtraTouch(const CtrTouchState *t)
+{
+    if (!t->justReleased)
+        return;
+
+    // The pager is live on both pages and is tested before either page's own
+    // controls, so nothing can ever sit underneath it.
+    for (u32 i = 0; i < PAGE_COUNT; i++)
+    {
+        if (UiHit(t, PGR_X((int)i), PGR_Y, PGR_W, PGR_H))
+        {
+            sPage = (u8)i;
+            UiMarkDirty();
+            return;
+        }
+    }
+
+    if (sPage == 0)
+        TouchPage1(t);
+    else
+        TouchPage2(t);
 }

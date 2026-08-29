@@ -273,6 +273,106 @@ int Ctr3dsGetShowAllTabs(void)
     return sShowAllTabs;
 }
 
+// Gameplay tweaks (EXTRA page 2). Same Apply/Set/Get split as everything above:
+// Apply mutates without persisting so CtrSettingsLoad() can use it, Set
+// persists, Get reads. The two enums are range-checked in Apply rather than
+// trusted, exactly as Ctr3dsApplyTurboBind rejects an invalid bind: a corrupt
+// settings byte must leave the default standing, not select a mode that does
+// not exist.
+//
+// Game-side code reads these through 3ds/tweaks.c, which is the only
+// translation unit that turns them into behaviour.
+static uint8_t sExpAll;
+static uint8_t sLevelCap;    // CTR_CAP_*
+static uint8_t sRandomizer;
+static uint8_t sBagSort;     // CTR_BAGSORT_*
+
+void Ctr3dsApplyExpAll(int on)
+{
+    sExpAll = on ? 1 : 0;
+}
+
+void Ctr3dsSetExpAll(int on)
+{
+    int before = sExpAll;
+
+    Ctr3dsApplyExpAll(on);
+
+    if (sExpAll != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetExpAll(void)
+{
+    return sExpAll;
+}
+
+void Ctr3dsApplyLevelCap(int mode)
+{
+    if (mode != CTR_CAP_OFF && mode != CTR_CAP_SOFT && mode != CTR_CAP_HARD)
+        return;
+
+    sLevelCap = (uint8_t)mode;
+}
+
+void Ctr3dsSetLevelCap(int mode)
+{
+    int before = sLevelCap;
+
+    Ctr3dsApplyLevelCap(mode);
+
+    if (sLevelCap != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetLevelCap(void)
+{
+    return sLevelCap;
+}
+
+void Ctr3dsApplyRandomizer(int on)
+{
+    sRandomizer = on ? 1 : 0;
+}
+
+void Ctr3dsSetRandomizer(int on)
+{
+    int before = sRandomizer;
+
+    Ctr3dsApplyRandomizer(on);
+
+    if (sRandomizer != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetRandomizer(void)
+{
+    return sRandomizer;
+}
+
+void Ctr3dsApplyBagSort(int mode)
+{
+    if (mode != CTR_BAGSORT_OFF && mode != CTR_BAGSORT_TYPE && mode != CTR_BAGSORT_NAME)
+        return;
+
+    sBagSort = (uint8_t)mode;
+}
+
+void Ctr3dsSetBagSort(int mode)
+{
+    int before = sBagSort;
+
+    Ctr3dsApplyBagSort(mode);
+
+    if (sBagSort != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetBagSort(void)
+{
+    return sBagSort;
+}
+
 // Modifier for the touch UI. Read at the same point as everything else, so it
 // is the same fresh hidScanInput() the touch state came from.
 int Ctr3dsUiModifierHeld(void)

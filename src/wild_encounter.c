@@ -64,6 +64,11 @@ EWRAM_DATA static u32 sFeebasRngValue = 0;
 
 #include "data/wild_encounters.h"
 
+#if PLATFORM_3DS
+// Species randomiser, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 static const struct WildPokemon sWildFeebas = {20, 25, SPECIES_FEEBAS};
 
 static const u16 sRoute119WaterTileData[] =
@@ -380,6 +385,13 @@ static void CreateWildMon(u16 species, u8 level)
 {
     bool32 checkCuteCharm;
 
+#if PLATFORM_3DS
+    // Must be the FIRST thing here: the gender-ratio switch below reads
+    // gSpeciesInfo[species], so remapping any later would run Cute Charm
+    // against the wrong species' ratio.
+    species = Ctr3dsMapWildSpecies(species);
+#endif
+
     ZeroEnemyPartyMons();
     checkCuteCharm = TRUE;
 
@@ -461,7 +473,13 @@ static u16 GenerateFishingWildMon(const struct WildPokemonInfo *wildMonInfo, u8 
     u8 level = ChooseWildMonLevel(&wildMonInfo->wildPokemon[wildMonIndex]);
 
     CreateWildMon(wildMonInfo->wildPokemon[wildMonIndex].species, level);
+#if PLATFORM_3DS
+    // The caller feeds this to SetPokemonAnglerSpecies for the TV show, so it
+    // has to be the species actually hooked, not the one in the table.
+    return Ctr3dsMapWildSpecies(wildMonInfo->wildPokemon[wildMonIndex].species);
+#else
     return wildMonInfo->wildPokemon[wildMonIndex].species;
+#endif
 }
 
 static bool8 SetUpMassOutbreakEncounter(u8 flags)

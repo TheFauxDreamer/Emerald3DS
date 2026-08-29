@@ -73,7 +73,8 @@ the town door when you are inside one. Tap anywhere to read that place's name;
 tap the sea to go back to following yourself. The caption names the landmark you
 are standing on when there is one.
 
-**EXTRA.** Things the original game has no concept of. Fast-forward at 1x, 2x,
+**EXTRA.** Two pages. **Page 1** is things the original game has no concept of
+but which leave it playing exactly as it shipped. Fast-forward at 1x, 2x,
 4x or 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or
 FILL (fills the panel, stretching 11%); the four buttons the GBA has no use
 for (X, Y, ZL and ZR) bindable to a hold-for-speed or to the touch UI's
@@ -83,6 +84,29 @@ first earning the Pokedex or the PokeNav in game; everything it reveals is
 read-only, so the worst it can do is show you a Pokedex you have not been given.
 Screen size, bindings and the tab override persist; fast-forward deliberately
 resets each launch.
+
+**Page 2** is different in kind, which is why it is behind a page turn. Every
+option on it is a cheat, and all four are off by default:
+
+- **EXP ALL.** Every living party member gains experience, exactly as though it
+  were holding an Exp. Share. The game's own participant/share split does the
+  work, so the totals stay balanced rather than multiplied.
+- **LEVEL CAP: OFF / SOFT / HARD.** The cap follows your badges (15, 19, 23, 29,
+  31, 33, 42, 46, then 58 for the Elite Four), which are Emerald's real gym
+  leader ace levels. HARD stops experience dead at the cap, including Rare
+  Candies and the day care. SOFT sharply reduces it instead. The row shows the
+  cap you are currently under.
+- **RANDOMISER.** Wild encounters, trainer parties, gift and static Pokemon,
+  the legendaries, the roaming Lati, and your starter are all remapped. The
+  mapping is derived from your save's trainer ID, so it is the same every launch
+  and toggling it off and back on does not reshuffle anything. It cannot
+  softlock the game: no item is ever randomised, so every key item, HM and badge
+  is untouched, and a species that could learn a field HM in the original is
+  always replaced by one that can learn it too. Already-caught Pokemon do not
+  change.
+- **BAG SORT: OFF / TYPE / NAME.** TYPE is category order, NAME is alphabetical.
+  It reorders the real bag, so the in-game bag and the BAG tab agree, and the
+  order sticks in your save.
 
 The whole thing follows your **Options → Frame** border choice, live, as you
 cycle through it.
@@ -100,6 +124,7 @@ means an emulator only.
 | Real-time clock | ✅ Backed by the console clock, so berries and time-of-day work |
 | Bottom: party, bag, Pokédex, extras | ✅ |
 | Bottom: map | ✅ Region map, player marker, tap for names |
+| Bottom: tweaks | ✅ EXP All, badge level cap, randomiser, bag sort |
 | Battle items from the touch screen | ✅ |
 | Audio | ⚠️ Needs a DSP firmware dump; some sample types silent |
 | Link cable / wireless | 🚧 On the `local-wireless` branch, unbuilt and untested |
