@@ -410,6 +410,50 @@ will still print the original name; that is a cosmetic data-side mismatch in
 
 ---
 
+# Save durability
+
+Symptom that led here: saving once, closing the game and reopening loaded the
+*previous* save, and saving twice worked around it.
+
+That is the two-slot save format behaving correctly, not failing. Emerald keeps
+an active slot and a backup; `GetSaveValidStatus` (`src/save.c:519`) takes
+whichever has the higher counter and passes its checksums. Loading the backup is
+the right answer when the active slot is not on the card. The two-save
+workaround follows: saves alternate slots, so a second one gives the file
+another chance to be written before the process dies.
+
+**The fact worth keeping: the exit path does not run when the emulator window is
+closed.** `CtrSaveFlush(1)` in `main()` is reached only through the `longjmp`
+that `aptMainLoop()` returning false triggers. Closing the Azahar window kills
+the process outright, so that never happens, and anything still sitting behind
+the write-coalescing debounce is lost. A debounce is a guess at when a save
+ended; the game knows exactly.
+
+So saves now commit on the event. `CtrSaveCommit()` (`3ds/host/save.c`) forces
+the file write, and `src/save.c` calls it the moment a save completes, at three
+sites: `TrySavingData` (which covers SAVE_NORMAL, SAVE_LINK, SAVE_HALL_OF_FAME
+and SAVE_OVERWRITE_DIFFERENT_FILE), `TryWriteSpecialSaveSector`, and the
+signature step of `Task_LinkFullSave`. The last two do not pass through
+`TrySavingData`. The debounce stays as a backstop and is now 100 ms.
+
+Two smaller things fixed alongside:
+
+- `Rp2350SaveSync()` stays *deferred* on purpose. `VerifyFlashSector` calls it
+  after every sector, so forcing there would be fourteen 128 KB writes per save.
+- The file swap moves the old save aside instead of deleting it. FAT will not
+  rename onto an existing name, so the old file has to move, but moving rather
+  than deleting means a complete save is on the card at every instant: a failed
+  rename puts the original back, and dying between the two renames leaves a
+  `.bak` that `CtrSaveLoad` recovers at boot. `fclose` is also checked now,
+  since on 3DS newlib that is the call that reaches the FS service.
+
+Note the burst size here is small, which is why committing per save is
+affordable: on real hardware a sector is ~4080 single-byte programs, but
+`ProgramFlashSector_MX` takes its whole-sector branch on this port, so a full
+save is 28 hook calls.
+
+---
+
 # Part C: Local wireless (Cable Club over UDS)
 
 ## Context

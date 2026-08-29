@@ -77,6 +77,13 @@ uint16_t Rp2350SaveProgramSector(uint16_t sectorNum, uint8_t *src);
 uint16_t Rp2350SaveProgramByte(uint16_t sectorNum, uint32_t offset, uint8_t data);
 void     Rp2350SaveSync(void);
 
+// Write the save image to the SD card NOW, ignoring the write-coalescing
+// debounce. Called from src/save.c the instant a save completes, so the file is
+// current before the game hands control back to the player. Without it the save
+// depends on the process surviving long enough for the debounce to fire, which
+// closing the emulator window does not guarantee.
+void     CtrSaveCommit(void);
+
 // Fast-forward. The game's superloop always runs one logical frame per
 // Rp2350PresentFrame() call; this sets how many of those happen per DISPLAYED
 // frame, so 2 means the game advances twice as fast.
