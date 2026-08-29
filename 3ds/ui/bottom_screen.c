@@ -148,6 +148,8 @@ static u32 UiStateHash(void)
         top[4] = UiDexStateKey();
     else if (sTab == UI_TAB_MAP)
         top[4] = UiMapStateKey();
+    else if (sTab == UI_TAB_EXTRA)
+        top[4] = UiExtraStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {

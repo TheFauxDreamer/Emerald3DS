@@ -83,10 +83,16 @@ u32 UiMapStateKey(void);
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
 
-// Port features that are not part of the original game (fast-forward, and
-// whatever follows it). Nothing here touches game state.
+// Port features that are not part of the original game. Two pages: page 1 is
+// host-side only and touches no game state, page 2 is the gameplay tweaks and
+// deliberately does.
 void UiExtraDraw(void);
 void UiExtraTouch(const CtrTouchState *t);
+
+// Cheap identity of the tweak toggles and the live level-cap readout, for the
+// shell's repaint hash. The cap moves when a badge is earned, which happens
+// nowhere near this tab.
+u32 UiExtraStateKey(void);
 
 // Cheap identity of the dex counts, for the shell's repaint hash. Walks the
 // whole dex, so the shell only asks while the DEX tab is on screen.

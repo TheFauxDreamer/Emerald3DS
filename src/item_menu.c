@@ -51,6 +51,11 @@
 #include "constants/rgb.h"
 #include "constants/songs.h"
 
+#if PLATFORM_3DS
+// Persistent bag sort order, chosen on the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 #define TAG_POCKET_SCROLL_ARROW 110
 #define TAG_BAG_SCROLL_ARROW    111
 
@@ -1113,6 +1118,13 @@ void UpdatePocketItemList(u8 pocketId)
         CompactItemsInBagPocket(pocket);
         break;
     }
+
+#if PLATFORM_3DS
+    // Applied after the game's own pass, so the player's chosen order wins.
+    // This rewrites the real pocket array, which is what makes the order stick
+    // in the save and show up on the bottom screen's BAG tab as well.
+    Ctr3dsSortBagPocket(pocketId);
+#endif
 
     gBagMenu->numItemStacks[pocketId] = 0;
 

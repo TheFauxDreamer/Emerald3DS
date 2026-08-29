@@ -46,6 +46,11 @@
 #include "constants/moves.h"
 #include "constants/songs.h"
 #include "constants/trainers.h"
+
+#if PLATFORM_3DS
+// The badge-based level cap, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
 #include "constants/union_room.h"
 
 #define DAY_EVO_HOUR_BEGIN       12
@@ -4917,8 +4922,16 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, u16 item, u8 partyIndex, u8 mov
             }
 
             // Rare Candy
+            // A HARD level cap refuses here as well as in battle. This is the
+            // authoritative site: the party menu, the bag and AI item use all
+            // reach the effect through this table, so capping it here catches
+            // every route rather than just the one the player can see.
             if ((itemEffect[i] & ITEM3_LEVEL_UP)
-             && GetMonData(mon, MON_DATA_LEVEL, NULL) != MAX_LEVEL)
+             && GetMonData(mon, MON_DATA_LEVEL, NULL) != MAX_LEVEL
+#if PLATFORM_3DS
+             && !Ctr3dsHardCapBlocks(GetMonData(mon, MON_DATA_LEVEL, NULL))
+#endif
+               )
             {
                 dataUnsigned = gExperienceTables[gSpeciesInfo[GetMonData(mon, MON_DATA_SPECIES, NULL)].growthRate][GetMonData(mon, MON_DATA_LEVEL, NULL) + 1];
                 SetMonData(mon, MON_DATA_EXP, &dataUnsigned);

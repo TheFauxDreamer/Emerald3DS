@@ -73,6 +73,11 @@
 #include "constants/rgb.h"
 #include "constants/songs.h"
 
+#if PLATFORM_3DS
+// The badge-based level cap, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 enum {
     MENU_SUMMARY,
     MENU_SWITCH,
@@ -4960,7 +4965,13 @@ void ItemUseCB_RareCandy(u8 taskId, TaskFunc task)
     u16 *itemPtr = &gSpecialVar_ItemId;
     bool8 cannotUseEffect;
 
-    if (GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL)
+    // Mirrors the cap test in PokemonUseItemEffects, so a capped mon is told
+    // "It won't have any effect." rather than appearing to accept the candy.
+    if (GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL
+#if PLATFORM_3DS
+     && !Ctr3dsHardCapBlocks(GetMonData(mon, MON_DATA_LEVEL))
+#endif
+       )
     {
         BufferMonStatsToTaskData(mon, arrayPtr);
         cannotUseEffect = ExecuteTableBasedItemEffect_(gPartyMenu.slotId, *itemPtr, 0);

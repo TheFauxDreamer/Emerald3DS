@@ -533,6 +533,11 @@ const struct TrainerMoney gTrainerMoneyTable[] =
 
 #include "data/text/abilities.h"
 
+#if PLATFORM_3DS
+// Species randomiser, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 static void (*const sTurnActionsFuncsTable[])(void) =
 {
     [B_ACTION_USE_MOVE]               = HandleAction_UseMove,
@@ -2011,7 +2016,19 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The four TRAINER_MON_* party flavours are distinct structs,
+                // so this is the same edit four times over. Hooking the call
+                // rather than the nameHash loop above is deliberate: the hash
+                // seeds personalityValue, and leaving it on the original name
+                // keeps a trainer's mon at a stable nature and gender whether
+                // the randomiser is on or off. CreateMon is passed a FIXED
+                // personality, so there is no gender rejection loop here to
+                // trip over a genderless result.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
                 break;
             }
             case F_TRAINER_PARTY_CUSTOM_MOVESET:
@@ -2023,7 +2040,19 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The four TRAINER_MON_* party flavours are distinct structs,
+                // so this is the same edit four times over. Hooking the call
+                // rather than the nameHash loop above is deliberate: the hash
+                // seeds personalityValue, and leaving it on the original name
+                // keeps a trainer's mon at a stable nature and gender whether
+                // the randomiser is on or off. CreateMon is passed a FIXED
+                // personality, so there is no gender rejection loop here to
+                // trip over a genderless result.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 for (j = 0; j < MAX_MON_MOVES; j++)
                 {
@@ -2041,7 +2070,19 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The four TRAINER_MON_* party flavours are distinct structs,
+                // so this is the same edit four times over. Hooking the call
+                // rather than the nameHash loop above is deliberate: the hash
+                // seeds personalityValue, and leaving it on the original name
+                // keeps a trainer's mon at a stable nature and gender whether
+                // the randomiser is on or off. CreateMon is passed a FIXED
+                // personality, so there is no gender rejection loop here to
+                // trip over a genderless result.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 SetMonData(&party[i], MON_DATA_HELD_ITEM, &partyData[i].heldItem);
                 break;
@@ -2055,7 +2096,19 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The four TRAINER_MON_* party flavours are distinct structs,
+                // so this is the same edit four times over. Hooking the call
+                // rather than the nameHash loop above is deliberate: the hash
+                // seeds personalityValue, and leaving it on the original name
+                // keeps a trainer's mon at a stable nature and gender whether
+                // the randomiser is on or off. CreateMon is passed a FIXED
+                // personality, so there is no gender rejection loop here to
+                // trip over a genderless result.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 SetMonData(&party[i], MON_DATA_HELD_ITEM, &partyData[i].heldItem);
 

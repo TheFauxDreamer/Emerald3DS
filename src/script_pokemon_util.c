@@ -24,6 +24,11 @@
 #include "constants/items.h"
 #include "constants/battle_frontier.h"
 
+#if PLATFORM_3DS
+// Species randomiser, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 static void CB2_ReturnFromChooseHalfParty(void);
 static void CB2_ReturnFromChooseBattleFrontierParty(void);
 
@@ -65,6 +70,13 @@ u8 ScriptGiveMon(u16 species, u8 level, u16 item, u32 unused1, u32 unused2, u8 u
     u8 heldItem[2];
     struct Pokemon mon;
 
+    // NOT randomised here, deliberately, even though this is where gift mons
+    // are made. There are two callers: ScrCmd_givemon, which maps the species
+    // before calling in, and CB2_GiveStarter, whose species already came
+    // mapped out of GetStarterPokemon. Mapping again here would map the
+    // starter TWICE, so the mon handed over would not be the one whose sprite
+    // and cry the player just picked. The Pokedex flags below read this
+    // argument rather than the created mon, and it is correct in both paths.
     CreateMon(&mon, species, level, USE_RANDOM_IVS, FALSE, 0, OT_ID_PLAYER_ID, 0);
     heldItem[0] = item;
     heldItem[1] = item >> 8;
@@ -137,6 +149,12 @@ bool8 DoesPartyHaveEnigmaBerry(void)
 void CreateScriptedWildMon(u16 species, u8 level, u16 item)
 {
     u8 heldItem[2];
+
+#if PLATFORM_3DS
+    // Every legendary and every static overworld battle arrives through here,
+    // via the setwildbattle script command.
+    species = Ctr3dsMapSpecies(species);
+#endif
 
     ZeroEnemyPartyMons();
     CreateMon(&gEnemyParty[0], species, level, USE_RANDOM_IVS, 0, 0, OT_ID_PLAYER_ID, 0);
