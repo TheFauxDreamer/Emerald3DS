@@ -27,6 +27,14 @@
 #define CELL_W    (CTR_BOTTOM_WIDTH / COLS)     // 160
 #define CELL_H    (UI_CONTENT_H / ROWS)         // 64
 
+// A cell is laid out as three columns: the selection cursor, the mon's icon and
+// status badge, then everything textual. The cursor column is always reserved,
+// selected or not, so the cards do not shuffle sideways as the selection moves.
+// The first two sit at the frame's interior edge rather than over its border.
+#define CELL_CURSOR_X   8
+#define CELL_ICON_X     18
+#define CELL_TEXT_X     54
+
 // Detail view: the stats block and the moves list share this row band, so their
 // widths are one decision, not two. A stat cell is an 18px label plus an 18px
 // three-digit value, and the longest move name is 72px (THUNDERSHOCK), which
@@ -159,41 +167,43 @@ static void DrawCell(int index)
 
     UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, CELL_H / 8);
 
+    // Before the empty-slot check below, so an empty slot still shows which one
+    // the player is on. This slot is what the detail view opens on and what the
+    // BAG tab's target picker starts from, so it has to be readable either way.
+    if (index == UiSelectedMon())
+        UiChevron(cx + CELL_CURSOR_X, cy + (CELL_H - UI_CHEVRON_H) / 2);
+
     species = GetMonData(mon, MON_DATA_SPECIES);
     if (species == SPECIES_NONE)
         return;
 
-    UiMonIcon(cx + 6, cy + 16, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
+    UiMonIcon(cx + CELL_ICON_X, cy + 16, (u16)species,
+              GetMonData(mon, MON_DATA_PERSONALITY));
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
-    // anything. The HP bar starts at cx + 42, well clear of it.
-    UiStatusIcon(cx + 6, cy + 48, GetMonAilment(mon));
+    // anything. The HP bar starts at CELL_TEXT_X, well clear of it.
+    UiStatusIcon(cx + CELL_ICON_X, cy + 48, GetMonAilment(mon));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
-    nameW = UiText(cx + 42, cy + 8, name, UiThemeText(), UiThemeShadow());
+    nameW = UiText(cx + CELL_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());
 
     // Centred in the 15px name row, immediately after the name.
-    DrawMatchupArrows(cx + 42 + nameW + 4, cy + 8 + (UI_GLYPH_H - UI_ARROW_H) / 2,
+    DrawMatchupArrows(cx + CELL_TEXT_X + nameW + 4,
+                      cy + 8 + (UI_GLYPH_H - UI_ARROW_H) / 2,
                       cx + CELL_W - 8, mon);
 
     level = GetMonData(mon, MON_DATA_LEVEL);
     UiAscii(label, "Lv", sizeof(label));
-    UiText(cx + 42, cy + 26, label, UI_COL_DIM, UiThemeShadow());
-    UiNum(cx + 60, cy + 26, (s32)level, UiThemeText(), UiThemeShadow());
+    UiText(cx + CELL_TEXT_X, cy + 26, label, UI_COL_DIM, UiThemeShadow());
+    UiNum(cx + CELL_TEXT_X + 18, cy + 26, (s32)level, UiThemeText(), UiThemeShadow());
 
     // The animated value, not the raw one: bar and number slide together.
     hp    = sShownHp[index];
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
     UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UiThemeText(), UiThemeShadow());
-    UiHpBar(cx + 42, cy + 46, CELL_W - 52, hp, maxHp);
-
-    // The selected slot is what this tab's detail view opens on, and what the
-    // BAG tab's target picker starts highlighted, so it needs to be
-    // unmistakable.
-    if (index == UiSelectedMon())
-        UiRect(cx + 2, cy + 2, CELL_W - 4, CELL_H - 4, UI_COL_ACCENT);
+    UiHpBar(cx + CELL_TEXT_X, cy + 46, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
 }
 
 static void DrawDetail(void)
