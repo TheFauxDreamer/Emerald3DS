@@ -75,6 +75,11 @@ void UiBagTouch(const CtrTouchState *t);
 void UiMapDraw(void);
 void UiMapTouch(const CtrTouchState *t);
 
+// Cheap identity of where the player is on the region map, for the shell's
+// repaint hash. Nothing else in that hash tracks the player's location, so
+// without this the map would go stale while they walk.
+u32 UiMapStateKey(void);
+
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
 
