@@ -94,6 +94,11 @@ void UiExtraTouch(const CtrTouchState *t);
 // nowhere near this tab.
 u32 UiExtraStateKey(void);
 
+// The tweak state on its own, without EXTRA's page number. The PARTY tab shows
+// the same settings as cheat tags, so it needs the same key. Defined in
+// tab_extra.c, next to the controls that set them.
+u32 UiTweakStateKey(void);
+
 // Cheap identity of the dex counts, for the shell's repaint hash. Walks the
 // whole dex, so the shell only asks while the DEX tab is on screen.
 u32 UiDexStateKey(void);

@@ -330,14 +330,22 @@ void UiExtraDraw(void)
 // nowhere near this tab. Everything else here changes only through the touch
 // handler below, which marks dirty itself, but the cap alone is enough to need
 // a key: without one the readout would sit stale until the tab was re-entered.
+//
+// Split in two because the PARTY tab's cheat tags need the same state and none
+// of EXTRA's own page number. The cap VALUE is the part that actually moves on
+// its own; the rest only changes under this tab's own touch handler.
+u32 UiTweakStateKey(void)
+{
+    return (u32)Ctr3dsCurrentLevelCap()
+         | ((u32)Ctr3dsGetLevelCap() << 8)
+         | ((u32)(Ctr3dsGetExpAll() != 0) << 10)
+         | ((u32)(Ctr3dsGetRandomizer() != 0) << 11)
+         | ((u32)Ctr3dsGetBagSort() << 12);
+}
+
 u32 UiExtraStateKey(void)
 {
-    return (u32)sPage
-         | ((u32)Ctr3dsCurrentLevelCap() << 4)
-         | ((u32)Ctr3dsGetLevelCap() << 12)
-         | ((u32)(Ctr3dsGetExpAll() != 0) << 14)
-         | ((u32)(Ctr3dsGetRandomizer() != 0) << 15)
-         | ((u32)Ctr3dsGetBagSort() << 16);
+    return (u32)sPage | (UiTweakStateKey() << 4);
 }
 
 static void TouchPage1(const CtrTouchState *t)

@@ -17,6 +17,7 @@
 #include "constants/party_menu.h"
 
 #include "../bridge.h"
+#include "../tweaks.h"      // Ctr3dsCurrentLevelCap
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
@@ -25,7 +26,26 @@
 #define COLS      2
 #define ROWS      3
 #define CELL_W    (CTR_BOTTOM_WIDTH / COLS)     // 160
-#define CELL_H    (UI_CONTENT_H / ROWS)         // 64
+
+// Cheat tags. EXP All, a level cap and the randomiser can all be left on and
+// forgotten, and every one of them quietly changes how the game plays. The team
+// screen is where their effects actually show up, so it is where the reminder
+// belongs.
+//
+// The strip exists only while something is on. With nothing active the grid is
+// pixel-for-pixel what it always was, which matters because that is the common
+// case: a permanently reserved empty band would tax every player for a feature
+// most never enable. Both cell heights are whole tiles, which UiWindowFrame
+// requires -- 64 is 8 and 56 is 7.
+#define TAG_STRIP_H   24
+#define CELL_H_FULL   (UI_CONTENT_H / ROWS)                  // 64, no strip
+#define CELL_H_TIGHT  ((UI_CONTENT_H - TAG_STRIP_H) / ROWS)  // 56, strip up
+
+#define TAG_X0        8
+#define TAG_Y         2
+#define TAG_H         20
+#define TAG_PAD       5
+#define TAG_GAP       6
 
 // A cell is laid out as three columns: the selection cursor, the mon's icon and
 // status badge, then everything textual. The cursor column is always reserved,
@@ -155,35 +175,115 @@ static void DrawMatchupArrows(int x, int y, int xLimit, struct Pokemon *mon)
                 (risk > TYPE_MUL_NORMAL) ? UI_COL_HP_LOW : UI_COL_HP_HIGH);
 }
 
+// A cell's rows, which have to shift when the strip takes 8px off the height.
+// Two explicit sets rather than arithmetic on the difference: the full layout
+// is the one that shipped and has to stay exactly as it was, and the tight one
+// is a different arrangement rather than the same one squeezed -- the icon
+// moves up to the interior's top edge and the status badge drops onto the HP
+// bar's row, which is free because the bar starts well to its right.
+struct CellRows { int iconY, lvY, hpY, statusY; };
+static const struct CellRows sRowsFull  = { 16, 26, 46, 48 };
+static const struct CellRows sRowsTight = {  8, 24, 40, 40 };
+
+static bool8 CapOn(void)
+{
+    return Ctr3dsGetLevelCap() != CTR_CAP_OFF;
+}
+
+static bool8 AnyTweakOn(void)
+{
+    return Ctr3dsGetExpAll() || CapOn() || Ctr3dsGetRandomizer();
+}
+
+static int TagStripH(void) { return AnyTweakOn() ? TAG_STRIP_H : 0; }
+static int CellH(void)     { return AnyTweakOn() ? CELL_H_TIGHT : CELL_H_FULL; }
+static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
+
+// Semantic colours, so the tag carries its meaning before the text is read:
+// green for the one that helps you, amber and red for the one holding you back
+// (matching SOFT and HARD), and the UI's own accent for the one that changes
+// the world rather than the numbers. Text and outline share the colour, the way
+// the detail view's BACK box does.
+static int DrawTag(int x, const char *text, u16 colour)
+{
+    u8 label[12];
+    int w;
+
+    UiAscii(label, text, sizeof(label));
+    w = UiTextWidth(label) + TAG_PAD * 2;
+
+    UiRect(x, TAG_Y, w, TAG_H, colour);
+    UiText(x + TAG_PAD, TAG_Y + (TAG_H - UI_GLYPH_H) / 2, label,
+           colour, UiThemeShadow());
+
+    return w + TAG_GAP;
+}
+
+static void DrawTagStrip(void)
+{
+    int x = TAG_X0;
+
+    if (Ctr3dsGetExpAll())
+        x += DrawTag(x, "EXP", UI_COL_HP_HIGH);
+
+    if (CapOn())
+    {
+        // The number as well as the mode: "held at 19" is the useful fact, and
+        // showing it is what makes clear the cap tracks your badges rather than
+        // being a fixed setting.
+        bool8 hard  = Ctr3dsGetLevelCap() == CTR_CAP_HARD;
+        u16   colour = hard ? UI_COL_HP_LOW : UI_COL_HP_MID;
+        int   cap   = Ctr3dsCurrentLevelCap();
+        int   ty    = TAG_Y + (TAG_H - UI_GLYPH_H) / 2;
+        u8    label[12];
+        int   w, tx;
+
+        UiAscii(label, hard ? "CAP H" : "CAP S", sizeof(label));
+        w = UiTextWidth(label) + 3 + UiNumWidth(cap) + TAG_PAD * 2;
+
+        UiRect(x, TAG_Y, w, TAG_H, colour);
+        tx  = x + TAG_PAD;
+        tx += UiText(tx, ty, label, colour, UiThemeShadow());
+        UiNum(tx + 3, ty, (s32)cap, colour, UiThemeShadow());
+
+        x += w + TAG_GAP;
+    }
+
+    if (Ctr3dsGetRandomizer())
+        x += DrawTag(x, "RND", UI_COL_ACCENT);
+}
+
 static void DrawCell(int index)
 {
     struct Pokemon *mon = &gPlayerParty[index];
+    const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
+    int cellH = CellH();
     int cx = (index % COLS) * CELL_W;
-    int cy = (index / COLS) * CELL_H;
+    int cy = CellTop(index);
     u32 species, hp, maxHp, level;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[8];
     int nameW;
 
-    UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, CELL_H / 8);
+    UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, cellH / 8);
 
     // Before the empty-slot check below, so an empty slot still shows which one
     // the player is on. This slot is what the detail view opens on and what the
     // BAG tab's target picker starts from, so it has to be readable either way.
     if (index == UiSelectedMon())
-        UiChevron(cx + CELL_CURSOR_X, cy + (CELL_H - UI_CHEVRON_H) / 2);
+        UiChevron(cx + CELL_CURSOR_X, cy + (cellH - UI_CHEVRON_H) / 2);
 
     species = GetMonData(mon, MON_DATA_SPECIES);
     if (species == SPECIES_NONE)
         return;
 
-    UiMonIcon(cx + CELL_ICON_X, cy + 16, (u16)species,
+    UiMonIcon(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
               GetMonData(mon, MON_DATA_PERSONALITY));
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
     // anything. The HP bar starts at CELL_TEXT_X, well clear of it.
-    UiStatusIcon(cx + CELL_ICON_X, cy + 48, GetMonAilment(mon));
+    UiStatusIcon(cx + CELL_ICON_X, cy + rows->statusY, GetMonAilment(mon));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(cx + CELL_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());
@@ -195,15 +295,29 @@ static void DrawCell(int index)
 
     level = GetMonData(mon, MON_DATA_LEVEL);
     UiAscii(label, "Lv", sizeof(label));
-    UiText(cx + CELL_TEXT_X, cy + 26, label, UI_COL_DIM, UiThemeShadow());
-    UiNum(cx + CELL_TEXT_X + 18, cy + 26, (s32)level, UiThemeText(), UiThemeShadow());
+    UiText(cx + CELL_TEXT_X, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
+    UiNum(cx + CELL_TEXT_X + 18, cy + rows->lvY, (s32)level, UiThemeText(), UiThemeShadow());
+
+    // Which mon has actually hit the ceiling. The strip above says what the cap
+    // is; this says who it is holding, which is the thing you want when one mon
+    // has stopped growing and the rest have not.
+    //
+    // It goes in the gutter between the level and the right-aligned HP, the one
+    // slot in the cell that is free whatever those two numbers are: the level
+    // is at most 3 digits and Gen 3 party HP at most 3.
+    if (CapOn() && level >= Ctr3dsCurrentLevelCap())
+        UiTextRight(cx + 128, cy + rows->lvY,
+                    UiAscii(label, "CAP", sizeof(label)),
+                    (Ctr3dsGetLevelCap() == CTR_CAP_HARD) ? UI_COL_HP_LOW
+                                                          : UI_COL_HP_MID,
+                    UiThemeShadow());
 
     // The animated value, not the raw one: bar and number slide together.
     hp    = sShownHp[index];
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
-    UiNumRight(cx + CELL_W - 10, cy + 26, (s32)hp, UiThemeText(), UiThemeShadow());
-    UiHpBar(cx + CELL_TEXT_X, cy + 46, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
+    UiNumRight(cx + CELL_W - 10, cy + rows->lvY, (s32)hp, UiThemeText(), UiThemeShadow());
+    UiHpBar(cx + CELL_TEXT_X, cy + rows->hpY, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
 }
 
 static void DrawDetail(void)
@@ -328,10 +442,15 @@ static void DrawDetail(void)
 void UiPartyDraw(void)
 {
     if (sDetailOpen)
+    {
         DrawDetail();
-    else
-        for (int i = 0; i < PARTY_SIZE; i++)
-            DrawCell(i);
+        return;
+    }
+
+    DrawTagStrip();
+
+    for (int i = 0; i < PARTY_SIZE; i++)
+        DrawCell(i);
 }
 
 void UiPartyTouch(const CtrTouchState *t)
@@ -352,9 +471,12 @@ void UiPartyTouch(const CtrTouchState *t)
     for (int i = 0; i < PARTY_SIZE; i++)
     {
         int cx = (i % COLS) * CELL_W;
-        int cy = (i / COLS) * CELL_H;
+        int cy = CellTop(i);
 
-        if (!UiHit(t, cx, cy, CELL_W, CELL_H))
+        // Has to track the drawn geometry, strip or no strip, or taps land on
+        // the wrong mon. A tap on the strip itself falls through and does
+        // nothing, which is right: it is a readout, not a control.
+        if (!UiHit(t, cx, cy, CELL_W, CellH()))
             continue;
 
         // First tap selects, a tap on the already-selected slot opens detail.
