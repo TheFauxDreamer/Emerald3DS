@@ -63,6 +63,28 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
     [UI_TAB_EXTRA] = { "EXTRA", 0                    },
 };
 
+// Whether the game's save data exists to be read yet.
+//
+// gSaveBlock1Ptr and gSaveBlock2Ptr start as NULL (src/load_save.c:41-42) and
+// are only assigned once a file is loaded or started. Every flag read below
+// goes through gSaveBlock1Ptr, so before that point FlagGet() is a null
+// dereference plus a field offset: flags[] sits at offset 0x1270, which puts
+// the read at roughly 0x1300 with nothing mapped there.
+//
+// Azahar tolerated that for months of testing. A real ARM11 does not, and
+// faulted on the first hardware boot with "data abort, translation - section,
+// access type Read" at exactly that address. CtrBottomUpdate gates touch input
+// and Redraw() on sInGame, but the state hash is polled unconditionally, so
+// this was reached on literally the first frame.
+//
+// Deliberately not the same question as sInGame. That latches on reaching the
+// overworld and stays true through battles and menus, which is what the screen
+// wants; this asks only whether there is save data to read at all.
+static bool8 SaveDataLive(void)
+{
+    return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
+}
+
 static bool8 TabUnlocked(u32 tab)
 {
     // The EXTRA tab's testing override. Deliberately checked before the flag
@@ -71,7 +93,15 @@ static bool8 TabUnlocked(u32 tab)
     if (Ctr3dsGetShowAllTabs())
         return TRUE;
 
-    return sTabs[tab].flag == 0 || FlagGet(sTabs[tab].flag);
+    // Ordered so the two answers that need no save data come first, and the
+    // flag read is only reached once there is a save block to read it from.
+    if (sTabs[tab].flag == 0)
+        return TRUE;
+
+    if (!SaveDataLive())
+        return FALSE;
+
+    return FlagGet(sTabs[tab].flag);
 }
 
 // Fills `out` with the visible tab ids in order and returns how many. The bag
@@ -127,12 +157,16 @@ static u32 UiStateHash(void)
     u32 top[5];
     top[0] = UiFrameId();
     top[1] = sInGame;
-    top[2] = (u32)FlagGet(FLAG_SYS_POKEMON_GET)
-           | ((u32)FlagGet(FLAG_SYS_POKENAV_GET) << 1)
-           | ((u32)FlagGet(FLAG_SYS_POKEDEX_GET) << 2)
-           // Sits with the flags because it answers the same question they do:
-           // which tabs exist.
-           | ((u32)(Ctr3dsGetShowAllTabs() != 0) << 3);
+    // The override is host-side and always safe to read; the three flags are
+    // not, so they are only folded in once there is a save block behind them.
+    // Before that the hash simply reports "no tabs unlocked", which is both
+    // true and what the blank pre-game screen already shows.
+    top[2] = (u32)(Ctr3dsGetShowAllTabs() != 0) << 3;
+
+    if (SaveDataLive())
+        top[2] |= (u32)FlagGet(FLAG_SYS_POKEMON_GET)
+               |  ((u32)FlagGet(FLAG_SYS_POKENAV_GET) << 1)
+               |  ((u32)FlagGet(FLAG_SYS_POKEDEX_GET) << 2);
     // The matchup badges depend on who we are facing, so the opponent has to be
     // in here or they would go stale when it switches.
     top[3] = UiMatchupOpponentKey();
@@ -143,18 +177,24 @@ static u32 UiStateHash(void)
     // up, because both walk data the other tabs have no reason to touch --
     // counting the dex means every entry, and the map position means the whole
     // of InitMapBasedOnPlayerLocation.
+    // Every one of these walks save data: the dex counts live in
+    // gSaveBlock2Ptr->pokedex, the map position reads gSaveBlock1Ptr, and the
+    // level cap behind the party's cheat tags reads badge flags.
     top[4] = 0;
-    if (sTab == UI_TAB_DEX)
-        top[4] = UiDexStateKey();
-    else if (sTab == UI_TAB_MAP)
-        top[4] = UiMapStateKey();
-    else if (sTab == UI_TAB_EXTRA)
-        top[4] = UiExtraStateKey();
-    // The party grid's cheat tags print the live level cap, which steps up the
-    // moment a badge is earned. That can happen with this tab on screen and
-    // touches nothing else in the hash.
-    else if (sTab == UI_TAB_PARTY)
-        top[4] = UiTweakStateKey();
+    if (SaveDataLive())
+    {
+        if (sTab == UI_TAB_DEX)
+            top[4] = UiDexStateKey();
+        else if (sTab == UI_TAB_MAP)
+            top[4] = UiMapStateKey();
+        else if (sTab == UI_TAB_EXTRA)
+            top[4] = UiExtraStateKey();
+        // The party grid's cheat tags print the live level cap, which steps
+        // up the moment a badge is earned. That can happen with this tab on
+        // screen and touches nothing else in the hash.
+        else if (sTab == UI_TAB_PARTY)
+            top[4] = UiTweakStateKey();
+    }
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {

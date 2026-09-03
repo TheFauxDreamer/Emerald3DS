@@ -151,6 +151,13 @@ u8 UiFrameId(void)
     if (live >= 0)
         return (u8)live;
 
+    // Null until a file is loaded (src/load_save.c). This is read from the
+    // shell's repaint hash on the very first frame, so without the guard it is
+    // a null dereference at offset 0x14 -- an instant data abort on hardware,
+    // which Azahar happened to tolerate. Frame 0 is Emerald's own default.
+    if (gSaveBlock2Ptr == NULL)
+        return 0;
+
     return gSaveBlock2Ptr->optionsWindowFrameType;
 }
 

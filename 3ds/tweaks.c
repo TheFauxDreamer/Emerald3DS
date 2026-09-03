@@ -71,6 +71,17 @@ u8 Ctr3dsCurrentLevelCap(void)
     if (Ctr3dsGetLevelCap() == CTR_CAP_OFF)
         return MAX_LEVEL;
 
+    // FlagGet resolves to &gSaveBlock1Ptr->flags[...], and that pointer is NULL
+    // until a file is loaded (src/load_save.c). The bottom screen polls this
+    // through its repaint hash from the very first frame, long before then, so
+    // without this the badge sweep below is a null dereference. On a real 3DS
+    // that is an instant data abort; Azahar let it pass.
+    //
+    // No save means no badges, and the honest answer to "what is the cap" is
+    // that there is not one yet.
+    if (gSaveBlock1Ptr == NULL)
+        return MAX_LEVEL;
+
     for (i = 0; i < ARRAY_COUNT(sLevelCaps); i++)
     {
         if (!FlagGet(sLevelCaps[i].flag))
@@ -180,7 +191,15 @@ static u32 FieldHmMask(u16 species)
 // persisted for any of that to hold.
 static u32 RandomizerSeed(void)
 {
-    const u8 *id = gSaveBlock2Ptr->playerTrainerId;
+    const u8 *id;
+
+    // Same hazard as the level cap above: this pointer is NULL until a file
+    // exists. Nothing should be creating Pokemon that early, but the cost of
+    // being sure is one compare against a crash that only shows on hardware.
+    if (gSaveBlock2Ptr == NULL)
+        return 0;
+
+    id = gSaveBlock2Ptr->playerTrainerId;
 
     return (u32)id[0] | ((u32)id[1] << 8) | ((u32)id[2] << 16) | ((u32)id[3] << 24);
 }
@@ -199,6 +218,12 @@ u16 Ctr3dsMapSpecies(u16 species)
         return species;
 
     if (species == SPECIES_NONE || species > SPECIES_CHIMECHO)
+        return species;
+
+    // Without a save there is no trainer ID, so there is no stable mapping to
+    // give. Returning the original keeps the identity rather than inventing a
+    // seed of 0 that a later call would not reproduce.
+    if (gSaveBlock2Ptr == NULL)
         return species;
 
     // The softlock guard. Surf, Waterfall and Dive gate progression outright,
