@@ -560,6 +560,8 @@ static void Task_AnimateBgGoingDown(u8 taskId)
 
 static void VBlankCB_CableCar(void)
 {
+    VBLANK_REQUIRE(sCableCar);
+
     CopyBgTilemapBufferToVram(0);
     CopyBgTilemapBufferToVram(3);
     SetGpuReg(REG_OFFSET_BG3HOFS, sCableCar->bg3HorizontalOffset);

@@ -468,6 +468,8 @@ static void CB2_UsePokeblockMenu(void)
 
 static void VBlankCB_UsePokeblockMenu(void)
 {
+    VBLANK_REQUIRE(sMenu);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

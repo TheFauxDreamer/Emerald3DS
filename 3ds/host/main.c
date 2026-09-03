@@ -476,6 +476,12 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
+    // First line of the session, and the reason the log file exists at all: on
+    // a console svcOutputDebugString goes nowhere, so without a line on the SD
+    // card there is no way to tell "the port never started" from "the port
+    // started and something later went wrong". See 3ds/host/log.c.
+    CtrLog("emerald3ds: boot (built " __DATE__ " " __TIME__ ")\n");
+
     // Must precede everything: every VRAM/palette/OAM/register access in the
     // game derives from this block.
     CtrTrace("emerald3ds: main() entered\n");
@@ -490,7 +496,9 @@ int main(int argc, char **argv)
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
-        CtrTrace("emerald3ds: FATAL CtrVideoInit failed\n");
+        // CtrLog, not CtrTrace: this is the one failure that ends the run, so
+        // it has to survive into a release build's log.
+        CtrLog("emerald3ds: FATAL CtrVideoInit failed\n");
         CtrVideoExit();
         return 1;
     }
@@ -499,8 +507,9 @@ int main(int argc, char **argv)
     // services are up, since it goes through PTM.
     osSetSpeedupEnable(true);
 
+    // Says for itself whether audio came up, and why not when it did not: a
+    // missing sdmc:/3ds/dspfirm.cdc is the usual answer and is not fatal.
     CtrAudioInit();
-    CtrTrace("emerald3ds: audio ready\n");
     CtrBottomInit();
     CtrTrace("emerald3ds: bottom screen ready\n");
 
