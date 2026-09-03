@@ -1,0 +1,4 @@
+
+# Nintendo DSP firmware. Dump it from your own console with DSP1 and place it
+# at sdmc:/3ds/dspfirm.cdc. Never redistributable, so never committed.
+dspfirm.cdc
