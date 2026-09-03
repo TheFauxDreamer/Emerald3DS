@@ -64,11 +64,7 @@ void Ctr3dsApplyTopScale(int mode)
         mode = CTR_TOP_SCALE_DEFAULT;
 
     sTopScale = mode;
-
-    // CtrSettingsLoad() runs before CtrVideoInit(), so the texture may not
-    // exist yet. CtrVideoInit() applies the filter itself once it does.
-    if (sReady)
-        apply_top_filter();
+    apply_top_filter();
 }
 
 int Ctr3dsGetTopScale(void)
@@ -131,10 +127,19 @@ static int sReady;
 // equivalent of its `bilinear`, and it costs nothing extra to sample.
 //
 // So: nearest at the integer scale, linear at the two fractional ones.
+//
+// Safe to call before the texture exists. CtrSettingsLoad() restores the saved
+// scale through Ctr3dsApplyTopScale() before CtrVideoInit() has run, so the
+// guard lives here rather than at the call site: this is the only function that
+// touches the texture, and putting the check anywhere else needs sReady visible
+// higher up the file than it is declared.
 static void apply_top_filter(void)
 {
     GPU_TEXTURE_FILTER_PARAM f =
         (sTopScale == CTR_TOP_SCALE_1X) ? GPU_NEAREST : GPU_LINEAR;
+
+    if (!sReady)
+        return;   // CtrVideoInit() applies it itself once the texture exists
 
     C3D_TexSetFilter(&sTopTex, f, f);
 }
@@ -172,9 +177,10 @@ int CtrVideoInit(void)
         return 0;
 
     // The bottom screen is drawn 1:1 and never resampled, so nearest is always
-    // right there. The top screen depends on the scale; see apply_top_filter.
+    // right there. The top screen depends on the scale, and its filter is set
+    // at the bottom of this function: apply_top_filter() is a no-op until
+    // sReady, precisely so the pre-init call from CtrSettingsLoad() is safe.
     C3D_TexSetFilter(&sBotTex, GPU_NEAREST, GPU_NEAREST);
-    apply_top_filter();
 
     init_subtex(&sTopSub, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, TOP_TEX_W, TOP_TEX_H);
     init_subtex(&sBotSub, CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, BOT_TEX_W, BOT_TEX_H);
@@ -199,6 +205,12 @@ int CtrVideoInit(void)
 #endif
 
     sReady = 1;
+
+    // After sReady, or the guard inside it would swallow this one too. The
+    // filter is only read when the texture is bound, so setting it last in init
+    // is no different from setting it first.
+    apply_top_filter();
+
     return 1;
 }
 
