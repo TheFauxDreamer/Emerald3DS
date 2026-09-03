@@ -150,6 +150,11 @@ static u32 UiStateHash(void)
         top[4] = UiMapStateKey();
     else if (sTab == UI_TAB_EXTRA)
         top[4] = UiExtraStateKey();
+    // The party grid's cheat tags print the live level cap, which steps up the
+    // moment a badge is earned. That can happen with this tab on screen and
+    // touches nothing else in the hash.
+    else if (sTab == UI_TAB_PARTY)
+        top[4] = UiTweakStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
