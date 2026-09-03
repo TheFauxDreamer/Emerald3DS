@@ -102,58 +102,51 @@ static uint32_t sNonZero;     // how many samples were not silence
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
-// Why audio can be silent on a console and fine in an emulator.
+// Keep the DSP thread able to preempt the game loop.
 //
 // The 3DS scheduler is strict priority with no round-robin between different
-// priorities: a lower-priority thread runs only while every higher-priority
-// one is blocked. NDSP does its work on its own thread, created at 0x18.
+// priorities: a lower-priority thread runs only while every higher-priority one
+// is blocked. libctru puts NDSP's work on its own thread at 0x18, and
+// AffinityMask 1 with SystemModeExt Legacy confine both it and us to core 0, so
+// a main thread that outranked it would starve the DSP whenever the software
+// rasteriser had work to do -- and it always does. A .3dsx under hbmenu gets
+// main priority 0x30, i.e. below NDSP, which is the arrangement NDSP is
+// actually exercised in.
 //
-// This port ships as a CIA, and 3ds/emerald3ds.rsf sets the main thread to
-// priority 0x10 -- NUMERICALLY LOWER, so HIGHER priority than the DSP thread.
-// AffinityMask is 1 and SystemModeExt is Legacy, so both threads are confined
-// to core 0 and cannot simply run side by side. The result is a game loop that
-// software-rasterises a whole GBA frame while outranking the thread whose job
-// is to keep the DSP fed, and NDSP gets only the slack left over.
+// 3ds/emerald3ds.rsf asks for main thread priority 0x10, which WOULD be that
+// inversion. It measurably is not what the console hands out: on hardware this
+// function found the main thread already at or below 0x18 and changed nothing,
+// which is why the log below reports the priority unconditionally rather than
+// only when it acts. That reading is what ruled the theory out; do not let the
+// silence of an untaken branch look like a fix that worked.
 //
-// GSP's event thread (0x1A) is outranked today too, but that one recovers by
-// itself: the main thread blocks waiting on the very events it signals, which
-// forces the yield. Nothing in the frame loop ever waits on audio, so NDSP has
-// no equivalent rescue.
-//
-// An emulator hides this completely: the frame's work costs almost nothing in
-// emulated time, so the main thread blocks early and often and the DSP thread
-// always gets scheduled. Real silicon has no such slack.
-//
-// A .3dsx under hbmenu gets main priority 0x30, i.e. BELOW NDSP, which is the
-// arrangement every working NDSP homebrew actually runs in. Restore it.
-//
-// Done here rather than in the exheader because it should only happen when
-// there is a DSP thread to yield to: with audio disabled there is nothing on
-// this core to give priority to, and the game may as well keep it.
+// The guard stays because it costs one comparison and the exheader still asks
+// for the wrong thing.
 static void fix_thread_priority(void)
 {
     s32 before = 0, after = 0;
     Result rc;
 
     svcGetThreadPriority(&before, CUR_THREAD_HANDLE);
+    after = before;
 
     if (before < NDSP_THREAD_PRIO) {
         rc = svcSetThreadPriority(CUR_THREAD_HANDLE, MAIN_THREAD_PRIO);
-        svcGetThreadPriority(&after, CUR_THREAD_HANDLE);
-
         if (R_FAILED(rc)) {
-            // Not fatal: it means audio may stutter or stay silent under load,
-            // which is exactly what the health report below will then say.
-            CtrLog("emerald3ds: could not lower main thread priority "
-                   "(0x%02lX, rc=0x%08lX) - audio may starve\n",
-                   (unsigned long)before, (unsigned long)rc);
+            CtrLog("emerald3ds: main thread priority 0x%02lX outranks NDSP's "
+                   "0x%02X and could not be lowered (rc=0x%08lX)\n",
+                   (unsigned long)before, NDSP_THREAD_PRIO, (unsigned long)rc);
             return;
         }
-
-        CtrLog("emerald3ds: main thread priority 0x%02lX -> 0x%02lX "
-               "(below NDSP's 0x%02X)\n",
-               (unsigned long)before, (unsigned long)after, NDSP_THREAD_PRIO);
+        svcGetThreadPriority(&after, CUR_THREAD_HANDLE);
     }
+
+    // Unconditional. An absent line is not evidence of anything, and the first
+    // version of this only logged when it acted, which made "the inversion is
+    // not happening" indistinguishable from "the code never ran".
+    CtrLog("emerald3ds: main thread priority 0x%02lX (NDSP 0x%02X)%s\n",
+           (unsigned long)after, NDSP_THREAD_PRIO,
+           after != before ? " [lowered]" : "");
 }
 
 void CtrAudioInit(void)
@@ -246,14 +239,44 @@ void CtrAudioExit(void)
 // queued, which is the only case that can actually cost you audio.
 static void health_report(void)
 {
-    uint32_t ident = 0, bgmStatus = 0, zeroRet = 0;
+    // Mirrors the M4A_DBG_* order in rp2350/m4a_1.c: each entry is what a CLEAR
+    // bit means, and the first clear one is the answer. Kept as text here so the
+    // log reads as a diagnosis rather than a number to decode by hand.
+    static const char *const kChainFaults[] = {
+        "m4aSoundInit never published gSoundInfo (SOUND_INFO_PTR is wrong)",
+        "MPlayOpen never ran: the music player chain is empty",
+        "MPlayExtender never ran: no CGB hook",
+        "the BGM player was never opened",
+        "no song has been started",
+        "the started song has no tracks",
+        "no track is running (nothing is playing right now)",
+    };
+
+    uint32_t ident = 0, bgmStatus = 0, zeroRet = 0, active = 0, flags = 0;
+    uint8_t  masterVol = 0, maxChans = 0;
     int32_t  spvb = 0;
     const char *verdict;
+    unsigned i;
 
     Rp2350AudioDebug(&ident, &spvb, &bgmStatus, &zeroRet);
+    Rp2350MixerDebug(&masterVol, &maxChans, &active, &flags);
 
-    if (sPeak == 0)
-        verdict = "SAMPLES ARE ALL ZERO - the silence is upstream of the DSP";
+    if (sPeak == 0) {
+        // Name the first broken link rather than just reporting silence. Only
+        // reached when the samples really are all zero, so the chain walk is
+        // the explanation and not a coincidence.
+        verdict = "samples all zero, and every engine stage looks set";
+        for (i = 0; i < sizeof(kChainFaults) / sizeof(kChainFaults[0]); i++) {
+            if (!(flags & (1u << i))) {
+                verdict = kChainFaults[i];
+                break;
+            }
+        }
+        if (masterVol == 0)
+            verdict = "masterVolume is 0: every channel mixes to nothing";
+        else if (maxChans == 0)
+            verdict = "maxChans is 0: the mixer loop never runs";
+    }
     else if (sStalled > sFrames / 4)
         verdict = "the DSP is not draining buffers (NDSP thread starved?)";
     else if (sUnderruns > sFrames / 4)
@@ -270,10 +293,14 @@ static void health_report(void)
 
     // The engine's own view, which the host side cannot infer. bgm 0 means no
     // song is playing, which is a complete and innocent explanation for a peak
-    // of 0 and has nothing to do with the 3DS at all.
-    CtrLog("emerald3ds: m4a ident=%08lX spvb=%ld bgm=%08lX zero-returns=%lu: %s\n",
+    // of 0 and has nothing to do with the 3DS at all; masterVol 0 or chans 0
+    // mean the mixer is structurally incapable of producing anything.
+    CtrLog("emerald3ds: m4a ident=%08lX spvb=%ld bgm=%08lX zero-returns=%lu "
+           "masterVol=%u maxChans=%u active=%lu chain=%02lX\n",
            (unsigned long)ident, (long)spvb, (unsigned long)bgmStatus,
-           (unsigned long)zeroRet, verdict);
+           (unsigned long)zeroRet, (unsigned)masterVol, (unsigned)maxChans,
+           (unsigned long)active, (unsigned long)flags);
+    CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 
 // Run the mixer for one game frame and top up the DSP queue. Called from
