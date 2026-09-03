@@ -16,8 +16,9 @@
 //
 // Scaling is selectable at runtime from the EXTRA tab (see kTopScales below).
 // The default 1.5x gives 360x240, filling the top screen's height exactly with a
-// 20 px pillarbox each side. Nearest-neighbour keeps GBA pixels sharp in every
-// mode.
+// 20 px pillarbox each side. The texture filter follows the scale rather than
+// being fixed: point sampling is right only at 1x, and is the cause of the
+// uneven pixel widths at the two fractional scales. See apply_top_filter.
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -49,6 +50,11 @@ static const struct { float sx, sy; } kTopScales[CTR_TOP_SCALE_COUNT] = {
 
 static int sTopScale = CTR_TOP_SCALE_DEFAULT;
 
+// Chooses the texture filter for the current scale. Defined below, next to the
+// texture it configures; see the comment there for why this is not simply
+// nearest everywhere.
+static void apply_top_filter(void);
+
 // Set without persisting. CtrSettingsLoad() uses this: writing the file back
 // out during the load that produced it would be pointless churn, and would turn
 // a read-only SD card into a write attempt on every boot.
@@ -58,6 +64,11 @@ void Ctr3dsApplyTopScale(int mode)
         mode = CTR_TOP_SCALE_DEFAULT;
 
     sTopScale = mode;
+
+    // CtrSettingsLoad() runs before CtrVideoInit(), so the texture may not
+    // exist yet. CtrVideoInit() applies the filter itself once it does.
+    if (sReady)
+        apply_top_filter();
 }
 
 int Ctr3dsGetTopScale(void)
@@ -100,6 +111,34 @@ static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 
 static int sReady;
 
+// Nearest only where nearest is actually correct.
+//
+// This used to be GPU_NEAREST unconditionally, "to keep GBA pixels crisp", and
+// at 1x that is exactly right: one GBA pixel is one 3DS pixel, no resampling
+// happens, and any filter would only blur a perfect image.
+//
+// At 1.5x it is the bug. 240 -> 360 and 160 -> 240 are both 3:2, so nearest has
+// no choice but to emit source columns and rows as 1,2,1,2,... pixels wide.
+// Every glyph stroke and every sprite edge is then randomly one or two pixels
+// thick depending on where it happens to land, which is the "pixels are not
+// aligned" artifacting. It is not a race and not a bug in the upload path; it
+// is what point sampling a 3:2 ratio means. FILL is worse still, being 5:3
+// horizontally.
+//
+// open_agb_firm, which is how most people play GBA titles on a 3DS, does not
+// point sample either: its `scaler` setting is none / bilinear / matrix and it
+// defaults to `matrix`, a filtered scale. GPU_LINEAR is the 3DS GPU's built-in
+// equivalent of its `bilinear`, and it costs nothing extra to sample.
+//
+// So: nearest at the integer scale, linear at the two fractional ones.
+static void apply_top_filter(void)
+{
+    GPU_TEXTURE_FILTER_PARAM f =
+        (sTopScale == CTR_TOP_SCALE_1X) ? GPU_NEAREST : GPU_LINEAR;
+
+    C3D_TexSetFilter(&sTopTex, f, f);
+}
+
 #if CTR_BOOT_DIAG
 // Kept so the diagnostics below can read DISPCNT; ppu_set_memory() otherwise
 // consumes these and video.c never needs them again.
@@ -132,9 +171,10 @@ int CtrVideoInit(void)
         !C3D_TexInit(&sBotTex, BOT_TEX_W, BOT_TEX_H, GPU_RGB565))
         return 0;
 
-    // Nearest keeps GBA pixels crisp at 1.5x instead of smearing them.
-    C3D_TexSetFilter(&sTopTex, GPU_NEAREST, GPU_NEAREST);
+    // The bottom screen is drawn 1:1 and never resampled, so nearest is always
+    // right there. The top screen depends on the scale; see apply_top_filter.
     C3D_TexSetFilter(&sBotTex, GPU_NEAREST, GPU_NEAREST);
+    apply_top_filter();
 
     init_subtex(&sTopSub, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, TOP_TEX_W, TOP_TEX_H);
     init_subtex(&sBotSub, CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, BOT_TEX_W, BOT_TEX_H);
