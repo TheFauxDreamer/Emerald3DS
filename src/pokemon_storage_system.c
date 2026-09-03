@@ -1978,6 +1978,8 @@ static void SpriteCB_ChooseBoxArrow(struct Sprite *sprite)
 
 static void VBlankCB_PokeStorage(void)
 {
+    VBLANK_REQUIRE(sStorage);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     UnkUtil_Run();

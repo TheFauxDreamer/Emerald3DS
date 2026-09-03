@@ -2030,6 +2030,8 @@ static void SetVBlank(void)
 
 static void VBlankCB_NamingScreen(void)
 {
+    VBLANK_REQUIRE(sNamingScreen);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

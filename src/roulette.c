@@ -1049,6 +1049,8 @@ static void CB2_Roulette(void)
 
 static void VBlankCB_Roulette(void)
 {
+    VBLANK_REQUIRE(sRoulette);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

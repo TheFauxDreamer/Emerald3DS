@@ -944,6 +944,8 @@ static void UpdateHitPitch(void)
 
 static void VBlankCB_BerryBlender(void)
 {
+    VBLANK_REQUIRE(sBerryBlender);
+
     SetBgPos();
     SetBgAffine(2, sBerryBlender->bgAffineSrc.texX, sBerryBlender->bgAffineSrc.texY,
                 sBerryBlender->bgAffineSrc.scrX, sBerryBlender->bgAffineSrc.scrY,
