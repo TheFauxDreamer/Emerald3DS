@@ -66,7 +66,14 @@
 #define HEALTH_REPORT_FRAME 600   // ~10 seconds
 
 static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
-static int8_t     *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
+
+// PCM16, not the mixer's native PCM8. The mixer produces 8-bit and the DSP can
+// play 8-bit, so this costs one shift per sample and 224 extra bytes a buffer.
+// It buys removing a variable: essentially every working NDSP homebrew feeds
+// PCM16, an emulator's HLE DSP is not the real DSP, and with the pipeline
+// measured healthy and still silent, the sample FORMAT is one of the few things
+// left that could differ between the two.
+static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
 
 static int8_t   sRing[RING_SAMPLES];
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
@@ -83,6 +90,15 @@ static uint32_t sStalled;     // NOTHING was free: the DSP is not consuming
 static uint32_t sZeroMix;     // the game-side mixer produced no samples
 static uint32_t sDropped;     // ring full, samples discarded
 static uint32_t sQueued;      // wave buffers handed to the DSP
+
+// The measurement that actually splits the problem, and the one the first
+// version of this report was missing. Every counter above can read perfectly
+// healthy while the samples flowing through are all zero, because
+// Rp2350MixFrame returning 224 only means the sound ENGINE is initialised, not
+// that anything is playing. A peak of 0 means the silence is upstream of this
+// file entirely and no amount of DSP configuration will help.
+static uint8_t  sPeak;        // largest |sample| seen
+static uint32_t sNonZero;     // how many samples were not silence
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
@@ -159,23 +175,42 @@ void CtrAudioInit(void)
         return;
     }
 
-    ndspSetOutputMode(NDSP_OUTPUT_MONO);
+    // STEREO, not the MONO this used to ask for. A mono channel played into a
+    // stereo output with an even front-left/front-right mix reaches both
+    // speakers and is the configuration NDSP is actually exercised in
+    // everywhere else; NDSP_OUTPUT_MONO changes the DSP's whole downmix path
+    // for no benefit here, and an emulator's HLE DSP is free to ignore the
+    // distinction where real firmware does not.
+    ndspSetOutputMode(NDSP_OUTPUT_STEREO);
+
+    // Both of these are already the libctru defaults (ndspInitMaster sets the
+    // master volume to 1.0, ndspChnReset sets mix[0] and mix[1] to 1.0). Set
+    // them anyway: "silent" is the symptom being chased, and a default is only
+    // a default until some future libctru changes it.
+    ndspSetMasterVol(1.0f);
+    {
+        float mix[12] = { 0 };
+        mix[0] = 1.0f;   // front left
+        mix[1] = 1.0f;   // front right
+        ndspChnSetMix(0, mix);
+    }
+
     ndspChnSetInterp(0, NDSP_INTERP_NONE);      // no resampling: rate matches
-    ndspChnSetRate(0, (float)SAMPLE_RATE);
-    ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM8);
+    ndspChnSetRate(0, SAMPLE_RATE);
+    ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
 
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
-        sBlock[i] = linearAlloc(BLOCK_SAMPLES);
+        sBlock[i] = linearAlloc(BLOCK_SAMPLES * sizeof(int16_t));
         if (sBlock[i] == NULL) {
             CtrLog("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
-                   BLOCK_SAMPLES);
+                   (int)(BLOCK_SAMPLES * sizeof(int16_t)));
             return;
         }
-        memset(sBlock[i], 0, BLOCK_SAMPLES);
+        memset(sBlock[i], 0, BLOCK_SAMPLES * sizeof(int16_t));
         memset(&sWaveBuf[i], 0, sizeof(sWaveBuf[i]));
         sWaveBuf[i].data_vaddr = sBlock[i];
-        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;
-        sWaveBuf[i].status     = NDSP_WBUF_DONE;   // free for the first fill
+        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // samples, not bytes
+        sWaveBuf[i].status     = NDSP_WBUF_DONE;  // free for the first fill
     }
 
     // Only now that there is a DSP thread worth yielding to.
@@ -200,24 +235,45 @@ void CtrAudioExit(void)
 // One line, once, naming which of the ways this can fail actually happened.
 // Without it "no sound" is indistinguishable from "sound, but you were in a
 // silent room of the game", and every cause below looks identical on a console.
+//
+// The first version of this report got its verdict wrong, and the wrongness is
+// worth recording. It treated `underruns` as a fault, but one underrun per
+// frame is the DESIGNED steady state: the mixer produces exactly one buffer's
+// worth of samples per frame, so the second free wave buffer in the refill loop
+// always finds an empty ring and always counts an underrun. It read
+// "underruns == frames" and cried starvation about a pipeline that was working
+// perfectly. Both counters below now only count a frame where NOTHING was
+// queued, which is the only case that can actually cost you audio.
 static void health_report(void)
 {
+    uint32_t ident = 0, bgmStatus = 0, zeroRet = 0;
+    int32_t  spvb = 0;
     const char *verdict;
 
-    if (sZeroMix >= sFrames)
-        verdict = "the game produced no samples at all";
+    Rp2350AudioDebug(&ident, &spvb, &bgmStatus, &zeroRet);
+
+    if (sPeak == 0)
+        verdict = "SAMPLES ARE ALL ZERO - the silence is upstream of the DSP";
     else if (sStalled > sFrames / 4)
         verdict = "the DSP is not draining buffers (NDSP thread starved?)";
     else if (sUnderruns > sFrames / 4)
         verdict = "the game is not keeping up with the DSP";
     else
-        verdict = "healthy";
+        verdict = "audible samples are reaching the DSP";
 
     CtrLog("emerald3ds: audio after %lu frames - queued %lu, stalled %lu, "
-           "underruns %lu, silent-mix %lu, dropped %lu: %s\n",
+           "underruns %lu, silent-mix %lu, dropped %lu, peak %lu, nonzero %lu\n",
            (unsigned long)sFrames, (unsigned long)sQueued,
            (unsigned long)sStalled, (unsigned long)sUnderruns,
-           (unsigned long)sZeroMix, (unsigned long)sDropped, verdict);
+           (unsigned long)sZeroMix, (unsigned long)sDropped,
+           (unsigned long)sPeak, (unsigned long)sNonZero);
+
+    // The engine's own view, which the host side cannot infer. bgm 0 means no
+    // song is playing, which is a complete and innocent explanation for a peak
+    // of 0 and has nothing to do with the 3DS at all.
+    CtrLog("emerald3ds: m4a ident=%08lX spvb=%ld bgm=%08lX zero-returns=%lu: %s\n",
+           (unsigned long)ident, (long)spvb, (unsigned long)bgmStatus,
+           (unsigned long)zeroRet, verdict);
 }
 
 // Run the mixer for one game frame and top up the DSP queue. Called from
@@ -239,6 +295,15 @@ void CtrAudioFrame(void)
         sZeroMix++;
 
     for (int i = 0; i < n; i++) {
+        // Measured on the way past, before anything else can be blamed. -128
+        // negates to itself in int8, so widen first.
+        int mag = mixed[i] < 0 ? -(int)mixed[i] : (int)mixed[i];
+        if (mag > 0) {
+            sNonZero++;
+            if (mag > (int)sPeak)
+                sPeak = (uint8_t)mag;   // at most 128
+        }
+
         if (ring_fill() >= RING_SAMPLES) {
             sDropped++;
             break;
@@ -253,29 +318,38 @@ void CtrAudioFrame(void)
             sWaveBuf[i].status != NDSP_WBUF_DONE)
             continue;
 
-        if (ring_fill() < BLOCK_SAMPLES) {
-            sUnderruns++;
+        // NOT counted as an underrun here. Producing one buffer per frame
+        // means the next free wave buffer legitimately finds an empty ring
+        // every single frame; only a frame that queued NOTHING has actually
+        // lost audio, and that is counted once, below.
+        if (ring_fill() < BLOCK_SAMPLES)
             break;
-        }
 
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
-            sBlock[i][s] = sRing[sRingTail % RING_SAMPLES];
+            // 8-bit mixer output widened to the DSP's PCM16. A plain shift, so
+            // full scale stays full scale and silence stays silence.
+            sBlock[i][s] = (int16_t)(sRing[sRingTail % RING_SAMPLES] * 256);
             sRingTail++;
         }
 
         // The DSP reads this memory directly and does not see the ARM11 cache.
-        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES);
+        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES * sizeof(int16_t));
         ndspChnWaveBufAdd(0, &sWaveBuf[i]);
         sQueued++;
         queuedThisFrame++;
     }
 
-    // Every buffer still QUEUED or PLAYING. Separate from an underrun on
-    // purpose: an underrun means WE were short, this means the DSP side has not
-    // returned a single buffer, which is what a starved NDSP thread looks like
-    // from here and is not a shortage of samples at all.
-    if (queuedThisFrame == 0 && ring_fill() >= BLOCK_SAMPLES)
-        sStalled++;
+    // A frame that handed the DSP nothing, split by whose fault it was. Held
+    // apart on purpose: `stalled` means every buffer was still QUEUED or
+    // PLAYING, so the DSP side has not returned one, which is what a starved
+    // NDSP thread looks like from here. `underruns` means a buffer WAS free and
+    // we had nothing to put in it. They call for opposite fixes.
+    if (queuedThisFrame == 0) {
+        if (ring_fill() >= BLOCK_SAMPLES)
+            sStalled++;
+        else
+            sUnderruns++;
+    }
 
     if (sFrames == HEALTH_REPORT_FRAME)
         health_report();

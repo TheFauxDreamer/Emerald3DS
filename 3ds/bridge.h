@@ -218,4 +218,15 @@ void Ctr3dsGetClock(CtrClock *out);
 // Mix one frame of PCM. Implemented game-side in rp2350/m4a_1.c.
 int Rp2350MixFrame(int8_t *out, int n);
 
+// m4a engine telemetry, for the audio health report in 3ds/host/audio.c. Also
+// game-side in rp2350/m4a_1.c, which already snapshots these every mix.
+//
+// It answers the question the host side cannot: whether the SOUND ENGINE is
+// running at all. `ident` should read ID_NUMBER once m4aSoundInit has run,
+// `samplesPerVBlank` should be 224, and `bgmStatus` is zero when no song is
+// playing, which is a perfectly good reason for silence and looks identical to
+// a broken DSP from outside. Any pointer may be NULL.
+void Rp2350AudioDebug(uint32_t *ident, int32_t *samplesPerVBlank,
+                      uint32_t *bgmStatus, uint32_t *zeroReturns);
+
 #endif // CTR_BRIDGE_H
