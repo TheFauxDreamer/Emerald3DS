@@ -229,4 +229,14 @@ int Rp2350MixFrame(int8_t *out, int n);
 void Rp2350AudioDebug(uint32_t *ident, int32_t *samplesPerVBlank,
                       uint32_t *bgmStatus, uint32_t *zeroReturns);
 
+// The mixer's own state, for the same report. Separate call because
+// Rp2350AudioDebug's signature is shared with the RP2350 port's game_main.c.
+// Answers the one case the host side cannot see into: a full frame of samples
+// arriving every frame with every sample zero. Any pointer may be NULL.
+// `engineFlags` walks the chain the mix depends on, lowest bit first, so the
+// lowest CLEAR bit names the link that was never made. Bit values and their
+// meanings are the M4A_DBG_* defines beside the implementation.
+void Rp2350MixerDebug(uint8_t *masterVolume, uint8_t *maxChans,
+                      uint32_t *activeChans, uint32_t *engineFlags);
+
 #endif // CTR_BRIDGE_H

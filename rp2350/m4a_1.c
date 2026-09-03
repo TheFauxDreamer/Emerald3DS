@@ -1034,6 +1034,60 @@ void Rp2350AudioDebug(u32 *ident, s32 *spvb, u32 *bgmStatus, u32 *zeroRet)
     if (zeroRet)   *zeroRet = gM4aDbgZeroRet;
 }
 
+// A second snapshot, for the 3DS port's audio health report (3ds/host/audio.c).
+// Kept separate from Rp2350AudioDebug rather than folded into it because that
+// signature is shared with rp2350/hw/game_main.c.
+//
+// This exists because every host-side counter can read perfectly healthy while
+// the samples flowing through are all zero: Rp2350MixFrame returning a full 224
+// only means the engine is INITIALISED. When the mix is silent, the question is
+// which link of the chain below never got made, and from outside m4a they are
+// indistinguishable.
+//
+// The flags walk that chain in order, so the LOWEST clear bit is the failure:
+// the sound info has to be published, the player chain has to be opened, a song
+// has to be started, and it has to have tracks before a single channel can ever
+// turn on.
+#define M4A_DBG_SOUNDINFO_PUBLISHED  (1u << 0)  // SOUND_INFO_PTR == &gSoundInfo
+#define M4A_DBG_MPLAY_CHAIN          (1u << 1)  // MPlayOpen ran: MPlayMainHead set
+#define M4A_DBG_CGB_HOOK             (1u << 2)  // MPlayExtender ran: CgbSound set
+#define M4A_DBG_BGM_OPEN             (1u << 3)  // BGM player ident == ID_NUMBER
+#define M4A_DBG_BGM_SONG             (1u << 4)  // a song header is loaded
+#define M4A_DBG_BGM_TRACKS           (1u << 5)  // that song has tracks
+#define M4A_DBG_BGM_PLAYING          (1u << 6)  // status says a track is running
+
+void Rp2350MixerDebug(u8 *masterVolume, u8 *maxChans, u32 *activeChans,
+                      u32 *engineFlags)
+{
+    struct SoundInfo *si = SOUND_INFO_PTR;
+    u32 active = 0;
+    u32 flags = 0;
+    s32 c;
+
+    // Zeroed GBA memory before m4aSoundInit, so this really can be NULL.
+    if (si != NULL)
+    {
+        if (si == &gSoundInfo)      flags |= M4A_DBG_SOUNDINFO_PUBLISHED;
+        if (si->MPlayMainHead)      flags |= M4A_DBG_MPLAY_CHAIN;
+        if (si->CgbSound)           flags |= M4A_DBG_CGB_HOOK;
+
+        for (c = 0; c < si->maxChans && c < MAX_DIRECTSOUND_CHANNELS; c++)
+            if (si->chans[c].statusFlags & SOUND_CHANNEL_SF_ON)
+                active++;
+    }
+
+    if (gMPlayInfo_BGM.ident == ID_NUMBER)  flags |= M4A_DBG_BGM_OPEN;
+    if (gMPlayInfo_BGM.songHeader != NULL)  flags |= M4A_DBG_BGM_SONG;
+    if (gMPlayInfo_BGM.trackCount != 0)     flags |= M4A_DBG_BGM_TRACKS;
+    if (gMPlayInfo_BGM.status & MUSICPLAYER_STATUS_TRACK)
+        flags |= M4A_DBG_BGM_PLAYING;
+
+    if (masterVolume) *masterVolume = (si != NULL) ? si->masterVolume : 0;
+    if (maxChans)     *maxChans     = (si != NULL) ? si->maxChans : 0;
+    if (activeChans)  *activeChans  = active;
+    if (engineFlags)  *engineFlags  = flags;
+}
+
 int Rp2350MixFrame(s8 *out, int n)
 {
     gM4aDbgIdent = gSoundInfo.ident;
