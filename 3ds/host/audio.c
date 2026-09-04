@@ -254,6 +254,7 @@ static void health_report(void)
 
     uint32_t ident = 0, bgmStatus = 0, zeroRet = 0, active = 0, flags = 0;
     uint32_t chType = 0, chStatus = 0, chEnv = 0, chFreq = 0, chNonZero = 0;
+    uint32_t dsPeak = 0, psgPeak = 0, cryPeak = 0;
     uint8_t  masterVol = 0, maxChans = 0;
     int32_t  spvb = 0;
     const char *verdict;
@@ -262,6 +263,7 @@ static void health_report(void)
     Rp2350AudioDebug(&ident, &spvb, &bgmStatus, &zeroRet);
     Rp2350MixerDebug(&masterVol, &maxChans, &active, &flags);
     Rp2350ChannelDebug(&chType, &chStatus, &chEnv, &chFreq, &chNonZero);
+    Rp2350AudioPeaks(&dsPeak, &psgPeak, &cryPeak);
 
     if (sPeak == 0) {
         // Name the first broken link rather than just reporting silence. Only
@@ -283,8 +285,8 @@ static void health_report(void)
         // Everything above is engine-wide. Below is the live channel itself,
         // which is the only place left for the silence to be hiding.
         else if (chType & 0x30)
-            verdict = "the live channel is compressed/reverse: "
-                      "SoundMainRAM_Unk1 is still a silent stub";
+            verdict = "the live channel is compressed/reverse: check cry= "
+                      "in the peaks line, not this one";
         else if ((chEnv & 0xFFFF) == 0)
             verdict = "channel envelope volume is 0: real samples multiplied "
                       "by nothing (volume chain)";
@@ -322,6 +324,12 @@ static void health_report(void)
            "sampleNonZero=%lu/64\n",
            (unsigned long)chType, (unsigned long)chStatus, (unsigned long)chEnv,
            (unsigned long)chFreq, (unsigned long)chNonZero);
+    // Split by subsystem, so each stage of the sound work can be signed off
+    // from the log rather than by ear: DirectSound, the PSG synthesiser, and
+    // the compressed/reverse path each report their own peak.
+    CtrLog("emerald3ds: mix peaks - directSound=%lu psg=%lu cry=%lu\n",
+           (unsigned long)dsPeak, (unsigned long)psgPeak,
+           (unsigned long)cryPeak);
     CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 

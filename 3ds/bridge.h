@@ -247,4 +247,12 @@ void Rp2350MixerDebug(uint8_t *masterVolume, uint8_t *maxChans,
 void Rp2350ChannelDebug(uint32_t *type, uint32_t *statusFlags, uint32_t *envVol,
                         uint32_t *frequency, uint32_t *sampleNonZero);
 
+// Per-subsystem output peaks. Each half of the mixer is measured on its own,
+// because "PSG is silent under a healthy DirectSound" and "both are silent" are
+// different faults with different fixes, and the summed peak cannot tell them
+// apart. `dsPeak` and `cryPeak` are in the DirectSound sample domain (0..128);
+// `psgPeak` is in the s16 domain the two are summed in. Any pointer may be
+// NULL. Free-running maxima, never reset.
+void Rp2350AudioPeaks(uint32_t *dsPeak, uint32_t *psgPeak, uint32_t *cryPeak);
+
 #endif // CTR_BRIDGE_H
