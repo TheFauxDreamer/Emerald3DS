@@ -386,6 +386,56 @@ int Ctr3dsUiModifierHeld(void)
     return 0;
 }
 
+// What fast-forward does to the soundtrack. Persisted, like the other display
+// preferences: it is a taste question, not a mode you can be surprised by.
+static uint8_t sFfAudio = CTR_FFAUDIO_NORMAL;
+
+// Set without persisting, for CtrSettingsLoad(), the same split as
+// Ctr3dsApplyTurboBind above.
+void Ctr3dsApplyFfAudio(int mode)
+{
+    if (mode != CTR_FFAUDIO_NORMAL && mode != CTR_FFAUDIO_FAST)
+        return;
+
+    sFfAudio = (uint8_t)mode;
+}
+
+void Ctr3dsSetFfAudio(int mode)
+{
+    int before = sFfAudio;
+
+    Ctr3dsApplyFfAudio(mode);
+
+    if (sFfAudio != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetFfAudio(void)
+{
+    return sFfAudio;
+}
+
+// Whether this game frame is the one that carries audio.
+//
+// Fast-forward runs several logical game frames per displayed frame. The sound
+// engine advances the song by one tick per m4aSoundMain() call, so calling it
+// every game frame plays the music at the fast-forward multiplier -- and since
+// the DSP still only consumes one frame's worth of samples, the surplus is
+// simply dropped, which is music racing past in chunks rather than music
+// playing faster.
+//
+// NORMAL therefore ticks the engine once per DISPLAYED frame. FAST keeps the
+// old every-frame behaviour for anyone who wants the pitch as a cue.
+//
+// Subframe 0 rather than the presenting subframe, matching where input is
+// sampled: any one frame of the group works, and the ring decouples this from
+// presentation anyway. At 1x every frame is subframe 0, so both settings behave
+// identically and nothing changes.
+int Ctr3dsIsAudioFrame(void)
+{
+    return sFfAudio == CTR_FFAUDIO_FAST || sSubFrame == 0;
+}
+
 // Fastest bound button currently held, else the resting speed. Fastest rather
 // than first so holding two never gives the slower of the two, which would feel
 // like the binding had been ignored.
@@ -453,10 +503,10 @@ void Rp2350PresentFrame(void)
     // GBA's key register is sampled between frames.
     CtrSetKeyInput(keys);
 
-    // Every game frame. The mixer produces a frame's worth of samples and drops
-    // them when the ring is full, which is exactly the fast-forward case: audio
-    // stays at pitch and thins out rather than blocking and undoing the speedup.
-    CtrAudioFrame();
+    // Drains what m4aSoundMain() just produced, so it has to run on exactly the
+    // frames the engine ticked on. One predicate decides both.
+    if (Ctr3dsIsAudioFrame())
+        CtrAudioFrame();
 
     if (++sSubFrame >= sSpeed) {
         sSubFrame = 0;

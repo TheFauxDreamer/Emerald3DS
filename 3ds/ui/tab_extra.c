@@ -89,6 +89,21 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // 96 clears it, and the note is 163px, ending well inside the 311px interior.
 #define TRB_NOTE_X    96
 
+// What fast-forward does to the music, sharing the GAME SPEED label line the
+// same way the MOD note shares BUTTON HOLD's -- page 1's four button rows
+// already fill the 176px interior exactly, so a fifth row does not fit and the
+// spare half of a label line is the only room there is.
+//
+// "GAME SPEED" ends near x=76 and the pager's PAGE caption starts near x=226,
+// so 104..204 is clear of both. 17px tall at y=8 ends at y=24, abutting the
+// row-1 buttons at y=25 without overlapping, exactly as the pager does.
+//
+// It belongs on this row because GAME SPEED is the only control it modifies.
+#define FFA_X         104
+#define FFA_W         100
+#define FFA_Y         ROW1_LABEL_Y
+#define FFA_H         PGR_H
+
 // Tab visibility. Label on the left, then the two states, then a reminder that
 // this exists for testing rather than as a way to skip the game.
 #define ROW4_Y        157
@@ -160,6 +175,18 @@ static void DrawPage1(void)
         DrawButton(SPD_X((int)i), SPD_Y, SPD_W,
                    UiAscii(label, text, sizeof(label)),
                    sSpeeds[i] == Ctr3dsGetSpeed());
+    }
+
+    // Highlighted on FAST rather than on 1x: 1x is the default, and the accent
+    // outline reads as "something has been changed here", which is how the
+    // turbo binds below use it too.
+    {
+        int fast = (Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST);
+
+        DrawButtonH(FFA_X, FFA_Y, FFA_W, FFA_H,
+                    UiAscii(label, fast ? "MUSIC FAST" : "MUSIC 1x",
+                            sizeof(label)),
+                    fast);
     }
 
     UiText(16, ROW2_LABEL_Y, UiAscii(label, "SCREEN SIZE", sizeof(label)),
@@ -345,11 +372,25 @@ u32 UiTweakStateKey(void)
 
 u32 UiExtraStateKey(void)
 {
-    return (u32)sPage | (UiTweakStateKey() << 4);
+    // sPage takes bits 0-1 and the tweaks start at bit 4, so bit 2 is free.
+    // Folded in even though the only way to change it is the button above,
+    // which marks the screen dirty itself: a setting that can go stale on
+    // screen is exactly what this hash exists to prevent.
+    return (u32)sPage
+         | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 2)
+         | (UiTweakStateKey() << 4);
 }
 
 static void TouchPage1(const CtrTouchState *t)
 {
+    if (UiHit(t, FFA_X, FFA_Y, FFA_W, FFA_H))
+    {
+        Ctr3dsSetFfAudio(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST
+                             ? CTR_FFAUDIO_NORMAL : CTR_FFAUDIO_FAST);
+        UiMarkDirty();
+        return;
+    }
+
     for (u32 i = 0; i < SPEED_COUNT; i++)
     {
         if (UiHit(t, SPD_X((int)i), SPD_Y, SPD_W, BTN_H))
