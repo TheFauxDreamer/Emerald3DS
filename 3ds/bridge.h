@@ -239,4 +239,12 @@ void Rp2350AudioDebug(uint32_t *ident, int32_t *samplesPerVBlank,
 void Rp2350MixerDebug(uint8_t *masterVolume, uint8_t *maxChans,
                       uint32_t *activeChans, uint32_t *engineFlags);
 
+// The first live channel's contents, for the same report. Separates "the
+// volume chain collapsed" from "the sample data is silence" from "this channel
+// took the still-stubbed compressed/reverse path", which is everything that can
+// still produce an all-zero mix once the engine itself measures healthy.
+// `envVol` packs envelopeVolume<<16 | envelopeVolumeRight<<8 | envelopeVolumeLeft.
+void Rp2350ChannelDebug(uint32_t *type, uint32_t *statusFlags, uint32_t *envVol,
+                        uint32_t *frequency, uint32_t *sampleNonZero);
+
 #endif // CTR_BRIDGE_H
