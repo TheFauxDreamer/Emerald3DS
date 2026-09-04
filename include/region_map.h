@@ -128,6 +128,16 @@ void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal);
 void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
                                  u8 *posWithinMapSec, bool8 *inCave);
 
+// MAPSECTYPE_*, which is how the game answers "can this be flown to?": the
+// FLAG_VISITED_* flags are folded into CANFLY against CANTFLY inside it.
+u8 Ctr3dsGetMapSecType(mapsec_u16_t mapSecId);
+
+// Sets the pending warp for a fly, for a destination picked by touch. Takes the
+// tapped tile, not just the mapsec: Ever Grande needs the position within it to
+// tell the Pokemon League from the city. FALSE means nothing was set and the
+// warp must not be started.
+bool8 Ctr3dsSetFlyWarpDestination(mapsec_u16_t mapSecId, u16 x, u16 y);
+
 // The map's own bounds, so the second screen can address it without copying the
 // numbers out of src/region_map.c.
 #define CTR_MAPCURSOR_X_MIN 1

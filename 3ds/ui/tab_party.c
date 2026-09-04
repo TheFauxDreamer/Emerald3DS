@@ -263,7 +263,7 @@ static void DrawCell(int index)
     u32 species, hp, maxHp, level;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[8];
-    int nameW;
+    int nameW, hpLabelX;
 
     UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, cellH / 8);
 
@@ -298,25 +298,39 @@ static void DrawCell(int index)
     UiText(cx + CELL_TEXT_X, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
     UiNum(cx + CELL_TEXT_X + 18, cy + rows->lvY, (s32)level, UiThemeText(), UiThemeShadow());
 
+    // The animated value, not the raw one: bar and number slide together.
+    hp    = sShownHp[index];
+    maxHp = GetMonData(mon, MON_DATA_MAX_HP);
+
+    // Labelled, because beside "Lv 42" a bare number reads as a second stat
+    // rather than as health, and the bar below it says how full without ever
+    // saying of what.
+    //
+    // Placed off maxHp's width rather than the animated hp's. maxHp does not
+    // move; hp does, and a label measured from a sliding value would step
+    // sideways every time that value crossed a digit boundary.
+    UiAscii(label, "HP", sizeof(label));
+    hpLabelX = cx + CELL_W - 10 - UiNumWidth((s32)maxHp) - UiTextWidth(label) - 2;
+
+    UiText(hpLabelX, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
+    UiNumRight(cx + CELL_W - 10, cy + rows->lvY, (s32)hp, UiThemeText(), UiThemeShadow());
+
     // Which mon has actually hit the ceiling. The strip above says what the cap
     // is; this says who it is holding, which is the thing you want when one mon
     // has stopped growing and the rest have not.
     //
-    // It goes in the gutter between the level and the right-aligned HP, the one
-    // slot in the cell that is free whatever those two numbers are: the level
-    // is at most 3 digits and Gen 3 party HP at most 3.
+    // It goes in the gutter between the level and the HP block, the one slot in
+    // the cell that is free whatever those numbers are: the level is at most 3
+    // digits so it ends by 90, and the HP block starts at 118 at its widest.
+    // Derived from hpLabelX rather than fixed, so gaining the label cannot
+    // leave this sitting under it.
     if (CapOn() && level >= Ctr3dsCurrentLevelCap())
-        UiTextRight(cx + 128, cy + rows->lvY,
+        UiTextRight(hpLabelX - 4, cy + rows->lvY,
                     UiAscii(label, "CAP", sizeof(label)),
                     (Ctr3dsGetLevelCap() == CTR_CAP_HARD) ? UI_COL_HP_LOW
                                                           : UI_COL_HP_MID,
                     UiThemeShadow());
 
-    // The animated value, not the raw one: bar and number slide together.
-    hp    = sShownHp[index];
-    maxHp = GetMonData(mon, MON_DATA_MAX_HP);
-
-    UiNumRight(cx + CELL_W - 10, cy + rows->lvY, (s32)hp, UiThemeText(), UiThemeShadow());
     UiHpBar(cx + CELL_TEXT_X, cy + rows->hpY, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
 }
 
