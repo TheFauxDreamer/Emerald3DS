@@ -32,11 +32,18 @@
 #define TONEDATA_TYPE_CMP        0x20
 #define WAVE_DATA_FLAG_LOOP      0xC0
 
-// How many PSG samples are rendered at a time. Emerald is fixed at 224 samples
-// per frame (SOUND_MODE_FREQ_13379), so this covers a whole frame in one pass;
-// chunking rather than sizing to PCM_DMA_BUF_SIZE keeps the stack cost at 512
-// bytes and still handles any sound mode correctly.
-#define PSG_CHUNK 256
+// How many sample frames the PSG is rendered in at a time.
+//
+// Kept small deliberately. These buffers are stereo and on the stack, and the
+// mono wrappers nest one inside another, so a large chunk costs four times what
+// it looks like. The RP2350 port's SDK stack defaults to 2 KB and calls the
+// mono path from the frame hook, which a 256-frame chunk would come close to
+// exhausting. At 64 frames the deepest path uses 512 bytes.
+//
+// The cost of chunking is re-reading the PSG registers once per chunk, which is
+// idempotent within a frame: the only side effect is consuming the NRx4 trigger
+// bit, and that happens on the first chunk exactly as it should.
+#define PSG_CHUNK 64
 
 // SOUND_INFO_PTR is a macro (gba/defines.h) for the SoundInfo pointer slot.
 extern const u8 gClockTable[];
@@ -1438,97 +1445,161 @@ void Rp2350ChannelDebug(u32 *type, u32 *statusFlags, u32 *envVol,
     if (sampleNonZero) *sampleNonZero = nonZero;
 }
 
-int Rp2350MixFrame16(s16 *out, int n)
+// Shared prologue: publish the debug snapshot, refuse to run before the engine
+// is up, and clamp to the frame the engine actually rendered. Returns 0 when
+// there is nothing to mix.
+static int mix_begin(int n)
 {
+    s32 avail;
+
     gM4aDbgIdent = gSoundInfo.ident;
     gM4aDbgSpvb = gSoundInfo.pcmSamplesPerVBlank;
     gM4aDbgBgmStatus = gMPlayInfo_BGM.status;
 
-    s32 avail = gSoundInfo.pcmSamplesPerVBlank;
+    avail = gSoundInfo.pcmSamplesPerVBlank;
     if (avail <= 0 || gSoundInfo.ident != ID_NUMBER)
     {
         gM4aDbgZeroRet++;
         return 0;
     }
-    if (n > avail)
-        n = avail;
 
+    return (n > avail) ? avail : n;
+}
+
+// Render frames [base, base+cnt) as interleaved left/right pairs. `out` holds
+// 2*cnt samples.
+//
+// The GBA sums its two DirectSound channels with the four PSG generators in
+// hardware. pcmBuffer holds only the DirectSound half, so the PSG half is added
+// here rather than inside MixAllChannels: that keeps MixChannel and
+// MixAllChannels byte-identical to the reference engine, and confines the
+// port's own additions to the port's own seam.
+//
+// Both halves are genuinely stereo. m4a renders DirectSound into two separate
+// buffers and pans every note across them (ChnVolSetAsm), and the PSG pans each
+// of its four channels through NR51, so collapsing to mono here would throw
+// away panning the music was written with.
+static void mix_stereo_range(s16 *out, int base, int cnt)
+{
     const s8 *bufR = gSoundInfo.pcmBuffer;
     const s8 *bufL = gSoundInfo.pcmBuffer + PCM_DMA_BUF_SIZE;
+    int done = 0;
 
-    // The GBA sums its two DirectSound channels with the four PSG generators in
-    // hardware. pcmBuffer holds only the DirectSound half, so the PSG half is
-    // added here rather than inside MixAllChannels: that keeps MixChannel and
-    // MixAllChannels byte-identical to the reference engine, and confines the
-    // port's own additions to the port's own seam.
-    //
-    // 16-bit output, not 8. DirectSound is genuinely 8-bit at source and stays
-    // exact when shifted up, but the PSG is generated at 16-bit precision and a
-    // console mixes the two in the analog domain, not on an 8-bit grid.
-    // Returning s8 here quantised the PSG away again and left the sum one bit
-    // from clipping on a loud line over a loud sample.
-    for (int base = 0; base < n; base += PSG_CHUNK)
+    while (done < cnt)
     {
-        s16 psg[PSG_CHUNK];
-        int cnt = n - base;
+        s16 psg[PSG_CHUNK * 2];
+        int part = cnt - done;
+        int i;
+
+        if (part > PSG_CHUNK)
+            part = PSG_CHUNK;
+
+        PsgRender(psg, part, gSoundInfo.pcmFreq);
+
+        for (i = 0; i < part; i++)
+        {
+            s32 dsL = bufL[base + done + i];
+            s32 dsR = bufR[base + done + i];
+            s32 l = (dsL << 8) + psg[i * 2];
+            s32 r = (dsR << 8) + psg[i * 2 + 1];
+            u32 mag;
+
+            mag = (u32)(dsL < 0 ? -dsL : dsL);
+            if (mag > gM4aDbgDsPeak)
+                gM4aDbgDsPeak = mag;
+            mag = (u32)(dsR < 0 ? -dsR : dsR);
+            if (mag > gM4aDbgDsPeak)
+                gM4aDbgDsPeak = mag;
+
+            mag = (u32)(psg[i * 2] < 0 ? -(s32)psg[i * 2] : (s32)psg[i * 2]);
+            if (mag > gM4aDbgPsgPeak)
+                gM4aDbgPsgPeak = mag;
+
+            if (l > 32767) l = 32767;
+            else if (l < -32768) l = -32768;
+            if (r > 32767) r = 32767;
+            else if (r < -32768) r = -32768;
+
+            out[(done + i) * 2] = (s16)l;
+            out[(done + i) * 2 + 1] = (s16)r;
+        }
+
+        done += part;
+    }
+}
+
+// Interleaved stereo PCM16. The preferred entry point: it is the only one that
+// preserves what the music was mixed with.
+int Rp2350MixFrameStereo16(s16 *out, int n)
+{
+    n = mix_begin(n);
+    if (n <= 0)
+        return 0;
+
+    mix_stereo_range(out, 0, n);
+    return n;
+}
+
+// Mono PCM16, for outputs that have nowhere to put a second channel.
+int Rp2350MixFrame16(s16 *out, int n)
+{
+    int done;
+
+    n = mix_begin(n);
+    if (n <= 0)
+        return 0;
+
+    for (done = 0; done < n; )
+    {
+        s16 st[PSG_CHUNK * 2];
+        int cnt = n - done;
+        int i;
 
         if (cnt > PSG_CHUNK)
             cnt = PSG_CHUNK;
 
-        PsgRender(psg, cnt, gSoundInfo.pcmFreq);
+        mix_stereo_range(st, done, cnt);
 
-        for (int i = 0; i < cnt; i++)
-        {
-            s32 ds = ((s32)bufL[base + i] + (s32)bufR[base + i]) >> 1;
-            s32 v = (ds << 8) + psg[i];
-            u32 mag;
+        for (i = 0; i < cnt; i++)
+            out[done + i] = (s16)(((s32)st[i * 2] + (s32)st[i * 2 + 1]) >> 1);
 
-            mag = (u32)(ds < 0 ? -ds : ds);
-            if (mag > gM4aDbgDsPeak)
-                gM4aDbgDsPeak = mag;
-            mag = (u32)(psg[i] < 0 ? -(s32)psg[i] : (s32)psg[i]);
-            if (mag > gM4aDbgPsgPeak)
-                gM4aDbgPsgPeak = mag;
-
-            if (v > 32767)
-                v = 32767;
-            else if (v < -32768)
-                v = -32768;
-
-            out[base + i] = (s16)v;
-        }
+        done += cnt;
     }
 
     return n;
 }
 
-// The original 8-bit seam, kept because rp2350/hw/audio.c's I2S ring is built
-// on this signature. New callers should prefer Rp2350MixFrame16: this one
-// necessarily throws the extra precision away again.
+// The original 8-bit mono seam, kept because rp2350/hw/audio.c's I2S ring is
+// built on this signature. Necessarily throws away both the second channel and
+// the extra precision.
 int Rp2350MixFrame(s8 *out, int n)
 {
-    int done = 0;
+    int done;
 
-    while (done < n)
+    n = mix_begin(n);
+    if (n <= 0)
+        return 0;
+
+    for (done = 0; done < n; )
     {
-        s16 wide[PSG_CHUNK];
+        s16 st[PSG_CHUNK * 2];
         int cnt = n - done;
-        int got, i;
+        int i;
 
         if (cnt > PSG_CHUNK)
             cnt = PSG_CHUNK;
 
-        got = Rp2350MixFrame16(wide, cnt);
-        if (got <= 0)
-            break;
+        mix_stereo_range(st, done, cnt);
 
-        for (i = 0; i < got; i++)
-            out[done + i] = (s8)(wide[i] >> 8);
+        for (i = 0; i < cnt; i++)
+        {
+            s32 v = ((s32)st[i * 2] + (s32)st[i * 2 + 1]) >> 1;
 
-        done += got;
-        if (got < cnt)
-            break;
+            out[done + i] = (s8)(v >> 8);
+        }
+
+        done += cnt;
     }
 
-    return done;
+    return n;
 }

@@ -19,9 +19,14 @@
 // Clear all channel state. Call before the first render; safe to call again.
 void PsgReset(void);
 
-// Render `n` mono samples into `out`, in the same signed domain the
-// DirectSound mix uses shifted left by 8 -- a full-scale DirectSound sample of
-// 127 corresponds to 127 << 8 here, so the two can simply be added.
+// Render `n` sample frames into `out` as INTERLEAVED left/right pairs, so `out`
+// must hold 2*n samples. Values are in the same signed domain the DirectSound
+// mix uses shifted left by 8 -- a full-scale DirectSound sample of 127
+// corresponds to 127 << 8 here, so the two can simply be added.
+//
+// Stereo rather than mono because NR51 pans each of the four channels
+// independently and Emerald's music uses it; collapsing here would throw that
+// away before anything downstream could keep it.
 //
 // `sampleRate` is the mixer's output rate in Hz (SoundInfo.pcmFreq, ~13379).
 void PsgRender(s16 *out, s32 n, s32 sampleRate);

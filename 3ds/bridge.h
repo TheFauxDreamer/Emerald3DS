@@ -226,6 +226,13 @@ void Ctr3dsGetClock(CtrClock *out);
 int Rp2350MixFrame(int8_t *out, int n);
 int Rp2350MixFrame16(int16_t *out, int n);
 
+// Interleaved stereo PCM16: `out` holds 2*n samples, left then right. The
+// preferred form. m4a renders DirectSound into two separate buffers and pans
+// every note across them, and the PSG pans its four channels through NR51, so
+// the two mono forms above are both discarding placement the music was written
+// with.
+int Rp2350MixFrameStereo16(int16_t *out, int n);
+
 // m4a engine telemetry, for the audio health report in 3ds/host/audio.c. Also
 // game-side in rp2350/m4a_1.c, which already snapshots these every mix.
 //

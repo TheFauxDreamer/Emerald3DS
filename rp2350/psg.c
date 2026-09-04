@@ -47,10 +47,9 @@ static const u8 kPsgRatio[4] = { 1, 2, 4, 4 };
 // volume 7) lands at 30720 rather than clipping.
 #define PSG_GAIN 512
 
-// The output DC blocker's time constant, as a right shift. The GB's DAC idles
-// at mid-scale and a channel switching off would otherwise step the output,
-// which is heard as a click. Tracking the mean and subtracting it removes both
-// the offset and the click, the same job the console's output capacitor does.
+// The output DC blocker's time constant, as a right shift on a Q8 accumulator.
+// 9 puts the corner near 26 Hz at 13.4 kHz, comparable to the console's own
+// output capacitor. See the per-side blocker in PsgRender.
 #define DC_SHIFT 9
 
 // ------------------------------------------------------------------- state --
@@ -98,7 +97,10 @@ static struct PsgNoise sNoise;
 
 static u32 sSeqPhase;     // Q16 accumulator of 512 Hz sequencer steps
 static u8  sSeqStep;      // 0..7
-static s32 sDcAcc;        // Q16 running mean, for the DC blocker
+
+// One DC-blocker accumulator per side. Sharing one would let a channel panned
+// hard left pull the right output's baseline around with it.
+static s32 sDcAccL, sDcAccR;   // Q8 running means
 
 void PsgReset(void)
 {
@@ -107,7 +109,8 @@ void PsgReset(void)
     memset(&sNoise, 0, sizeof(sNoise));
     sSeqPhase = 0;
     sSeqStep = 0;
-    sDcAcc = 0;
+    sDcAccL = 0;
+    sDcAccR = 0;
     sNoise.lfsr = 0x7FFF;
 }
 
@@ -423,7 +426,7 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
     // Master switch. With the APU off the hardware outputs nothing at all.
     if (!(REG_SOUNDCNT_X & 0x80))
     {
-        for (i = 0; i < n; i++)
+        for (i = 0; i < n * 2; i++)
             out[i] = 0;
         return;
     }
@@ -452,11 +455,18 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
     leftVol = (nr50 >> 4) & 7;
     ratio = kPsgRatio[REG_SOUNDCNT_H & 3];
 
+    // Master volume, PSG:DirectSound ratio and output gain folded into one
+    // multiplier per side, computed once. The 28 is 7 (NR50 full scale) times 4
+    // (the ratio's denominator). ARMv6 has no divide instruction, so keeping
+    // this out of the per-sample loop matters.
+    leftVol = (leftVol * PSG_GAIN * ratio) / 28;
+    rightVol = (rightVol * PSG_GAIN * ratio) / 28;
+
     seqStepInc = (u32)(((u64)512u << 16) / (u32)sampleRate);
 
     for (i = 0; i < n; i++)
     {
-        s32 right = 0, left = 0, mono;
+        s32 right = 0, left = 0;
         u8 s1, s2, s3, s4;
 
         // ---- frame sequencer, 512 Hz ----
@@ -512,7 +522,7 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
             noise_advance(&sNoise, clocks);
         }
 
-        // ---- panning (NR51), then master volume (NR50) ----
+        // ---- panning (NR51) ----
         if (nr51 & 0x01) right += s1;
         if (nr51 & 0x02) right += s2;
         if (nr51 & 0x04) right += s3;
@@ -522,20 +532,25 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
         if (nr51 & 0x40) left += s3;
         if (nr51 & 0x80) left += s4;
 
-        // (left*lv/7 + right*rv/7) / 2, folded into a single divide.
-        mono = (left * leftVol + right * rightVol) / 14;
+        left *= leftVol;
+        right *= rightVol;
 
-        // ---- DC blocker, then scale into the DirectSound domain ----
-        sDcAcc += ((mono << 16) - sDcAcc) >> DC_SHIFT;
-        mono -= sDcAcc >> 16;
+        // ---- DC blocker, per side ----
+        // The GB's DAC idles at mid-scale, so a channel switching off would
+        // step the output; tracking the mean and subtracting it removes both
+        // the offset and the click, which is what the console's output
+        // capacitor does.
+        sDcAccL += ((left << 8) - sDcAccL) >> DC_SHIFT;
+        sDcAccR += ((right << 8) - sDcAccR) >> DC_SHIFT;
+        left -= sDcAccL >> 8;
+        right -= sDcAccR >> 8;
 
-        mono = (mono * PSG_GAIN * ratio) >> 2;
+        if (left > 32767) left = 32767;
+        else if (left < -32768) left = -32768;
+        if (right > 32767) right = 32767;
+        else if (right < -32768) right = -32768;
 
-        if (mono > 32767)
-            mono = 32767;
-        else if (mono < -32768)
-            mono = -32768;
-
-        out[i] = (s16)mono;
+        out[i * 2] = (s16)left;
+        out[i * 2 + 1] = (s16)right;
     }
 }
