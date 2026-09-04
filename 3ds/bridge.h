@@ -216,7 +216,15 @@ typedef struct {
 void Ctr3dsGetClock(CtrClock *out);
 
 // Mix one frame of PCM. Implemented game-side in rp2350/m4a_1.c.
+//
+// Prefer the 16-bit form. DirectSound is 8-bit at source and survives the wider
+// type exactly, but the PSG channels are generated at 16-bit precision and a
+// console mixes the two in the analog domain rather than on an 8-bit grid, so
+// the narrow form quantises the PSG away and mixes one bit from clipping. The
+// 8-bit entry point remains only because the RP2350 port's I2S ring is built
+// on it.
 int Rp2350MixFrame(int8_t *out, int n);
+int Rp2350MixFrame16(int16_t *out, int n);
 
 // m4a engine telemetry, for the audio health report in 3ds/host/audio.c. Also
 // game-side in rp2350/m4a_1.c, which already snapshots these every mix.
