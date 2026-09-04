@@ -1,9 +1,10 @@
 // m4a -> NDSP audio.
 //
 // rp2350/m4a_1.c is the C port of the GBA's MP2K mixer and is compiled into the
-// game archive; it hands us signed 8-bit mono samples through Rp2350MixFrame().
-// NDSP plays PCM8 natively, so no format conversion is needed -- the samples go
-// to the DSP exactly as the mixer produced them.
+// game archive; it hands us signed 16-bit mono samples through
+// Rp2350MixFrame16(), which is DirectSound and the four PSG channels already
+// summed. NDSP plays PCM16 natively, so the samples reach the DSP exactly as
+// the mixer produced them, with no conversion and no requantisation.
 //
 // The mixer runs once per game frame and can stall (a load spike, a save
 // flush), while the DSP consumes at a constant rate. A ring between them
@@ -67,15 +68,14 @@
 
 static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
 
-// PCM16, not the mixer's native PCM8. The mixer produces 8-bit and the DSP can
-// play 8-bit, so this costs one shift per sample and 224 extra bytes a buffer.
-// It buys removing a variable: essentially every working NDSP homebrew feeds
-// PCM16, an emulator's HLE DSP is not the real DSP, and with the pipeline
-// measured healthy and still silent, the sample FORMAT is one of the few things
-// left that could differ between the two.
+// PCM16 all the way from the mixer. Originally chosen while chasing the silence
+// (every working NDSP homebrew feeds PCM16, and an emulator's HLE DSP is not the
+// real DSP); it now also carries real precision, because the PSG channels are
+// generated at 16-bit and a console mixes them with DirectSound in the analog
+// domain rather than on an 8-bit grid.
 static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
 
-static int8_t   sRing[RING_SAMPLES];
+static int16_t  sRing[RING_SAMPLES];
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
 
 static int sReady;
@@ -97,7 +97,7 @@ static uint32_t sQueued;      // wave buffers handed to the DSP
 // Rp2350MixFrame returning 224 only means the sound ENGINE is initialised, not
 // that anything is playing. A peak of 0 means the silence is upstream of this
 // file entirely and no amount of DSP configuration will help.
-static uint8_t  sPeak;        // largest |sample| seen
+static uint32_t sPeak;        // largest |sample| seen
 static uint32_t sNonZero;     // how many samples were not silence
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
@@ -188,7 +188,17 @@ void CtrAudioInit(void)
         ndspChnSetMix(0, mix);
     }
 
-    ndspChnSetInterp(0, NDSP_INTERP_NONE);      // no resampling: rate matches
+    // LINEAR, not NONE. The old comment here claimed "no resampling: rate
+    // matches", which is not true of anything: the DSP runs at 32728 Hz and the
+    // mixer feeds it 13401, so every sample is resampled up by about 2.44x no
+    // matter what. NDSP_INTERP_NONE makes that a zero-order hold, whose imaging
+    // is heard as grit on top of the music. Linear interpolation costs the DSP
+    // nothing and removes most of it.
+    //
+    // Not POLYPHASE: libctru degrades it to NONE whenever the rate ratio is
+    // below 1.0 (ndspiUpdateChn), which ours always is, so asking for it would
+    // quietly land back on the zero-order hold.
+    ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, SAMPLE_RATE);
     ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
 
@@ -337,7 +347,7 @@ static void health_report(void)
 // Rp2350PresentFrame() on the main thread.
 void CtrAudioFrame(void)
 {
-    int8_t mixed[SAMPLES_PER_FRAME];
+    int16_t mixed[SAMPLES_PER_FRAME];
     int n, queuedThisFrame = 0;
 
     if (!sReady)
@@ -347,18 +357,18 @@ void CtrAudioFrame(void)
 
     // 1. Produce. Mix straight into the ring; drop the frame if the ring is
     //    full (the DSP is behind, which means we are running fast).
-    n = Rp2350MixFrame(mixed, SAMPLES_PER_FRAME);
+    n = Rp2350MixFrame16(mixed, SAMPLES_PER_FRAME);
     if (n <= 0)
         sZeroMix++;
 
     for (int i = 0; i < n; i++) {
-        // Measured on the way past, before anything else can be blamed. -128
-        // negates to itself in int8, so widen first.
+        // Measured on the way past, before anything else can be blamed.
+        // Widened first: -32768 negates to itself in int16.
         int mag = mixed[i] < 0 ? -(int)mixed[i] : (int)mixed[i];
         if (mag > 0) {
             sNonZero++;
-            if (mag > (int)sPeak)
-                sPeak = (uint8_t)mag;   // at most 128
+            if ((uint32_t)mag > sPeak)
+                sPeak = (uint32_t)mag;
         }
 
         if (ring_fill() >= RING_SAMPLES) {
@@ -383,9 +393,9 @@ void CtrAudioFrame(void)
             break;
 
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
-            // 8-bit mixer output widened to the DSP's PCM16. A plain shift, so
-            // full scale stays full scale and silence stays silence.
-            sBlock[i][s] = (int16_t)(sRing[sRingTail % RING_SAMPLES] * 256);
+            // Already PCM16 all the way from the mixer, so this is a copy
+            // rather than a widening conversion.
+            sBlock[i][s] = sRing[sRingTail % RING_SAMPLES];
             sRingTail++;
         }
 

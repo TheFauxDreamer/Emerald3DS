@@ -467,12 +467,48 @@ apply_env:
 // ----------------------------------------------------------------------------
 static void MixAllChannels(struct SoundInfo *si, s8 *dma, s32 n)
 {
-    // Reverb is not configured for Emerald (m4aSoundMode sets reverb 0); the
-    // asm's reverb feedback pass is therefore skipped.
-    for (s32 i = 0; i < n; i++)
+    // The frame starts from the reverb feedback rather than from silence,
+    // whenever a reverb depth is set.
+    //
+    // The previous claim here was that Emerald never configures reverb because
+    // m4aSoundInit passes 0. That is true of the INITIAL mode and false of
+    // everything after it: MPlayStart calls m4aSoundMode(songHeader->reverb)
+    // for any song whose header sets SOUND_MODE_REVERB_SET (src/m4a.c:734), and
+    // 479 of Emerald's 529 songs are built with -R50 (sound/songs/midi/midi.cfg).
+    // So nearly all of the soundtrack asks for reverb 50 and was getting none.
+    //
+    // The pass itself is the reference's (SoundMainRAM_Reverb, src/m4a_1.s):
+    // seed each sample with the scaled sum of four taps of already-rendered
+    // audio, which is a one-frame feedback delay. The reference reads two
+    // windows of its DMA ring, one frame apart; this port renders into a single
+    // window (see SoundMain), so both taps come from the one frame of history
+    // the buffer holds. The tap COUNT and therefore the feedback gain are
+    // identical, only the second tap's extra frame of delay is lost.
+    s32 reverb = si->reverb;
+
+    if (reverb == 0)
     {
-        dma[i] = 0;
-        dma[i + PCM_DMA_BUF_SIZE] = 0;
+        for (s32 i = 0; i < n; i++)
+        {
+            dma[i] = 0;
+            dma[i + PCM_DMA_BUF_SIZE] = 0;
+        }
+    }
+    else
+    {
+        for (s32 i = 0; i < n; i++)
+        {
+            s32 r = dma[i];
+            s32 l = dma[i + PCM_DMA_BUF_SIZE];
+            s32 v = ((r + l + r + l) * reverb) >> 9;
+
+            // The reference's rounding fixup, kept verbatim.
+            if (v & 0x80)
+                v += 1;
+
+            dma[i] = (s8)v;
+            dma[i + PCM_DMA_BUF_SIZE] = (s8)v;
+        }
     }
 
     s32 maxChans = si->maxChans;
@@ -1402,7 +1438,7 @@ void Rp2350ChannelDebug(u32 *type, u32 *statusFlags, u32 *envVol,
     if (sampleNonZero) *sampleNonZero = nonZero;
 }
 
-int Rp2350MixFrame(s8 *out, int n)
+int Rp2350MixFrame16(s16 *out, int n)
 {
     gM4aDbgIdent = gSoundInfo.ident;
     gM4aDbgSpvb = gSoundInfo.pcmSamplesPerVBlank;
@@ -1426,9 +1462,11 @@ int Rp2350MixFrame(s8 *out, int n)
     // MixAllChannels byte-identical to the reference engine, and confines the
     // port's own additions to the port's own seam.
     //
-    // Summed in s16 (a DirectSound s8 sample scaled up by 256) and clamped once
-    // at the end, so a loud PSG line over a loud sample cannot wrap around into
-    // the opposite polarity the way an 8-bit accumulator would.
+    // 16-bit output, not 8. DirectSound is genuinely 8-bit at source and stays
+    // exact when shifted up, but the PSG is generated at 16-bit precision and a
+    // console mixes the two in the analog domain, not on an 8-bit grid.
+    // Returning s8 here quantised the PSG away again and left the sum one bit
+    // from clipping on a loud line over a loud sample.
     for (int base = 0; base < n; base += PSG_CHUNK)
     {
         s16 psg[PSG_CHUNK];
@@ -1452,15 +1490,45 @@ int Rp2350MixFrame(s8 *out, int n)
             if (mag > gM4aDbgPsgPeak)
                 gM4aDbgPsgPeak = mag;
 
-            v >>= 8;
-            if (v > 127)
-                v = 127;
-            else if (v < -128)
-                v = -128;
+            if (v > 32767)
+                v = 32767;
+            else if (v < -32768)
+                v = -32768;
 
-            out[base + i] = (s8)v;
+            out[base + i] = (s16)v;
         }
     }
 
     return n;
+}
+
+// The original 8-bit seam, kept because rp2350/hw/audio.c's I2S ring is built
+// on this signature. New callers should prefer Rp2350MixFrame16: this one
+// necessarily throws the extra precision away again.
+int Rp2350MixFrame(s8 *out, int n)
+{
+    int done = 0;
+
+    while (done < n)
+    {
+        s16 wide[PSG_CHUNK];
+        int cnt = n - done;
+        int got, i;
+
+        if (cnt > PSG_CHUNK)
+            cnt = PSG_CHUNK;
+
+        got = Rp2350MixFrame16(wide, cnt);
+        if (got <= 0)
+            break;
+
+        for (i = 0; i < got; i++)
+            out[done + i] = (s8)(wide[i] >> 8);
+
+        done += got;
+        if (got < cnt)
+            break;
+    }
+
+    return done;
 }
