@@ -210,7 +210,7 @@ void CtrAudioInit(void)
     fix_thread_priority();
 
     sReady = 1;
-    CtrLog("emerald3ds: audio ready (%d Hz, mono PCM8)\n", (int)SAMPLE_RATE);
+    CtrLog("emerald3ds: audio ready (%d Hz, mono PCM16)\n", (int)SAMPLE_RATE);
 }
 
 void CtrAudioExit(void)
@@ -253,6 +253,7 @@ static void health_report(void)
     };
 
     uint32_t ident = 0, bgmStatus = 0, zeroRet = 0, active = 0, flags = 0;
+    uint32_t chType = 0, chStatus = 0, chEnv = 0, chFreq = 0, chNonZero = 0;
     uint8_t  masterVol = 0, maxChans = 0;
     int32_t  spvb = 0;
     const char *verdict;
@@ -260,6 +261,7 @@ static void health_report(void)
 
     Rp2350AudioDebug(&ident, &spvb, &bgmStatus, &zeroRet);
     Rp2350MixerDebug(&masterVol, &maxChans, &active, &flags);
+    Rp2350ChannelDebug(&chType, &chStatus, &chEnv, &chFreq, &chNonZero);
 
     if (sPeak == 0) {
         // Name the first broken link rather than just reporting silence. Only
@@ -276,6 +278,22 @@ static void health_report(void)
             verdict = "masterVolume is 0: every channel mixes to nothing";
         else if (maxChans == 0)
             verdict = "maxChans is 0: the mixer loop never runs";
+        else if (active == 0)
+            verdict = "no channel is live: nothing asked to be played";
+        // Everything above is engine-wide. Below is the live channel itself,
+        // which is the only place left for the silence to be hiding.
+        else if (chType & 0x30)
+            verdict = "the live channel is compressed/reverse: "
+                      "SoundMainRAM_Unk1 is still a silent stub";
+        else if ((chEnv & 0xFFFF) == 0)
+            verdict = "channel envelope volume is 0: real samples multiplied "
+                      "by nothing (volume chain)";
+        else if (chNonZero == 0)
+            verdict = "the wave data under currentPointer is silence: "
+                      "bad sample pointer, or silent .bin assets";
+        else
+            verdict = "live channel has volume AND non-silent samples, "
+                      "yet the mix is zero: the fault is inside MixChannel";
     }
     else if (sStalled > sFrames / 4)
         verdict = "the DSP is not draining buffers (NDSP thread starved?)";
@@ -300,6 +318,10 @@ static void health_report(void)
            (unsigned long)ident, (long)spvb, (unsigned long)bgmStatus,
            (unsigned long)zeroRet, (unsigned)masterVol, (unsigned)maxChans,
            (unsigned long)active, (unsigned long)flags);
+    CtrLog("emerald3ds: chan type=%02lX status=%02lX env=%06lX freq=%lu "
+           "sampleNonZero=%lu/64\n",
+           (unsigned long)chType, (unsigned long)chStatus, (unsigned long)chEnv,
+           (unsigned long)chFreq, (unsigned long)chNonZero);
     CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 

@@ -1088,6 +1088,80 @@ void Rp2350MixerDebug(u8 *masterVolume, u8 *maxChans, u32 *activeChans,
     if (engineFlags)  *engineFlags  = flags;
 }
 
+// The last thing the host side cannot see: what the live channels actually
+// contain. Reported for the FIRST channel with SOUND_CHANNEL_SF_ON, which is
+// enough, because a fault that silences one silences all of them.
+//
+// With the engine measuring healthy (chain=7F, active=4) and every output
+// sample still zero, exactly three things can be responsible, and these fields
+// separate them:
+//
+//   envVol == 0        the envelope or the volume chain collapsed, so real
+//                      samples are being multiplied by nothing
+//   sampleNonZero == 0 the wave data under currentPointer really is silence,
+//                      or the pointer is not where the sample is
+//   type & 0x30        the channel took the SoundMainRAM_Unk1 path, which is
+//                      still a silent stub (compressed / reverse playback)
+//
+// Cheap enough to run every mix: it walks at most 5 channels and 64 bytes.
+void Rp2350ChannelDebug(u32 *type, u32 *statusFlags, u32 *envVol,
+                        u32 *frequency, u32 *sampleNonZero)
+{
+    struct SoundInfo *si = SOUND_INFO_PTR;
+    struct SoundChannel *chan = NULL;
+    u32 nonZero = 0;
+    s32 c;
+
+    if (si != NULL)
+    {
+        for (c = 0; c < si->maxChans && c < MAX_DIRECTSOUND_CHANNELS; c++)
+        {
+            if (si->chans[c].statusFlags & SOUND_CHANNEL_SF_ON)
+            {
+                chan = &si->chans[c];
+                break;
+            }
+        }
+    }
+
+    if (chan == NULL)
+    {
+        if (type)          *type = 0;
+        if (statusFlags)   *statusFlags = 0;
+        if (envVol)        *envVol = 0;
+        if (frequency)     *frequency = 0;
+        if (sampleNonZero) *sampleNonZero = 0;
+        return;
+    }
+
+    // Bounded by the wave's own extent, so a stale pointer cannot walk off the
+    // end of the sample and read whatever data follows it.
+    if (chan->wav != NULL && chan->currentPointer != NULL)
+    {
+        const s8 *start = chan->wav->data;
+        const s8 *end   = start + chan->wav->size;
+        const s8 *p     = chan->currentPointer;
+
+        if (p >= start && p < end)
+        {
+            s32 i;
+            for (i = 0; i < 64 && (p + i) < end; i++)
+                if (p[i] != 0)
+                    nonZero++;
+        }
+    }
+
+    // Packed rather than three parameters: it is read as hex in one glance,
+    // and all three are only ever interesting together.
+    if (type)        *type = chan->type;
+    if (statusFlags) *statusFlags = chan->statusFlags;
+    if (envVol)      *envVol = ((u32)chan->envelopeVolume << 16)
+                             | ((u32)chan->envelopeVolumeRight << 8)
+                             |  (u32)chan->envelopeVolumeLeft;
+    if (frequency)   *frequency = chan->frequency;
+    if (sampleNonZero) *sampleNonZero = nonZero;
+}
+
 int Rp2350MixFrame(s8 *out, int n)
 {
     gM4aDbgIdent = gSoundInfo.ident;
