@@ -19,11 +19,12 @@
 //  - maxLines (the per-scanline render deadline) is ignored: we always mix every
 //    active channel in full. RP2350 has the cycle budget and no VCOUNT race.
 //  - Compressed (TONEDATA_TYPE_CMP) and reverse (TONEDATA_TYPE_REV) samples go
-//    through SoundMainRAM_Unk1 -- currently a silent stub (see TODO) so the
-//    uncompressed majority can be validated first.
+//    through MixChannelSpecial, which decodes the BDPCM block format rather
+//    than transliterating the reference's pointer arithmetic.
 
 #include "global.h"
 #include "gba/m4a_internal.h"
+#include "psg.h"
 
 // Flags not exported to the C header (only in constants/m4a_constants.inc).
 #define SOUND_CHANNEL_SF_SPECIAL 0x20
@@ -31,8 +32,22 @@
 #define TONEDATA_TYPE_CMP        0x20
 #define WAVE_DATA_FLAG_LOOP      0xC0
 
+// How many PSG samples are rendered at a time. Emerald is fixed at 224 samples
+// per frame (SOUND_MODE_FREQ_13379), so this covers a whole frame in one pass;
+// chunking rather than sizing to PCM_DMA_BUF_SIZE keeps the stack cost at 512
+// bytes and still handles any sound mode correctly.
+#define PSG_CHUNK 256
+
 // SOUND_INFO_PTR is a macro (gba/defines.h) for the SoundInfo pointer slot.
 extern const u8 gClockTable[];
+extern const s8 gDeltaEncodingTable[];
+
+// Per-subsystem peaks, so "is there sound" can be answered for each half of the
+// mixer separately instead of for the sum. A silent PSG with a healthy
+// DirectSound reads very differently from both being silent.
+volatile u32 gM4aDbgDsPeak;    // largest |sample| out of the DirectSound mix
+volatile u32 gM4aDbgPsgPeak;   // ... out of the PSG synthesiser
+volatile u32 gM4aDbgCryPeak;   // ... out of the compressed/reverse path
 extern void *const gMPlayJumpTableTemplate[];
 extern void ClearChain(void *x);
 extern void Clear64byte(void *x);
@@ -91,15 +106,152 @@ void SoundMainBTM(void)
 }
 
 // ----------------------------------------------------------------------------
-// SoundMainRAM_Unk1: compressed (BDPCM) / reverse-playback sample generation.
-// TODO: port the DPCM delta decoder (Unk2) + reverse loops from m4a_1.s. For
-// now CMP/REV channels are rendered silent (state preserved, no buffer writes)
-// so the uncompressed engine can be brought up and validated first.
+// Compressed (BDPCM) and reverse-playback sample generation.
+//
+// A compressed wave stores 64 samples per 33-byte block: one verbatim sample,
+// then 32 bytes of 4-bit deltas indexing gDeltaEncodingTable, low nibble before
+// high. The high nibble of the first packed byte is unused, because 1 base plus
+// 63 deltas already fills the block.
+//
+// The reference (SoundMainRAM_Unk1/Unk2 in src/m4a_1.s) rewrites
+// chan->currentPointer into a sample index and caches the decoded block in
+// chan->xpi. This does the same work index-first, which is what the format
+// wants anyway, and keys the cache on the wave and block instead so two
+// channels reading different compressed samples cannot see each other's buffer.
 // ----------------------------------------------------------------------------
-static void SoundMainRAM_Unk1(struct SoundInfo *si, struct SoundChannel *chan)
+
+static const struct WaveData *sDecodedWav;
+static u32 sDecodedBlock;
+static s8  sDecodeBuf[64];
+
+static s32 BdpcmSample(const struct WaveData *wav, u32 index)
 {
-    (void)si;
-    (void)chan;
+    u32 block = index >> 6;
+
+    if (wav != sDecodedWav || block != sDecodedBlock || sDecodedWav == NULL)
+    {
+        const u8 *p = (const u8 *)wav->data + block * 0x21;
+        s32 acc = (s8)*p++;
+        s32 k = 0;
+        u8 packed;
+
+        sDecodeBuf[k++] = (s8)acc;
+
+        // Only the low nibble of the first packed byte carries a delta.
+        packed = *p++;
+        acc = (s8)(acc + gDeltaEncodingTable[packed & 0xF]);
+        sDecodeBuf[k++] = (s8)acc;
+
+        while (k < 64)
+        {
+            packed = *p++;
+            acc = (s8)(acc + gDeltaEncodingTable[packed >> 4]);
+            sDecodeBuf[k++] = (s8)acc;
+            acc = (s8)(acc + gDeltaEncodingTable[packed & 0xF]);
+            sDecodeBuf[k++] = (s8)acc;
+        }
+
+        sDecodedWav = wav;
+        sDecodedBlock = block;
+    }
+
+    return sDecodeBuf[index & 63];
+}
+
+// One sample by index, honouring compression and playback direction. Clamped
+// rather than trusted: the interpolator reads index+1, which is past the end on
+// the final sample of a non-looping wave.
+static s32 SpecialSample(const struct SoundChannel *chan,
+                         const struct WaveData *wav, s32 index)
+{
+    s32 size = (s32)wav->size;
+
+    if (index < 0)
+        index = 0;
+    else if (index >= size)
+        index = size - 1;
+
+    if (chan->type & TONEDATA_TYPE_REV)
+        index = size - 1 - index;
+
+    if (wav->type != 0)
+        return BdpcmSample(wav, (u32)index);
+
+    return wav->data[index];
+}
+
+// The compressed/reverse counterpart of the plain sample loops below. Same
+// interpolation and same loop handling; only the fetch differs, so a fixed-rate
+// channel falls out of it too (inc of one whole sample leaves the interpolation
+// weight at zero).
+static void MixChannelSpecial(struct SoundInfo *si, struct SoundChannel *chan,
+                              s8 *bufR, s8 *bufL, s32 n, s32 envR, s32 envL)
+{
+    struct WaveData *wav = chan->wav;
+    u32 fw = chan->fw;
+    u32 inc;
+    s32 count = chan->count;
+    s32 size = (s32)wav->size;
+    s32 index = size - count;
+    s32 loopLength = 0;
+    s32 base, delta;
+
+    if (wav == NULL || size <= 0)
+    {
+        chan->statusFlags = 0;
+        return;
+    }
+
+    inc = (chan->type & TONEDATA_TYPE_FIX) ? (1u << 23)
+                                           : (u32)si->divFreq * chan->frequency;
+
+    if (chan->statusFlags & SOUND_CHANNEL_SF_LOOP)
+        loopLength = size - (s32)wav->loopStart;
+
+    base = SpecialSample(chan, wav, index);
+    delta = SpecialSample(chan, wav, index + 1) - base;
+
+    for (s32 i = 0; i < n; i++)
+    {
+        s32 interp = base + (s32)(((s64)(s32)fw * delta) >> 23);
+        u32 adv;
+        u32 mag;
+
+        bufR[i] = (s8)(bufR[i] + ((envR * interp) >> 8));
+        bufL[i] = (s8)(bufL[i] + ((envL * interp) >> 8));
+
+        mag = (u32)(interp < 0 ? -interp : interp);
+        if (mag > gM4aDbgCryPeak)
+            gM4aDbgCryPeak = mag;
+
+        fw += inc;
+        adv = fw >> 23;
+        if (adv != 0)
+        {
+            fw &= ~0x3F800000u;
+            count -= adv;
+            if (count <= 0)
+            {
+                if (loopLength <= 0)
+                {
+                    chan->statusFlags = 0;
+                    chan->count = 0;
+                    chan->fw = fw;
+                    return;
+                }
+                do { count += loopLength; } while (count <= 0);
+            }
+            index = size - count;
+            base = SpecialSample(chan, wav, index);
+            delta = SpecialSample(chan, wav, index + 1) - base;
+        }
+    }
+
+    chan->fw = fw;
+    chan->count = count;
+    // Kept in step for anything that inspects it, the telemetry included, even
+    // though this path indexes rather than walks.
+    chan->currentPointer = wav->data + (size - count);
 }
 
 // ----------------------------------------------------------------------------
@@ -227,7 +379,7 @@ apply_env:
 
     if (chan->type & (TONEDATA_TYPE_CMP | TONEDATA_TYPE_REV))
     {
-        SoundMainRAM_Unk1(si, chan);
+        MixChannelSpecial(si, chan, bufR, bufL, n, envR, envL);
         return;
     }
 
@@ -713,8 +865,40 @@ void ply_note(u32 note_cmd, struct MusicPlayerInfo *mplayInfo, struct MusicPlaye
 
     if (cgbType != 0)
     {
-        // CGB voices are unsupported on RP2350 (no PSG); drop the note.
-        return;
+        // A CGB voice gets exactly one channel, indexed by its type (1..4),
+        // instead of the pool search the DirectSound path does below: the GBA
+        // has one square-1, one square-2, one wave and one noise generator, so
+        // there is nothing to search for.
+        //
+        // struct CgbChannel and struct SoundChannel are deliberately overlaid
+        // (statusFlags, priority, track, frequency and wav/wavePointer all sit
+        // at identical offsets, and both are 0x40 bytes), which is why the
+        // reference drives both kinds through one code path from here on. The
+        // cast mirrors that; the build already uses -fno-strict-aliasing.
+        struct CgbChannel *cgb = si->cgbChans;
+
+        if (cgb == NULL)
+            return;   // MPlayExtender never ran, so there are no CGB channels
+
+        chan = (struct SoundChannel *)(cgb + (cgbType - 1));
+
+        // Steal rules, from ply_note in src/m4a_1.s: a free or already
+        // releasing channel is taken outright, otherwise this note has to
+        // outrank the one playing. Equal priority is broken by track address,
+        // so a later track cannot cut off an earlier one.
+        {
+            u8 sf = chan->statusFlags;
+
+            if ((sf & SOUND_CHANNEL_SF_ON) && !(sf & SOUND_CHANNEL_SF_STOP))
+            {
+                if (chan->priority > priority)
+                    return;
+                if (chan->priority == priority
+                 && (uintptr_t)chan->track < (uintptr_t)track)
+                    return;
+            }
+        }
+        goto chan_found;
     }
 
     // Find a channel to (re)use: a free one wins immediately; otherwise steal
@@ -824,8 +1008,32 @@ chan_found:;
     if (midiKey < 0)
         midiKey = 0;
 
-    chan->count = track->unk_3C;
-    chan->frequency = MidiKeyToFreq(chan->wav, midiKey, track->pitM);
+    if (cgbType != 0)
+    {
+        // The CGB tail of ply_note. Deliberately no `count`: a PSG note has no
+        // sample to run out of, it plays until the length counter or the
+        // envelope stops it.
+        struct CgbChannel *cgb = (struct CgbChannel *)chan;
+        u8 ps = tone->pan_sweep;
+
+        cgb->length = tone->length;
+
+        // pan_sweep is one byte doing two jobs. Bit 7 set means it encodes a
+        // PAN value, so there is no sweep to take; an all-zero sweep field
+        // likewise means none. Both cases fall back to 8, the reference's
+        // inert value.
+        cgb->sweep = (!(ps & 0x80) && (ps & 0x70)) ? ps : 8;
+
+        // Through the SoundInfo hook rather than calling MidiKeyToCgbFreq
+        // directly, exactly as the reference does: MPlayExtender is what
+        // installs it, so a build without CGB support cannot reach here.
+        chan->frequency = si->MidiKeyToCgbFreq(cgbType, midiKey, track->pitM);
+    }
+    else
+    {
+        chan->count = track->unk_3C;
+        chan->frequency = MidiKeyToFreq(chan->wav, midiKey, track->pitM);
+    }
     chan->statusFlags = SOUND_CHANNEL_SF_START;
     track->flags &= 0xF0;
 }
@@ -1049,6 +1257,14 @@ volatile s32 gM4aDbgSpvb;
 volatile u32 gM4aDbgBgmStatus;
 volatile u32 gM4aDbgZeroRet;   // count of frames Rp2350MixFrame returned 0
 
+
+void Rp2350AudioPeaks(u32 *dsPeak, u32 *psgPeak, u32 *cryPeak)
+{
+    if (dsPeak)  *dsPeak = gM4aDbgDsPeak;
+    if (psgPeak) *psgPeak = gM4aDbgPsgPeak;
+    if (cryPeak) *cryPeak = gM4aDbgCryPeak;
+}
+
 void Rp2350AudioDebug(u32 *ident, s32 *spvb, u32 *bgmStatus, u32 *zeroRet)
 {
     if (ident)     *ident = gM4aDbgIdent;
@@ -1123,8 +1339,9 @@ void Rp2350MixerDebug(u8 *masterVolume, u8 *maxChans, u32 *activeChans,
 //                      samples are being multiplied by nothing
 //   sampleNonZero == 0 the wave data under currentPointer really is silence,
 //                      or the pointer is not where the sample is
-//   type & 0x30        the channel took the SoundMainRAM_Unk1 path, which is
-//                      still a silent stub (compressed / reverse playback)
+//   type & 0x30        the channel is compressed or reverse-playback, so it
+//                      runs through MixChannelSpecial rather than the plain
+//                      sample loops
 //
 // Cheap enough to run every mix: it walks at most 5 channels and 64 bytes.
 void Rp2350ChannelDebug(u32 *type, u32 *statusFlags, u32 *envVol,
@@ -1202,8 +1419,48 @@ int Rp2350MixFrame(s8 *out, int n)
 
     const s8 *bufR = gSoundInfo.pcmBuffer;
     const s8 *bufL = gSoundInfo.pcmBuffer + PCM_DMA_BUF_SIZE;
-    for (int i = 0; i < n; i++)
-        out[i] = (s8)(((s32)bufL[i] + (s32)bufR[i]) >> 1);
+
+    // The GBA sums its two DirectSound channels with the four PSG generators in
+    // hardware. pcmBuffer holds only the DirectSound half, so the PSG half is
+    // added here rather than inside MixAllChannels: that keeps MixChannel and
+    // MixAllChannels byte-identical to the reference engine, and confines the
+    // port's own additions to the port's own seam.
+    //
+    // Summed in s16 (a DirectSound s8 sample scaled up by 256) and clamped once
+    // at the end, so a loud PSG line over a loud sample cannot wrap around into
+    // the opposite polarity the way an 8-bit accumulator would.
+    for (int base = 0; base < n; base += PSG_CHUNK)
+    {
+        s16 psg[PSG_CHUNK];
+        int cnt = n - base;
+
+        if (cnt > PSG_CHUNK)
+            cnt = PSG_CHUNK;
+
+        PsgRender(psg, cnt, gSoundInfo.pcmFreq);
+
+        for (int i = 0; i < cnt; i++)
+        {
+            s32 ds = ((s32)bufL[base + i] + (s32)bufR[base + i]) >> 1;
+            s32 v = (ds << 8) + psg[i];
+            u32 mag;
+
+            mag = (u32)(ds < 0 ? -ds : ds);
+            if (mag > gM4aDbgDsPeak)
+                gM4aDbgDsPeak = mag;
+            mag = (u32)(psg[i] < 0 ? -(s32)psg[i] : (s32)psg[i]);
+            if (mag > gM4aDbgPsgPeak)
+                gM4aDbgPsgPeak = mag;
+
+            v >>= 8;
+            if (v > 127)
+                v = 127;
+            else if (v < -128)
+                v = -128;
+
+            out[base + i] = (s8)v;
+        }
+    }
 
     return n;
 }

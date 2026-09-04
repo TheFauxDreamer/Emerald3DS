@@ -88,7 +88,7 @@ assemble_sound_data() { # $1 = .s, $2 = out .o
 
 echo "[1/3] compiling C sources..."
 n=0
-for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/m4a_1.c \
+for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/m4a_1.c rp2350/psg.c \
            3ds/gba_mem.c 3ds/tweaks.c 3ds/ui/*.c; do
   obj="$OBJ/$(basename "$src" .c).o"
   compile_c "$src" "$obj"
