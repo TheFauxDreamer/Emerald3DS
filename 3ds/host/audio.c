@@ -1,10 +1,11 @@
 // m4a -> NDSP audio.
 //
 // rp2350/m4a_1.c is the C port of the GBA's MP2K mixer and is compiled into the
-// game archive; it hands us signed 16-bit mono samples through
-// Rp2350MixFrame16(), which is DirectSound and the four PSG channels already
-// summed. NDSP plays PCM16 natively, so the samples reach the DSP exactly as
-// the mixer produced them, with no conversion and no requantisation.
+// game archive; it hands us interleaved stereo 16-bit samples through
+// Rp2350MixFrameStereo16(), which is DirectSound and the four PSG channels
+// already summed and panned. NDSP plays stereo PCM16 natively, so the samples
+// reach the DSP exactly as the mixer produced them, with no conversion, no
+// requantisation and no downmix.
 //
 // The mixer runs once per game frame and can stall (a load spike, a save
 // flush), while the DSP consumes at a constant rate. A ring between them
@@ -73,7 +74,7 @@ static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
 // real DSP); it now also carries real precision, because the PSG channels are
 // generated at 16-bit and a console mixes them with DirectSound in the analog
 // domain rather than on an 8-bit grid.
-static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
+static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible, stereo
 
 static int16_t  sRing[RING_SAMPLES];
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
@@ -200,19 +201,19 @@ void CtrAudioInit(void)
     // quietly land back on the zero-order hold.
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, SAMPLE_RATE);
-    ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
+    ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
 
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
-        sBlock[i] = linearAlloc(BLOCK_SAMPLES * sizeof(int16_t));
+        sBlock[i] = linearAlloc(BLOCK_SAMPLES * 2 * sizeof(int16_t));
         if (sBlock[i] == NULL) {
             CtrLog("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
-                   (int)(BLOCK_SAMPLES * sizeof(int16_t)));
+                   (int)(BLOCK_SAMPLES * 2 * sizeof(int16_t)));
             return;
         }
-        memset(sBlock[i], 0, BLOCK_SAMPLES * sizeof(int16_t));
+        memset(sBlock[i], 0, BLOCK_SAMPLES * 2 * sizeof(int16_t));
         memset(&sWaveBuf[i], 0, sizeof(sWaveBuf[i]));
         sWaveBuf[i].data_vaddr = sBlock[i];
-        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // samples, not bytes
+        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // sample FRAMES, not bytes
         sWaveBuf[i].status     = NDSP_WBUF_DONE;  // free for the first fill
     }
 
@@ -220,7 +221,7 @@ void CtrAudioInit(void)
     fix_thread_priority();
 
     sReady = 1;
-    CtrLog("emerald3ds: audio ready (%d Hz, mono PCM16)\n", (int)SAMPLE_RATE);
+    CtrLog("emerald3ds: audio ready (%d Hz, stereo PCM16)\n", (int)SAMPLE_RATE);
 }
 
 void CtrAudioExit(void)
@@ -347,7 +348,7 @@ static void health_report(void)
 // Rp2350PresentFrame() on the main thread.
 void CtrAudioFrame(void)
 {
-    int16_t mixed[SAMPLES_PER_FRAME];
+    int16_t mixed[SAMPLES_PER_FRAME * 2];   // interleaved L,R
     int n, queuedThisFrame = 0;
 
     if (!sReady)
@@ -357,25 +358,30 @@ void CtrAudioFrame(void)
 
     // 1. Produce. Mix straight into the ring; drop the frame if the ring is
     //    full (the DSP is behind, which means we are running fast).
-    n = Rp2350MixFrame16(mixed, SAMPLES_PER_FRAME);
+    n = Rp2350MixFrameStereo16(mixed, SAMPLES_PER_FRAME);
     if (n <= 0)
         sZeroMix++;
 
     for (int i = 0; i < n; i++) {
-        // Measured on the way past, before anything else can be blamed.
-        // Widened first: -32768 negates to itself in int16.
-        int mag = mixed[i] < 0 ? -(int)mixed[i] : (int)mixed[i];
-        if (mag > 0) {
-            sNonZero++;
-            if ((uint32_t)mag > sPeak)
-                sPeak = (uint32_t)mag;
+        // Measured on the way past, before anything else can be blamed, and
+        // over both sides so a hard-panned line still registers. Widened first:
+        // -32768 negates to itself in int16.
+        for (int c = 0; c < 2; c++) {
+            int mag = mixed[i * 2 + c] < 0 ? -(int)mixed[i * 2 + c]
+                                           : (int)mixed[i * 2 + c];
+            if (mag > 0) {
+                sNonZero++;
+                if ((uint32_t)mag > sPeak)
+                    sPeak = (uint32_t)mag;
+            }
         }
 
         if (ring_fill() >= RING_SAMPLES) {
             sDropped++;
             break;
         }
-        sRing[sRingHead % RING_SAMPLES] = mixed[i];
+        sRing[(sRingHead % RING_SAMPLES) * 2] = mixed[i * 2];
+        sRing[(sRingHead % RING_SAMPLES) * 2 + 1] = mixed[i * 2 + 1];
         sRingHead++;
     }
 
@@ -393,14 +399,15 @@ void CtrAudioFrame(void)
             break;
 
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
-            // Already PCM16 all the way from the mixer, so this is a copy
-            // rather than a widening conversion.
-            sBlock[i][s] = sRing[sRingTail % RING_SAMPLES];
+            // Already interleaved stereo PCM16 from the mixer, so this is a
+            // copy rather than a conversion.
+            sBlock[i][s * 2] = sRing[(sRingTail % RING_SAMPLES) * 2];
+            sBlock[i][s * 2 + 1] = sRing[(sRingTail % RING_SAMPLES) * 2 + 1];
             sRingTail++;
         }
 
         // The DSP reads this memory directly and does not see the ARM11 cache.
-        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES * sizeof(int16_t));
+        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES * 2 * sizeof(int16_t));
         ndspChnWaveBufAdd(0, &sWaveBuf[i]);
         sQueued++;
         queuedThisFrame++;
