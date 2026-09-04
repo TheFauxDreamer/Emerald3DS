@@ -782,7 +782,30 @@ chan_found:;
         clear_modM(track);
     TrkVolPitSet(mplayInfo, track);
 
+    // One 32-bit store in the reference (ply_note, m4a_1.s): SoundChannel's
+    // gateTime/midiKey/velocity/priority at 0x10..0x13 are copied wholesale
+    // from MusicPlayerTrack's gateTime/key/velocity/runningStatus at
+    // 0x04..0x07, with priority overwritten by the computed value two
+    // instructions later. Hand-copying that word as individual fields lost the
+    // two in the middle.
+    //
+    // chan->velocity is the one that silenced the port. ChnVolSetAsm multiplies
+    // by it, so leaving it at the zero-initialised 0 made rightVolume and
+    // leftVolume 0 for every note ever played. Everything else looked perfect:
+    // song playing on 8 tracks, channels live, envelopeVolume climbing to 0xFF,
+    // real sample data under currentPointer, and every output sample
+    // multiplied by nothing.
+    //
+    // chan->midiKey is not cosmetic either: ply_endtie matches on it to find
+    // the channel to release, so a permanent 0 meant tied notes were never
+    // released.
+    //
+    // The other two packed stores in the same routine, attack/decay/sustain/
+    // release and pseudoEchoVolume/pseudoEchoLength, are already unpacked
+    // correctly below; this was the only one missed.
     chan->gateTime = track->gateTime;
+    chan->midiKey  = track->key;
+    chan->velocity = track->velocity;
     chan->priority = priority;
     chan->key = keyForFreq;
     chan->rhythmPan = rhythmPan;
