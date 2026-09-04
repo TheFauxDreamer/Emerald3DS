@@ -1363,7 +1363,9 @@ static bool8 RegionMap_IsMapSecIdInNextRow(u16 y)
 // The 3DS port's bottom screen draws this map itself, into its own RGB565
 // framebuffer, so it needs the art and the player's position but none of the BG
 // layers, sprites or tasks that everything else in this file exists to drive.
-// These three accessors are the whole seam. Nothing here writes game state.
+//
+// Four of the five accessors below are pure reads. The exception is
+// Ctr3dsSetFlyWarpDestination, which sets a pending warp and says so.
 
 void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 **pal)
 {
@@ -1430,6 +1432,87 @@ void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
     *inCave = sScratch.playerIsInCave;
 
     sRegionMap = saved;
+}
+
+// Whether a place can be flown to, which is where "have they been there?"
+// actually lives: GetMapsecType folds every FLAG_VISITED_* into CITY_CANFLY
+// against CITY_CANTFLY, and adds FLAG_LANDMARK_BATTLE_FRONTIER on top. Asking
+// it is what keeps the second screen from carrying its own list of towns and
+// flags that would drift from this one the first time either changed.
+u8 Ctr3dsGetMapSecType(mapsec_u16_t mapSecId)
+{
+    return GetMapsecType(mapSecId);
+}
+
+// The warp half of CB_ExitFlyMap, for a destination picked by touch rather than
+// by the fly map's cursor. The switch below is that function's, case for case.
+//
+// This is the only thing in this block that WRITES game state, and all it
+// writes is the pending warp destination. It does not start the warp: the
+// caller does that with ReturnToFieldFromFlyMapSelect(), which is the very next
+// thing CB_ExitFlyMap does too.
+//
+// posWithinMapSec is recomputed here from the tapped tile rather than taken as
+// an argument. Only Ever Grande cares -- position 0 is the Pokemon League and
+// anything else is the city -- and sourcing it here means the caller does not
+// also need the tile walk in GetPositionOfCursorWithinMapSec exported to it.
+//
+// Returns FALSE if it set nothing, which the caller must treat as "do not
+// start the warp": the destination left over from the last one is still in
+// place, and flying to it would be worse than refusing.
+bool8 Ctr3dsSetFlyWarpDestination(mapsec_u16_t mapSecId, u16 x, u16 y)
+{
+    // Borrowed the same way Ctr3dsGetRegionMapPlayerPos borrows it, and for the
+    // same reason: a real map may legitimately be open on the top screen.
+    static struct RegionMap sScratch;
+    struct RegionMap *saved = sRegionMap;
+    u8 posWithinMapSec;
+
+    sRegionMap = &sScratch;
+    sScratch.zoomed = FALSE;
+    sScratch.mapSecId = mapSecId;
+    sScratch.cursorPosX = x;
+    sScratch.cursorPosY = y;
+    GetPositionOfCursorWithinMapSec();
+    posWithinMapSec = sScratch.posWithinMapSec;
+    sRegionMap = saved;
+
+    switch (mapSecId)
+    {
+    case MAPSEC_SOUTHERN_ISLAND:
+        SetWarpDestinationToHealLocation(HEAL_LOCATION_SOUTHERN_ISLAND_EXTERIOR);
+        break;
+    case MAPSEC_BATTLE_FRONTIER:
+        SetWarpDestinationToHealLocation(HEAL_LOCATION_BATTLE_FRONTIER_OUTSIDE_EAST);
+        break;
+    case MAPSEC_LITTLEROOT_TOWN:
+        SetWarpDestinationToHealLocation(gSaveBlock2Ptr->playerGender == MALE ? HEAL_LOCATION_LITTLEROOT_TOWN_BRENDANS_HOUSE : HEAL_LOCATION_LITTLEROOT_TOWN_MAYS_HOUSE);
+        break;
+    case MAPSEC_EVER_GRANDE_CITY:
+        SetWarpDestinationToHealLocation(FlagGet(FLAG_LANDMARK_POKEMON_LEAGUE) && posWithinMapSec == 0 ? HEAL_LOCATION_EVER_GRANDE_CITY_POKEMON_LEAGUE : HEAL_LOCATION_EVER_GRANDE_CITY);
+        break;
+    default:
+        // sMapHealLocations stops at MAPSEC_ROUTE_134, well short of the whole
+        // mapsec list: MAPSEC_BATTLE_FRONTIER and MAPSEC_SOUTHERN_ISLAND sit
+        // past its end, which is why the fly map gives them cases of their own
+        // above rather than letting them fall through here.
+        //
+        // Only the sixteen CANFLY towns can actually reach this branch, and the
+        // caller checks that. Bounded anyway because this is a public entry
+        // point and the check that protects it lives in another file: an
+        // out-of-range mapsec here would not read a wrong warp, it would read
+        // past the array and warp somewhere arbitrary.
+        if (mapSecId >= ARRAY_COUNT(sMapHealLocations))
+            return FALSE;
+
+        if (sMapHealLocations[mapSecId][2] != HEAL_LOCATION_NONE)
+            SetWarpDestinationToHealLocation(sMapHealLocations[mapSecId][2]);
+        else
+            SetWarpDestinationToMapWarp(sMapHealLocations[mapSecId][0], sMapHealLocations[mapSecId][1], WARP_ID_NONE);
+        break;
+    }
+
+    return TRUE;
 }
 #endif // PLATFORM_3DS
 

@@ -473,6 +473,13 @@ static void DrawPickCell(u8 slot)
     hp    = GetMonData(mon, MON_DATA_HP);
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
+    // Labelled to match the PARTY cell this is a relative of. Same reasoning
+    // there: beside "Lv 42" a bare number reads as another stat rather than as
+    // health. Measured the same way too, off maxHp, even though nothing here
+    // animates -- one rule for both cells is what keeps them looking alike.
+    UiAscii(label, "HP", sizeof(label));
+    UiText(cx + PICK_CELL_W - 10 - UiNumWidth((s32)maxHp) - UiTextWidth(label) - 2,
+           cy + 24, label, UI_COL_DIM, UiThemeShadow());
     UiNumRight(cx + PICK_CELL_W - 10, cy + 24, (s32)hp,
                UiThemeText(), UiThemeShadow());
     UiHpBar(cx + PICK_TEXT_X, cy + 40, PICK_CELL_W - PICK_TEXT_X - 10, hp, maxHp);
