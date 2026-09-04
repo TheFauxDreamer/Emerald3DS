@@ -234,7 +234,15 @@ void WasmRunFrame(void)
 
     FRAME_TRACE("callbacks");
     PlayTimeCounter_Update();
+#if PLATFORM_3DS
+    // Paced by real time, not game time, so that fast-forward does not run the
+    // map's fade-in/fade-out state machine at the multiplier and desynchronise
+    // it from the music engine gated the same way below.
+    { extern int Ctr3dsIsAudioFrame(void);
+      if (Ctr3dsIsAudioFrame()) MapMusicMain(); }
+#else
     MapMusicMain();
+#endif
     FRAME_TRACE("MapMusicMain");
 #if WASM || RP2350
     VBlankIntr();
@@ -441,7 +449,16 @@ static void VBlankIntr(void)
 
     gPcmDmaCounter = gSoundInfo.pcmDmaCounter;
 
+#if PLATFORM_3DS
+    // One tick per DISPLAYED frame, not per game frame. Under fast-forward the
+    // superloop runs 2x to 8x logical frames per displayed frame, and this call
+    // is what advances the song, so running it every time played the music at
+    // the fast-forward speed. See Ctr3dsIsAudioFrame() in 3ds/host/main.c.
+    { extern int Ctr3dsIsAudioFrame(void);
+      if (Ctr3dsIsAudioFrame()) m4aSoundMain(); }
+#else
     m4aSoundMain();
+#endif
     TryReceiveLinkBattleData();
 
     if (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED)))

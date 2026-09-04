@@ -34,7 +34,11 @@
 // leading 12 bytes of a v4 file, and throwing it away would silently reset the
 // player's top scale and turbo binds as the price of adding an unrelated
 // option. The new fields take their defaults, which is what a v3 file means.
-#define SETTINGS_VERSION 4
+//
+// v5 appended the fast-forward audio preference, and migrates the same way. A
+// zero there is CTR_FFAUDIO_NORMAL, which is the default anyway, so an older
+// file loads as exactly what it meant.
+#define SETTINGS_VERSION 5
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -53,10 +57,20 @@ struct CtrSettings {
     uint8_t  levelCap;                 // CTR_CAP_*
     uint8_t  randomizer;
     uint8_t  bagSort;                  // CTR_BAGSORT_*
+    // Appended in v5.
+    uint8_t  ffAudio;                  // CTR_FFAUDIO_*
+    // Explicit, because without it the compiler adds three bytes of its own to
+    // round the struct to its 4-byte alignment and CtrSettingsSave would write
+    // uninitialised stack to the card. Named padding keeps the promise above
+    // that every byte on disk is accounted for, and gives v6 somewhere to go
+    // without another size change.
+    uint8_t  pad[3];
 };
 
-// How much of the struct a v3 file fills: everything up to the v4 additions.
+// How much of the struct each older layout fills: everything up to the fields
+// the next version appended.
 #define SETTINGS_V3_SIZE  offsetof(struct CtrSettings, expAll)
+#define SETTINGS_V4_SIZE  offsetof(struct CtrSettings, ffAudio)
 
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
@@ -73,6 +87,8 @@ extern int  Ctr3dsGetRandomizer(void);
 extern void Ctr3dsApplyRandomizer(int on);
 extern int  Ctr3dsGetBagSort(void);
 extern void Ctr3dsApplyBagSort(int mode);
+extern int  Ctr3dsGetFfAudio(void);
+extern void Ctr3dsApplyFfAudio(int mode);
 
 void CtrSettingsLoad(void)
 {
@@ -96,6 +112,11 @@ void CtrSettingsLoad(void)
     {
         if (n != sizeof(s))
             return;
+    }
+    else if (s.version == 4)
+    {
+        if (n != SETTINGS_V4_SIZE)
+            return;                   // claims v4 but is not v4 shaped
     }
     else if (s.version == 3)
     {
@@ -127,11 +148,19 @@ void CtrSettingsLoad(void)
     Ctr3dsApplyLevelCap(s.levelCap);
     Ctr3dsApplyRandomizer(s.randomizer != 0);
     Ctr3dsApplyBagSort(s.bagSort);
+
+    // Zero for a migrated v3 or v4 file, which is CTR_FFAUDIO_NORMAL and also
+    // the default, so an older file loads as exactly what it meant.
+    Ctr3dsApplyFfAudio(s.ffAudio);
 }
 
 void CtrSettingsSave(void)
 {
     struct CtrSettings s;
+
+    // Zeroed first so the padding above is written as zero rather than as
+    // whatever the stack held.
+    memset(&s, 0, sizeof(s));
 
     s.magic    = SETTINGS_MAGIC;
     s.version  = SETTINGS_VERSION;
@@ -143,6 +172,7 @@ void CtrSettingsSave(void)
     s.levelCap   = (uint8_t)Ctr3dsGetLevelCap();
     s.randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
     s.bagSort    = (uint8_t)Ctr3dsGetBagSort();
+    s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
 
     mkdir("sdmc:/3ds", 0777);
     mkdir(SETTINGS_DIR, 0777);

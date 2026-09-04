@@ -104,6 +104,30 @@ void     CtrSaveCommit(void);
 void Ctr3dsSetSpeed(int multiplier);
 int  Ctr3dsGetSpeed(void);
 
+// What fast-forward does to the soundtrack (EXTRA tab, page 1).
+//
+// The sound engine advances the song one tick per m4aSoundMain() call, and the
+// superloop runs 2x to 8x logical frames per displayed frame while
+// fast-forwarding. Ticking it every game frame therefore plays the music at the
+// multiplier, and because the DSP still consumes only one frame's worth of
+// samples the surplus is dropped: music racing past in chunks.
+//
+// NORMAL ticks the engine once per DISPLAYED frame instead, so the soundtrack
+// keeps its tempo and full quality while the game runs fast. FAST is the older
+// behaviour, kept because a rising pitch is also a useful cue that
+// fast-forward is engaged.
+#define CTR_FFAUDIO_NORMAL 0
+#define CTR_FFAUDIO_FAST   1
+
+void Ctr3dsSetFfAudio(int mode);
+int  Ctr3dsGetFfAudio(void);
+
+// Whether this game frame is the one that carries audio. Always true at 1x, and
+// under fast-forward it follows the setting above: once per displayed frame for
+// NORMAL, every game frame for FAST. src/main.c gates m4aSoundMain() and
+// MapMusicMain() on this, and the host gates the mixer drain on it.
+int Ctr3dsIsAudioFrame(void);
+
 // Turbo bindings for the four 3DS buttons the GBA has no equivalent of, so
 // nothing else wants them. Holding a bound button overrides the speed above for
 // as long as it is held; the GAME SPEED selection stays the resting speed.
