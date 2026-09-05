@@ -60,7 +60,7 @@ struct BattleEnigmaBerry
     /*0x1A*/ u8 holdEffectParam;
 };
 
-struct BerryTree
+struct SAVE_STRUCT_ALIGNED BerryTree
 {
     u8 berry;
     u8 stage:7;
