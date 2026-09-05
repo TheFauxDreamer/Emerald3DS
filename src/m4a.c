@@ -166,7 +166,6 @@ void m4aSoundInit(void)
     // register dump to say which one it was. This names it.
     {
         extern void CtrTraceHex(const char *label, unsigned int value);
-        extern char SoundMainRAM_Buffer[];
         struct SoundInfo *si = SOUND_INFO_PTR;
 
         CtrTraceHex("m4a SOUND_INFO_PTR   ", (unsigned int)si);
@@ -174,8 +173,25 @@ void m4aSoundInit(void)
         CtrTraceHex("m4a  .MPlayMainHead  ", (unsigned int)(si ? (void *)si->MPlayMainHead : 0));
         CtrTraceHex("m4a  .CgbSound       ", (unsigned int)(si ? (void *)si->CgbSound : 0));
         CtrTraceHex("m4a  .MPlayJumpTable ", (unsigned int)(si ? (void *)si->MPlayJumpTable : 0));
-        CtrTraceHex("m4a SoundMainRAM_Buf ", (unsigned int)SoundMainRAM_Buffer);
-        CtrTraceHex("m4a SoundMainRAM     ", (unsigned int)(void *)SoundMainRAM);
+
+        // Entry 35 is Clear64byte and entry 34 is ClearChain: the two the
+        // C side calls through by index. They come from MPlayJumpTableCopy
+        // (src/m4a_1.s), whose chk_adr_r2 guard used to zero every one of them
+        // on this target, so a null here means that regression is back.
+        CtrTraceHex("m4a  jumpTable[34]   ", (unsigned int)(void *)gMPlayJumpTable[34]);
+        CtrTraceHex("m4a  jumpTable[35]   ", (unsigned int)(void *)gMPlayJumpTable[35]);
+
+        // Only the assembly build has these: SoundMainRAM lives in
+        // src/m4a_1.s, which is not assembled when the C engine is in use, and
+        // referencing it there is an undefined symbol at link time.
+#if CTR_M4A_ASM
+        {
+            extern char SoundMainRAM_Buffer[];
+
+            CtrTraceHex("m4a SoundMainRAM_Buf ", (unsigned int)SoundMainRAM_Buffer);
+            CtrTraceHex("m4a SoundMainRAM     ", (unsigned int)(void *)SoundMainRAM);
+        }
+#endif
     }
 #endif
 
