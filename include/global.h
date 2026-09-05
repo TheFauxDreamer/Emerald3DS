@@ -169,6 +169,23 @@
 // It looks like file.c:line: size of array `id' is negative
 #define STATIC_ASSERT(expr, id) typedef char id[(expr) ? 1 : -1];
 
+// Struct padding that the SAVE FILE FORMAT depends on.
+//
+// agbcc gave every struct a minimum alignment of 4, so a struct's size always
+// rounded up to a multiple of 4. Modern GCC uses the largest member's alignment
+// instead, which leaves some structs smaller than the ones the retail cartridge
+// was built with.
+//
+// Nearly everywhere that is invisible. It is not invisible in SaveBlock1 and
+// SaveBlock2, whose layout IS the on-cartridge file format: without this, 63 of
+// SaveBlock1's 87 members and 12 of SaveBlock2's 24 sit at the wrong offset, so
+// a save from a real Pokemon Emerald reads as corrupt.
+//
+// Applied to every aggregate reachable from either save block whose natural
+// size is not a multiple of 4. The offsets the members are annotated with in
+// this file are the check: they are the retail ones, and they all have to hold.
+#define SAVE_STRUCT_ALIGNED ALIGNED(4)
+
 struct Coords8
 {
     s8 x;
@@ -205,7 +222,7 @@ struct UCoords32
     u32 y;
 };
 
-struct Time
+struct SAVE_STRUCT_ALIGNED Time
 {
     /*0x00*/ s16 days;
     /*0x02*/ s8 hours;
@@ -374,7 +391,7 @@ struct RentalMon
     //u8 padding2[2];
 };
 
-struct BattleDomeTrainer
+struct SAVE_STRUCT_ALIGNED BattleDomeTrainer
 {
     u16 trainerId:10;
     u16 isEliminated:1;
@@ -603,7 +620,7 @@ struct ItemSlot
     u16 quantity;
 };
 
-struct Pokeblock
+struct SAVE_STRUCT_ALIGNED Pokeblock
 {
     u8 color;
     u8 spicy;
@@ -631,7 +648,7 @@ struct Roamer
     /*0x14*/ u8 filler[0x8];
 };
 
-struct RamScriptData
+struct SAVE_STRUCT_ALIGNED RamScriptData
 {
     u8 magic;
     u8 mapGroup;
@@ -658,7 +675,7 @@ struct DewfordTrend
     u16 words[2];
 }; /*size = 0x8*/
 
-struct MauvilleManCommon
+struct SAVE_STRUCT_ALIGNED MauvilleManCommon
 {
     u8 id;
 };
@@ -688,7 +705,7 @@ struct MauvilleManStoryteller
     u8 language[NUM_STORYTELLER_TALES];
 };
 
-struct MauvilleManGiddy
+struct SAVE_STRUCT_ALIGNED MauvilleManGiddy
 {
     /*0x00*/ u8 id;
     /*0x01*/ u8 taleCounter;
@@ -700,14 +717,14 @@ struct MauvilleManGiddy
     /*0x21*/ //u8 padding2;
 }; /*size = 0x2C*/
 
-struct MauvilleManHipster
+struct SAVE_STRUCT_ALIGNED MauvilleManHipster
 {
     u8 id;
     bool8 taughtWord;
     u8 language;
 };
 
-struct MauvilleOldManTrader
+struct SAVE_STRUCT_ALIGNED MauvilleOldManTrader
 {
     u8 id;
     u8 decorations[NUM_TRADER_ITEMS];
@@ -738,7 +755,7 @@ struct LinkBattleRecord
     u16 draws;
 };
 
-struct LinkBattleRecords
+struct SAVE_STRUCT_ALIGNED LinkBattleRecords
 {
     struct LinkBattleRecord entries[LINK_B_RECORDS_COUNT];
     u8 languages[LINK_B_RECORDS_COUNT];
@@ -771,7 +788,7 @@ struct ContestWinner
     //u8 padding;
 };
 
-struct Mail
+struct SAVE_STRUCT_ALIGNED Mail
 {
     /*0x00*/ u16 words[MAIL_WORDS_COUNT];
     /*0x12*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
@@ -780,7 +797,7 @@ struct Mail
     /*0x20*/ u16 itemId;
 };
 
-struct DaycareMail
+struct SAVE_STRUCT_ALIGNED DaycareMail
 {
     struct Mail message;
     u8 otName[PLAYER_NAME_LENGTH + 1];
@@ -888,7 +905,7 @@ struct TrainerHillSave
                //u16 padding:8;
 };
 
-struct WonderNewsMetadata
+struct SAVE_STRUCT_ALIGNED WonderNewsMetadata
 {
     u8 newsType:2;
     u8 sentRewardCounter:3;
@@ -963,6 +980,10 @@ struct ExternalEventData
 
 // For external event flags. The majority of these may have never been used.
 // In Emerald, Jirachi cannot normally be received, but hacking the distribution discs allows Emerald to receive Jirachi and set the flag
+// NOT padded, unlike its neighbours: retail places this at 0x31C7, an ODD
+// offset, and gives it 21 bytes. agbcc's 4-byte rounding did not apply to a
+// struct of nothing but u8 bitfields, so forcing it here moves everything
+// after it by 3.
 struct ExternalEventFlags
 {
     u8 usedBoxRS:1; // Set by Pokémon Box: Ruby & Sapphire; denotes whether this save has connected to it and triggered the free False Swipe Swablu Egg giveaway.
