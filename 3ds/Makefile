@@ -125,10 +125,18 @@ $(TARGET).elf: $(OBJS) $(GAME_LIB)
 $(GAME_LIB):
 	@echo "error: $@ missing. Run 3ds/build_objs.sh first." >&2; exit 1
 
-# main.o carries the build stamp, which changes on every invocation, so it is
-# forced rather than left to timestamps. Rebuilding one small file is cheaper
-# than a log line that lies about which binary is running.
-.PHONY: $(BUILD)/main.o
+# main.o carries the build stamp, which changes on every invocation, so it has
+# to be rebuilt every time. Rebuilding one small file is cheaper than a log line
+# that lies about which binary is running.
+#
+# Done with an always-out-of-date prerequisite, NOT with .PHONY. Marking a real
+# file .PHONY tells make it is not a file at all, so make never builds it and
+# the link then fails with "cannot find build/main.o". The recipe still comes
+# from the pattern rule below; this only adds a prerequisite to it.
+.PHONY: FORCE
+FORCE:
+
+$(BUILD)/main.o: FORCE
 
 $(BUILD)/%.o: host/%.c | $(BUILD)
 	@echo "compiling ... $<"
