@@ -40,6 +40,8 @@
 #include "overworld.h"
 #include "script.h"
 #include "field_effect.h"
+#include "field_weather.h"            // PlayRainStoppingSoundEffect
+#include "palette.h"                  // gPaletteFade
 #include "battle.h"                   // struct DisableStruct, for the header below
 #include "party_menu.h"               // gPartyMenu, whose slotId picks the flyer
 #include "constants/region_map_sections.h"
@@ -270,6 +272,14 @@ static u8 FlyState(mapsec_u16_t dest)
     if (ScriptContext_IsEnabled())
         return FLY_BUSY;
 
+    // Every exit from the overworld in the game waits on this before tearing
+    // anything down -- the start menu, item use, the PC, all of them open with
+    // `if (!gPaletteFade.active)`. A fade means a transition is already in
+    // flight, and starting a second one on top of it hands the callback it was
+    // heading for a half-dismantled map.
+    if (gPaletteFade.active)
+        return FLY_BUSY;
+
     // SetUpFieldMove_Fly. Indoors, in a cave or underwater the party menu
     // refuses before the fly map is ever opened.
     if (Overworld_MapTypeAllowsTeleportAndFly(gMapHeader.mapType) != TRUE)
@@ -319,6 +329,35 @@ static void DoFly(mapsec_u16_t mapSecId)
     // highlighted, or fall back to slot 0 through its own clamp. Point it at
     // the mon this fly was actually authorised on.
     gPartyMenu.slotId = (s8)slot;
+
+    // Hand the overworld's graphics back BEFORE leaving it.
+    //
+    // This is not optional and it is not tidiness. The overworld does not free
+    // these on the way out, it frees them on the way IN, so whatever takes the
+    // main callback away from CB2_Overworld has to do it first. Every one of
+    // the twenty places in the game that leaves the overworld calls this: the
+    // start menu, item use, the PC, egg hatching, battle setup, the lot.
+    //
+    // Skipping it does not fail visibly, which is what made it dangerous. The
+    // first fly looks perfect. ReturnToFieldLocal still reaches
+    // InitOverworldBgs, and it leaks 0x2D80 bytes every time:
+    //
+    //   3 x BG_SCREEN_SIZE   fresh Bg1/2/3 tilemap buffers allocated straight
+    //                        over the live pointers
+    //   1 x BG_SCREEN_SIZE   InitWindows' first loop sets
+    //                        gWindowBgTilemapBuffers[0] to NULL without freeing
+    //   27 * 4 * 32          its second loop NULLs every gWindows[].tileData,
+    //                        also without freeing
+    //
+    // That is under ten flies before a 0x1C000 heap has nothing left, sooner
+    // with fragmentation. Then an allocation returns NULL, nobody checks
+    // InitWindows' return value, and the next thing to draw into a window
+    // writes through a null tileData -- which is a write to address 0.
+    //
+    // The rain SFX is stopped for the same reason the start menu stops it: the
+    // map is being left, and nothing downstream of here will silence it.
+    PlayRainStoppingSoundEffect();
+    CleanupOverworldWindowsAndTilemaps();
 
     // Exactly what CB_ExitFlyMap does once it has set the destination.
     //
