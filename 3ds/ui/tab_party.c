@@ -63,8 +63,37 @@
 #define STAT_Y          72
 #define STAT_ROW_H      18
 #define STAT_VALUE_DX   34
+// The moves list, and the panel that opens when one is tapped.
+//
+// Four rows of 28px fill y=72..184 exactly, which is the interior below the HP
+// row. Each row carries the game's own 32x16 type icon, so FIRE here is the
+// FIRE the summary screen shows, and the name beside it: names start at 234 and
+// the longest (72px, THUNDERSHOCK) ends at 306, inside the 312px interior.
+//
+// PP, power and accuracy do NOT fit on a row -- 306 leaves 6px and PP alone is
+// 30px -- which is exactly why tapping a move opens a panel instead of the list
+// trying to carry everything.
 #define MOVES_X         196
 #define MOVES_Y         72
+#define MOVE_ROW_H      28
+#define MOVE_ROW_Y(i)   (MOVES_Y + (i) * MOVE_ROW_H)
+#define MOVE_ICON_X     (MOVES_X + 2)
+#define MOVE_NAME_X     (MOVE_ICON_X + UI_TYPE_ICON_W + 4)
+#define MOVE_ROW_W      (CTR_BOTTOM_WIDTH - 8 - MOVES_X)
+
+// The tapped move's details take over the left column: the stats block and the
+// ability/nature/item lines are what get replaced, never the moves list itself,
+// so the move you are reading about stays on screen and highlighted.
+#define MOVEINFO_X      12
+#define MOVEINFO_W      (MOVES_X - MOVEINFO_X - 8)
+#define MOVEINFO_LABEL_X MOVEINFO_X
+#define MOVEINFO_VALUE_X (MOVEINFO_X + 52)
+
+// Top-aligned with the moves list, so the icon in the panel sits level with the
+// icon in the row it came from. Icon 72..88, then three 16px lines to 141, and
+// the description gets 148..179 for its two lines, inside the 184px floor.
+#define MOVEINFO_Y      MOVES_Y
+#define MOVEINFO_DESC_Y 148
 
 // The detail view's way out. One definition, because the drawn rect and the hit
 // test in UiPartyTouch have to agree; the dex entry screen names its own the
@@ -75,6 +104,12 @@
 #define BACK_H          22
 
 static bool8 sDetailOpen;
+
+// Which move the detail view is describing, or -1 for none, in which case the
+// left column shows the stats and the ability/nature/item block as before.
+// Reset whenever the detail view opens or closes, so it can never describe a
+// move belonging to the previously selected mon.
+static s8 sMoveSel = -1;
 
 // ------------------------------------------------------- HP bar animation --
 //
@@ -334,6 +369,108 @@ static void DrawCell(int index)
     UiHpBar(cx + CELL_TEXT_X, cy + rows->hpY, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
 }
 
+// One move row: the game's own type icon, the name, and a highlight when this
+// is the row whose details are showing.
+//
+// Drawn for empty slots too, as a dimmed "-", so a mon with two moves still
+// shows four rows and the list does not change height as moves are learned.
+static void DrawMoveRow(struct Pokemon *mon, u8 i)
+{
+    u8 label[16];
+    u16 move = (u16)GetMonData(mon, MON_DATA_MOVE1 + i);
+    int y = MOVE_ROW_Y(i);
+
+    if (sMoveSel == (s8)i)
+    {
+        // The same doubled inset outline the EXTRA tab's buttons use for the
+        // active choice, so a selection means the same thing on both screens.
+        UiRect(MOVES_X, y, MOVE_ROW_W, MOVE_ROW_H, UI_COL_ACCENT);
+        UiRect(MOVES_X + 1, y + 1, MOVE_ROW_W - 2, MOVE_ROW_H - 2, UI_COL_ACCENT);
+    }
+
+    if (move == MOVE_NONE)
+    {
+        UiText(MOVE_NAME_X, y + (MOVE_ROW_H - UI_GLYPH_H) / 2,
+               UiAscii(label, "-", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+        return;
+    }
+
+    UiTypeIcon(MOVE_ICON_X, y + (MOVE_ROW_H - UI_TYPE_ICON_H) / 2,
+               gBattleMoves[move].type);
+    UiText(MOVE_NAME_X, y + (MOVE_ROW_H - UI_GLYPH_H) / 2, gMoveNames[move],
+           UiThemeText(), UiThemeShadow());
+}
+
+static void DrawMoveList(struct Pokemon *mon)
+{
+    for (u8 i = 0; i < MAX_MON_MOVES; i++)
+        DrawMoveRow(mon, i);
+}
+
+// The tapped move's details, in the space the stats block otherwise occupies.
+//
+// Power and accuracy are stored as 0 for moves that have none -- status moves,
+// and the ones that never miss -- and the game prints those as "---" rather
+// than as a zero, which would read as "this move does nothing".
+static void DrawMoveInfo(struct Pokemon *mon, u8 i)
+{
+    u8 label[24];
+    u16 move = (u16)GetMonData(mon, MON_DATA_MOVE1 + i);
+    const struct BattleMove *info;
+    int y;
+
+    if (move == MOVE_NONE)
+        return;
+
+    info = &gBattleMoves[move];
+
+    UiTypeIcon(MOVEINFO_X, MOVEINFO_Y, info->type);
+    UiText(MOVEINFO_X + UI_TYPE_ICON_W + 6,
+           MOVEINFO_Y + (UI_TYPE_ICON_H - UI_GLYPH_H) / 2,
+           gTypeNames[info->type], UiThemeText(), UiThemeShadow());
+
+    y = MOVEINFO_Y + UI_TYPE_ICON_H + 6;
+
+    UiText(MOVEINFO_LABEL_X, y, UiAscii(label, "POWER", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+    if (info->power > 1)
+        UiNum(MOVEINFO_VALUE_X, y, info->power, UiThemeText(), UiThemeShadow());
+    else
+        UiText(MOVEINFO_VALUE_X, y, UiAscii(label, "---", sizeof(label)),
+               UI_COL_DIM, UiThemeShadow());
+
+    y += UI_LINE_H;
+    UiText(MOVEINFO_LABEL_X, y, UiAscii(label, "ACC", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+    if (info->accuracy != 0)
+        UiNum(MOVEINFO_VALUE_X, y, info->accuracy, UiThemeText(), UiThemeShadow());
+    else
+        UiText(MOVEINFO_VALUE_X, y, UiAscii(label, "---", sizeof(label)),
+               UI_COL_DIM, UiThemeShadow());
+
+    // Max PP is the mon's, not the move's: PP Ups raise it, and showing the
+    // table value would contradict what the game itself reports.
+    y += UI_LINE_H;
+    {
+        u8 ppBonuses = (u8)GetMonData(mon, MON_DATA_PP_BONUSES);
+        int cur = (int)GetMonData(mon, MON_DATA_PP1 + i);
+        int max = (int)CalculatePPWithBonus(move, ppBonuses, i);
+        int x = MOVEINFO_VALUE_X;
+
+        UiText(MOVEINFO_LABEL_X, y, UiAscii(label, "PP", sizeof(label)),
+               UI_COL_DIM, UiThemeShadow());
+        x += UiNum(x, y, cur, UiThemeText(), UiThemeShadow());
+        x += UiText(x, y, UiAscii(label, "/", sizeof(label)),
+                    UI_COL_DIM, UiThemeShadow());
+        UiNum(x, y, max, UiThemeText(), UiThemeShadow());
+    }
+
+    // The game's own description, carrying its own newline, so it wraps exactly
+    // where the summary screen wraps it.
+    UiText(MOVEINFO_X, MOVEINFO_DESC_Y, gMoveDescriptionPointers[move - 1],
+           UiThemeText(), UiThemeShadow());
+}
+
 static void DrawDetail(void)
 {
     struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
@@ -385,6 +522,16 @@ static void DrawDetail(void)
     UiStatusIcon(120, y + 2, GetMonAilment(mon));
     UiHpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
             GetMonData(mon, MON_DATA_MAX_HP));
+
+    // Left column: the stats and the ability/nature/item block, UNLESS a move
+    // is selected, in which case that move's details take this space instead.
+    // The moves list on the right is drawn either way.
+    if (sMoveSel >= 0)
+    {
+        DrawMoveInfo(mon, (u8)sMoveSel);
+        DrawMoveList(mon);
+        return;
+    }
 
     // Stats, two rows of three, and the moves list beside them.
     //
@@ -441,16 +588,7 @@ static void DrawDetail(void)
                    UI_COL_DIM, UiThemeShadow());
     }
 
-    // Moves, two columns
-    for (int i = 0; i < MAX_MON_MOVES; i++)
-    {
-        u16 move = (u16)GetMonData(mon, MON_DATA_MOVE1 + i);
-        if (move == MOVE_NONE)
-            continue;
-
-        UiText(MOVES_X, MOVES_Y + i * UI_LINE_H, gMoveNames[move],
-               UiThemeText(), UiThemeShadow());
-    }
+    DrawMoveList(mon);
 }
 
 void UiPartyDraw(void)
@@ -477,8 +615,31 @@ void UiPartyTouch(const CtrTouchState *t)
         if (UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
         {
             sDetailOpen = FALSE;
+            sMoveSel = -1;
             UiMarkDirty();
+            return;
         }
+
+        // A move row. Tapping the open one closes it rather than doing nothing,
+        // so the stats are always one tap away and there is no second control
+        // to hunt for.
+        for (u8 i = 0; i < MAX_MON_MOVES; i++)
+        {
+            if (!UiHit(t, MOVES_X, MOVE_ROW_Y((int)i), MOVE_ROW_W, MOVE_ROW_H))
+                continue;
+
+            // An empty slot has nothing to describe. Silently ignored rather
+            // than clearing the selection, so a mis-tap below the last move
+            // does not throw away what you were reading.
+            if (GetMonData(&gPlayerParty[UiSelectedMon()],
+                           MON_DATA_MOVE1 + i) == MOVE_NONE)
+                return;
+
+            sMoveSel = (sMoveSel == (s8)i) ? -1 : (s8)i;
+            UiMarkDirty();
+            return;
+        }
+
         return;
     }
 
@@ -497,9 +658,14 @@ void UiPartyTouch(const CtrTouchState *t)
         // That keeps selection (which BAG needs) reachable without a long press
         // on a resistive panel.
         if (UiSelectedMon() == i)
+        {
             sDetailOpen = TRUE;
+            sMoveSel = -1;   // never describe the previous mon's move
+        }
         else
+        {
             UiSetSelectedMon((u8)i);
+        }
 
         UiMarkDirty();
         return;

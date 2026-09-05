@@ -75,6 +75,13 @@ void UiPokeball(int x, int y);
 // A species footprint: 16x16, 1bpp, drawn in `color`.
 void UiFootprint(int x, int y, u16 species, u16 color);
 
+// A move or species type badge, 32x16, drawn from the game's own icon sheet.
+// Takes a TYPE_* value. Draws nothing for anything outside the sheet.
+#define UI_TYPE_ICON_W 32
+#define UI_TYPE_ICON_H 16
+
+void UiTypeIcon(int x, int y, u8 type);
+
 // A status badge (PSN, SLP, BRN ...): 32x8, the party menu's own art. Takes an
 // AILMENT_* value, normally straight from GetMonAilment(). Draws nothing for
 // AILMENT_NONE or AILMENT_PKRS, which is what the party menu does too.

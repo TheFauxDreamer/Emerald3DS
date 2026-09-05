@@ -12,6 +12,7 @@
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
 #include "constants/characters.h"     // TEXT_COLOR_*
+#include "pokemon_summary_screen.h"   // Ctr3dsGetTypeIconGfx, type icon sheet
 #include "constants/party_menu.h"     // AILMENT_*
 #include "constants/species.h"        // SPECIES_UNOWN, SPECIES_SPINDA
 
@@ -428,6 +429,61 @@ void UiStatusIcon(int x, int y, u8 ailment)
 
     for (int t = 0; t < 4; t++)
         UiBlit4bppTile(x + t * 8, y, icon + t * 32, pal, TRUE);
+}
+
+// A move/species type badge: the game's own 32x16 icon, so FIRE here is the
+// same FIRE the summary screen shows.
+//
+// One sheet of 23 icons (18 types plus the 5 contest categories) at 0x100 bytes
+// each, in type order, and a palette of three 16-colour banks that the icons
+// share between them -- Ctr3dsGetTypeIconPalBank says which bank a type wants.
+// Both come through the PLATFORM_3DS accessors in src/pokemon_summary_screen.c
+// because the sheet's palette table is file-static there.
+//
+// Loaded once and kept, like UiStatusIcon: both destinations are size-checked
+// before either decompress, because LZDecompressWram is bounded only by the
+// size word in its own input and an overrun lands in this file's neighbouring
+// statics. See the note above UiMonPic for what that looked like the last time.
+void UiTypeIcon(int x, int y, u8 type)
+{
+    #define TYPE_ICON_COUNT (NUMBER_OF_MON_TYPES + CONTEST_CATEGORIES_COUNT)
+
+    static u8    tiles[TYPE_ICON_COUNT * CTR_TYPE_ICON_BYTES];
+    static u16   pal[3 * 16];
+    static bool8 loaded;
+
+    const u8 *icon;
+    const u16 *bank;
+
+    if (type >= TYPE_ICON_COUNT)
+        return;
+
+    if (!loaded)
+    {
+        const u32 *gfxLZ;
+        const u32 *palLZ;
+        u16 gbaPal[3 * 16];
+
+        Ctr3dsGetTypeIconGfx(&gfxLZ, &palLZ);
+
+        if (GetDecompressedDataSize(gfxLZ) > sizeof(tiles)
+         || GetDecompressedDataSize(palLZ) > sizeof(gbaPal))
+            return;
+
+        LZDecompressWram(gfxLZ, tiles);
+        LZDecompressWram(palLZ, gbaPal);
+        UiLoadPal(pal, gbaPal, 3 * 16);
+        loaded = TRUE;
+    }
+
+    icon = tiles + (u32)type * CTR_TYPE_ICON_BYTES;
+    bank = pal + Ctr3dsGetTypeIconPalBank(type) * 16;
+
+    // 32x16, so 8 tiles in 1D sprite order: four across, two down.
+    for (int t = 0; t < 8; t++)
+        UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, icon + t * 32, bank, TRUE);
+
+    #undef TYPE_ICON_COUNT
 }
 
 // Generated rather than stored. Row r counts from the tip and spans columns
