@@ -126,6 +126,7 @@ if [ "$CTR_M4A_ASM" = "1" ]; then
     | $CC -E -DPLATFORM_3DS=1 -I include -I . - \
     | $PP -ie src/m4a_1.s charmap.txt \
     | $AS -march=armv6k -mfloat-abi=hard -I include -I . -o "$OBJ/m4a_1.o" -
+  $AS -march=armv6k -mfloat-abi=hard -o "$OBJ/m4a_arm11.o" 3ds/asm/m4a_arm11.s
 fi
 
 echo "[2/3] assembling data sources..."

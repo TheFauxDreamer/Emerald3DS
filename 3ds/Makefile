@@ -82,18 +82,11 @@ LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 # in. There is also nothing to gain, since the ARM11 runs .text at full speed.
 # So the buffer symbol simply IS the routine and src/m4a.c skips the copy.
 #
-# Done with --defsym rather than a .set in an assembly file: SoundMainRAM lives
-# in a different object, and `as` cannot resolve .set to an external symbol --
-# it emits a reference instead of a definition, which is an undefined symbol at
-# link time. --defsym is resolved by ld, which can see both.
-#
-# The Thumb bit works out because --defsym creates an ABSOLUTE symbol carrying
-# SoundMainRAM's plain (even) address rather than a function symbol. The `+ 1`
-# already in that literal is then the Thumb bit, exactly as it is for the real
-# buffer. A %function alias would have had the bit applied twice.
-ifeq ($(CTR_M4A_ASM),1)
-LDFLAGS  += -Wl,--defsym,SoundMainRAM_Buffer=SoundMainRAM
-endif
+# The symbol is supplied by 3ds/asm/m4a_arm11.s, assembled into the game
+# archive. Neither `.set` nor `ld --defsym` can do it: `as` cannot resolve .set
+# to a symbol in another object, and --defsym is evaluated before symbol
+# resolution, so it produced 0 and the tail jump faulted at address 0. See the
+# comment in that file.
 LIBS     := -lcitro2d -lcitro3d -lctru -lm
 LIBDIRS  := -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
 
