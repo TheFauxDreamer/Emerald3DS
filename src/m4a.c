@@ -22,7 +22,7 @@ COMMON_DATA u8 gMPlayMemAccArea[0x10] = {0};
 COMMON_DATA struct MusicPlayerInfo gMPlayInfo_SE3 = {0};
 
 // RP2350 runs the real m4a engine: the asm core (m4a_1.s) is reimplemented in C
-// in rp2350/m4a_1.c, so RP2350 takes the #else (real) path below, not the WASM
+// in rp2350/m4a_engine.c, so RP2350 takes the #else (real) path below, not the WASM
 // audio stubs.
 #if WASM
 static void WasmMPlayStart(struct MusicPlayerInfo *mplayInfo)
@@ -137,7 +137,7 @@ void m4aSoundInit(void)
 
 #if !RP2350
     // The GBA copies the mixer into fast IWRAM. On RP2350 the mixer is plain C
-    // (rp2350/m4a_1.c) called directly, so SoundMainRAM_Buffer is unused.
+    // (rp2350/m4a_engine.c) called directly, so SoundMainRAM_Buffer is unused.
     CpuCopy32((void *)((s32)SoundMainRAM & ~1), SoundMainRAM_Buffer, sizeof(SoundMainRAM_Buffer));
 #endif
 

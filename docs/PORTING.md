@@ -241,7 +241,7 @@ produce a ~28 ms hiccup every second.
 ## Phase 4 — Audio
 
 The GBA's m4a sound engine lives in hand-written ARM assembly (`m4a_1.s`) that
-cannot be assembled for Cortex-M33. It is reimplemented in C in `rp2350/m4a_1.c`
+cannot be assembled for Cortex-M33. It is reimplemented in C in `rp2350/m4a_engine.c`
 — mixer, sequence interpreter, and note handling — feeding a PCM5102A over
 PIO-driven I²S at the game's native 13440 Hz, so no resampling is needed.
 

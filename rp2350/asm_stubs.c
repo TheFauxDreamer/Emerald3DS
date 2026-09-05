@@ -15,7 +15,7 @@
 
 // NOTE: The m4a sound engine (the m4a_1.s assembly core: ply_*, MPlayMain,
 // SoundMain, SoundMainRAM, TrackStop, ChnVolSetAsm, RealClearChain, ply_note,
-// umul3232H32, ...) is now provided in C by rp2350/m4a_1.c, and the high-level
+// umul3232H32, ...) is now provided in C by rp2350/m4a_engine.c, and the high-level
 // engine (TrkVolPitSet, FadeOutBody, SampleFreqSet, the cry control, the ply_x*
 // commands) by the real src/m4a.c path. They are no longer stubbed here.
 

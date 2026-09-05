@@ -129,7 +129,7 @@ void AgbMain(void)
     IdentifyFlash();
     BOOT_TRACE("IdentifyFlash");
     // Bring up the real m4a sound engine (asm core ported to C in
-    // rp2350/m4a_1.c). The mixer renders into gSoundInfo.pcmBuffer each
+    // rp2350/m4a_engine.c). The mixer renders into gSoundInfo.pcmBuffer each
     // VBlankIntr; Rp2350MixFrame drains it into the I2S ring.
     m4aSoundInit();
     BOOT_TRACE("m4aSoundInit");

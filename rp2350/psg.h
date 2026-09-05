@@ -1,7 +1,7 @@
 // The GBA's four PSG (CGB) sound channels, rendered in software.
 //
 // The GBA mixes two DirectSound sample channels with the Game Boy's original
-// square/square/wave/noise generators. rp2350/m4a_1.c renders the DirectSound
+// square/square/wave/noise generators. rp2350/m4a_mix.c sums it with the DirectSound
 // half; this renders the other half, which is roughly half of Emerald's real
 // voices and the reason music sounds thin without it.
 //

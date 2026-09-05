@@ -189,7 +189,7 @@ notes worth reading before debugging anything.
   game runs silent and says so in the log. Dump it from your own console with
   [DSP1](https://github.com/zoogie/DSP1); it is a standard one-time CFW step
   every NDSP homebrew needs. Separately, DPCM and reverse-playback instruments
-  are still silent stubs in `rp2350/m4a_1.c`, so some instruments and cries do
+  are still silent stubs in `rp2350/m4a_engine.c`, so some instruments and cries do
   not play at all.
 - **Never run on hardware.** No fill-rate, battery or timing data exists, and
   ZL/ZR bindings are untestable on an Old 3DS by definition.
@@ -213,7 +213,7 @@ directory.
 | `3ds/` | **The port.** Bridge, GBA memory block, build scripts, ROM spec. |
 | `3ds/host/` | libctru side: entry point, video, audio, saves, settings, tracing. |
 | `3ds/ui/` | **The second screen**, game-side: drawing, Emerald-font text, tabs. |
-| `rp2350/` | The RP2350 port this is built on. `ppu.c` and `m4a_1.c` are shared. |
+| `rp2350/` | The RP2350 port this is built on. `ppu.c` and the `m4a_*.c` pair are shared. |
 | `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald sources and assets. |
 | `web/`, `tools/wasm_*` | The WASM build, retained as the PPU reference. |
 | `docs/` | RP2350 hardware, build and porting documentation. |
