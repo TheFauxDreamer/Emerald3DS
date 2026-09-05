@@ -129,6 +129,25 @@ static uint32_t sQueued;      // wave buffers handed to the DSP
 static uint32_t sPeak;        // largest |sample| seen
 static uint32_t sNonZero;     // how many samples were not silence
 
+// Where a repeating click actually happens.
+//
+// A click is a sample-to-sample discontinuity, and WHERE it lands in the frame
+// says what caused it. Clustered at index 0 means the fault is at the frame
+// boundary -- the buffer handoff, the render window, the engine tick. Spread
+// through the frame means it is in the audio itself and no amount of buffer
+// plumbing will fix it. Nothing else in this report can tell those apart.
+//
+// The threshold is 32 DirectSound LSBs. DirectSound is 8-bit, so a legitimate
+// step is a multiple of 256 and small ones are everywhere; a real waveform at
+// 13.4 kHz does not jump an eighth of full scale between adjacent samples.
+#define JUMP_THRESHOLD 8192
+
+static int32_t  sPrevSample;   // carried across frames, so index 0 is measured
+static uint32_t sJumpCount;    // discontinuities over the threshold
+static uint32_t sJumpAtFrameStart;  // ... of those, how many at index 0
+static uint32_t sJumpMax;      // largest one seen
+static uint32_t sJumpMaxPos;   // and where in the frame it was
+
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
 // Where one frame lives. The frame index is scaled by the channel count exactly
@@ -301,7 +320,7 @@ static void health_report(void)
 
     uint32_t ident = 0, bgmStatus = 0, zeroRet = 0, active = 0, flags = 0;
     uint32_t chType = 0, chStatus = 0, chEnv = 0, chFreq = 0, chNonZero = 0;
-    uint32_t dsPeak = 0, psgPeak = 0, cryPeak = 0, clipped = 0;
+    uint32_t dsPeak = 0, psgPeak = 0, cryPeak = 0, clipped = 0, dsWrap = 0;
     uint8_t  masterVol = 0, maxChans = 0;
     int32_t  spvb = 0;
     const char *verdict;
@@ -311,6 +330,7 @@ static void health_report(void)
     Rp2350MixerDebug(&masterVol, &maxChans, &active, &flags);
     Rp2350ChannelDebug(&chType, &chStatus, &chEnv, &chFreq, &chNonZero);
     Rp2350AudioPeaks(&dsPeak, &psgPeak, &cryPeak, &clipped);
+    { extern volatile uint32_t gM4aDbgDsWrap; dsWrap = gM4aDbgDsWrap; }
 
     if (sPeak == 0) {
         // Name the first broken link rather than just reporting silence. Only
@@ -377,6 +397,15 @@ static void health_report(void)
     CtrLog("emerald3ds: mix peaks - directSound=%lu psg=%lu cry=%lu clipped=%lu\n",
            (unsigned long)dsPeak, (unsigned long)psgPeak,
            (unsigned long)cryPeak, (unsigned long)clipped);
+
+    // jumps= how many discontinuities, atFrameStart= how many of those landed on
+    // the first sample of a frame. atFrameStart close to jumps means the click
+    // is the frame boundary itself; close to 0 means it is in the audio.
+    CtrLog("emerald3ds: discontinuities - jumps=%lu atFrameStart=%lu "
+           "biggest=%lu at sample %lu of %d, dsWrap=%lu\n",
+           (unsigned long)sJumpCount, (unsigned long)sJumpAtFrameStart,
+           (unsigned long)sJumpMax, (unsigned long)sJumpMaxPos,
+           SAMPLES_PER_FRAME, (unsigned long)dsWrap);
     CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 
@@ -424,6 +453,25 @@ void CtrAudioFrame(void)
                 if ((uint32_t)mag > sPeak)
                     sPeak = (uint32_t)mag;
             }
+        }
+
+        // Measured on the left channel only. Both carry the same discontinuity
+        // when there is one, and one channel keeps this to a subtract per frame.
+        {
+            int32_t cur = mixed[i * AUDIO_CHANNELS];
+            int32_t d = cur - sPrevSample;
+            uint32_t mag = (uint32_t)(d < 0 ? -d : d);
+
+            if (mag > JUMP_THRESHOLD) {
+                sJumpCount++;
+                if (i == 0)
+                    sJumpAtFrameStart++;
+                if (mag > sJumpMax) {
+                    sJumpMax = mag;
+                    sJumpMaxPos = (uint32_t)i;
+                }
+            }
+            sPrevSample = cur;
         }
 
         if (ring_fill() >= RING_FRAMES) {

@@ -109,6 +109,29 @@ void SoundMainBTM(void)
 {
 }
 
+// One accumulated sample, into both halves of the PCM buffer.
+//
+// The add wraps at s8 rather than saturating, which is what the reference does:
+// it mixes four samples per 32-bit word and discards the inter-byte carries. So
+// five channels summing past +-127 fold to the opposite sign, and the waveform
+// takes a full-scale step that no peak counter can see -- the result is still
+// within +-127 either way.
+//
+// Counted here, in the one place all three mixer loops go through, because
+// "does that actually happen in this game" is a question about frequency and
+// guessing at it has not worked.
+static inline void MixAccum(s8 *bufR, s8 *bufL, s32 i, s32 addR, s32 addL)
+{
+    s32 sumR = bufR[i] + addR;
+    s32 sumL = bufL[i] + addL;
+
+    if (sumR > 127 || sumR < -128 || sumL > 127 || sumL < -128)
+        gM4aDbgDsWrap++;
+
+    bufR[i] = (s8)sumR;
+    bufL[i] = (s8)sumL;
+}
+
 // ----------------------------------------------------------------------------
 // Compressed (BDPCM) and reverse-playback sample generation.
 //
@@ -221,8 +244,7 @@ static void MixChannelSpecial(struct SoundInfo *si, struct SoundChannel *chan,
         u32 adv;
         u32 mag;
 
-        bufR[i] = (s8)(bufR[i] + ((envR * interp) >> 8));
-        bufL[i] = (s8)(bufL[i] + ((envL * interp) >> 8));
+        MixAccum(bufR, bufL, i, (envR * interp) >> 8, (envL * interp) >> 8);
 
         mag = (u32)(interp < 0 ? -interp : interp);
         if (mag > gM4aDbgCryPeak)
@@ -393,8 +415,7 @@ apply_env:
         for (s32 i = 0; i < n; i++)
         {
             s32 s = *src++;
-            bufR[i] = (s8)(bufR[i] + ((envR * s) >> 8));
-            bufL[i] = (s8)(bufL[i] + ((envL * s) >> 8));
+            MixAccum(bufR, bufL, i, (envR * s) >> 8, (envL * s) >> 8);
             if (--count == 0)
             {
                 if (loopLength != 0)
@@ -426,8 +447,7 @@ apply_env:
     for (s32 i = 0; i < n; i++)
     {
         s32 interp = base + (s32)(((s64)(s32)fw * delta) >> 23);
-        bufR[i] = (s8)(bufR[i] + ((envR * interp) >> 8));
-        bufL[i] = (s8)(bufL[i] + ((envL * interp) >> 8));
+        MixAccum(bufR, bufL, i, (envR * interp) >> 8, (envL * interp) >> 8);
 
         fw += inc;
         u32 adv = fw >> 23;
