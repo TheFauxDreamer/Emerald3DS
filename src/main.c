@@ -455,7 +455,24 @@ static void VBlankIntr(void)
     // is what advances the song, so running it every time played the music at
     // the fast-forward speed. See Ctr3dsIsAudioFrame() in 3ds/host/main.c.
     { extern int Ctr3dsIsAudioFrame(void);
-      if (Ctr3dsIsAudioFrame()) m4aSoundMain(); }
+      if (Ctr3dsIsAudioFrame())
+      {
+          // m4aSoundVSync FIRST, then m4aSoundMain, matching the order the two
+          // reach the engine on hardware: VCount fires at line 150 and VBlank
+          // at 160, so the counter is always decremented before the mixer reads
+          // it.
+          //
+          // It has to be called from here at all because on a GBA it is reached
+          // through VCountIntr in gIntrTableTemplate, dispatched by IntrMain
+          // from the real interrupt vector. There is no GBA interrupt
+          // controller here and nothing dispatches that table, so without this
+          // line m4aSoundVSync never ran: pcmDmaCounter stayed 0, the render
+          // window pinned to 0, and the reverb had no delay line to tap. See
+          // Rp2350MixWindowOffset in rp2350/m4a_mix.c.
+          m4aSoundVSync();
+          m4aSoundMain();
+      }
+    }
 #else
     m4aSoundMain();
 #endif

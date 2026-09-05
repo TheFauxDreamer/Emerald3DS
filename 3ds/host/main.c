@@ -19,6 +19,16 @@
 #include "../bridge.h"
 #include "trace.h"
 
+// Both are normally passed by 3ds/build_objs.sh and 3ds/Makefile. Defaulted
+// here so this file still builds standalone, and so a missing one shows up in
+// the log as "unknown" rather than silently reading as a stale value.
+#ifndef CTR_BUILD_STAMP
+#define CTR_BUILD_STAMP "build stamp unknown"
+#endif
+#ifndef CTR_M4A_ASM
+#define CTR_M4A_ASM 0
+#endif
+
 int  CtrVideoInit(void);
 void CtrVideoExit(void);
 void CtrVideoPresent(void);
@@ -576,7 +586,14 @@ int main(int argc, char **argv)
     // a console svcOutputDebugString goes nowhere, so without a line on the SD
     // card there is no way to tell "the port never started" from "the port
     // started and something later went wrong". See 3ds/host/log.c.
-    CtrLog("emerald3ds: boot (built " __DATE__ " " __TIME__ ")\n");
+    // __DATE__/__TIME__ are baked when THIS file is compiled, so an
+    // incremental build that does not touch it reports a stale time and two
+    // different builds look identical in the log. CTR_BUILD_STAMP is passed
+    // fresh by the build script on every run, and CTR_M4A_ASM says which mixer
+    // is actually in the binary -- the one thing that cannot be told apart from
+    // the outside.
+    CtrLog("emerald3ds: boot (%s, mixer=%s)\n",
+           CTR_BUILD_STAMP, CTR_M4A_ASM ? "m4a_1.s asm" : "C engine");
 
     // Must precede everything: every VRAM/palette/OAM/register access in the
     // game derives from this block.
