@@ -1505,23 +1505,22 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
             s32 l, r;
             u32 mag;
 
-            // Halved, because the two generators have to SHARE the int16
-            // range rather than each own it.
+            // Full scale, NOT halved.
             //
-            // A DirectSound sample is s8, so dsL << 8 alone reaches 32512 of
-            // the 32767 available -- which was fine while DirectSound was the
-            // only thing here. The PSG then adds up to another 30720 on top,
-            // putting the sum at 63232: 5.7 dB past full scale. The clamp
-            // below is not limiting that, it is hard-clipping every passage
-            // loud enough to drive both halves at once, which is heard as
-            // honking rather than as loudness.
+            // On paper this can overflow: dsL << 8 reaches 32512 of the 32767
+            // available and the PSG can add another 30720 on top, so the worst
+            // case is 63232. That worst case does not occur. A 600-frame log
+            // from the Birch intro measured directSound=68 of 127 and psg=5138
+            // of 30720, for a final peak of 8524 -- a quarter of full scale --
+            // with clipped=0.
             //
-            // Shifting the SUM rather than scaling the two separately keeps
-            // their relative levels exactly as the GBA mixes them, and costs
-            // one rounding instead of two. Worst case is now
-            // (32512 + 30720) / 2 = 31616, inside the range with room spare.
-            l = (((s32)dsL << 8) + psg[i * 2]) >> 1;
-            r = (((s32)dsR << 8) + psg[i * 2 + 1]) >> 1;
+            // Halving it "for headroom" therefore bought nothing and cost 6 dB
+            // on a console whose speakers are quiet to begin with. The clamp
+            // and the counter below stay: they are what turned that from an
+            // argument into a measurement, and they are what will catch it if
+            // some song really does drive both halves at once.
+            l = ((s32)dsL << 8) + psg[i * 2];
+            r = ((s32)dsR << 8) + psg[i * 2 + 1];
 
             mag = (u32)(dsL < 0 ? -dsL : dsL);
             if (mag > gM4aDbgDsPeak)
@@ -1534,10 +1533,9 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
             if (mag > gM4aDbgPsgPeak)
                 gM4aDbgPsgPeak = mag;
 
-            // Unreachable with the halving above, and counted anyway: this
-            // is the one number that says whether the headroom argument still
-            // holds. A non-zero clipped= in the log means some generator got
-            // louder than this arithmetic assumed.
+            // The measurement that decides whether this mix needs scaling
+            // down. A non-zero clipped= in the log is the evidence that it
+            // does; a zero one is why it currently does not.
             if (l > 32767)       { l = 32767;  gM4aDbgClipped++; }
             else if (l < -32768) { l = -32768; gM4aDbgClipped++; }
             if (r > 32767)       { r = 32767;  gM4aDbgClipped++; }
