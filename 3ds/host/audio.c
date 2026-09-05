@@ -47,7 +47,17 @@
 #define NUM_WAVEBUFS 4
 #define BLOCK_SAMPLES SAMPLES_PER_FRAME
 
-#define RING_SAMPLES (SAMPLES_PER_FRAME * 16)
+// In sample FRAMES, which is the unit sRingHead and sRingTail advance in, the
+// unit ring_fill() returns, and the unit BLOCK_SAMPLES is compared against.
+// The ring holds interleaved stereo, so the ARRAY is twice this many int16.
+//
+// That distinction is why this is named for frames. It used to be a "samples"
+// count with the array declared to match, while the indexing was already
+// [frame * 2 + channel] -- so every frame wrote 0x1C00 bytes past the end into
+// the neighbouring .bss. Azahar tolerated it and the sound was fine; a real
+// ARM11 eventually found a zeroed sBlock[] pointer and took a data abort
+// writing to address 0, a few seconds after boot.
+#define RING_FRAMES (SAMPLES_PER_FRAME * 16)
 
 // libctru creates the NDSP service thread at this priority (ndspInit,
 // libctru/source/ndsp/ndsp.c). Hardcoded there, so it is a constant we have to
@@ -76,7 +86,7 @@ static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
 // domain rather than on an 8-bit grid.
 static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible, stereo
 
-static int16_t  sRing[RING_SAMPLES];
+static int16_t  sRing[RING_FRAMES * 2];   // interleaved L,R
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
 
 static int sReady;
@@ -102,6 +112,14 @@ static uint32_t sPeak;        // largest |sample| seen
 static uint32_t sNonZero;     // how many samples were not silence
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
+
+// Where one frame lives. The frame index is doubled exactly once, here, rather
+// than at each of the four use sites -- doing it at the use sites is how the
+// array came to be declared at half the size those sites index.
+static int16_t *ring_slot(uint32_t frame)
+{
+    return &sRing[(frame % RING_FRAMES) * 2];
+}
 
 // Keep the DSP thread able to preempt the game loop.
 //
@@ -376,12 +394,17 @@ void CtrAudioFrame(void)
             }
         }
 
-        if (ring_fill() >= RING_SAMPLES) {
+        if (ring_fill() >= RING_FRAMES) {
             sDropped++;
             break;
         }
-        sRing[(sRingHead % RING_SAMPLES) * 2] = mixed[i * 2];
-        sRing[(sRingHead % RING_SAMPLES) * 2 + 1] = mixed[i * 2 + 1];
+
+        {
+            int16_t *slot = ring_slot(sRingHead);
+
+            slot[0] = mixed[i * 2];
+            slot[1] = mixed[i * 2 + 1];
+        }
         sRingHead++;
     }
 
@@ -401,8 +424,10 @@ void CtrAudioFrame(void)
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
             // Already interleaved stereo PCM16 from the mixer, so this is a
             // copy rather than a conversion.
-            sBlock[i][s * 2] = sRing[(sRingTail % RING_SAMPLES) * 2];
-            sBlock[i][s * 2 + 1] = sRing[(sRingTail % RING_SAMPLES) * 2 + 1];
+            const int16_t *slot = ring_slot(sRingTail);
+
+            sBlock[i][s * 2] = slot[0];
+            sBlock[i][s * 2 + 1] = slot[1];
             sRingTail++;
         }
 
