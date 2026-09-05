@@ -312,7 +312,7 @@ static void health_report(void)
 
     uint32_t ident = 0, bgmStatus = 0, zeroRet = 0, active = 0, flags = 0;
     uint32_t chType = 0, chStatus = 0, chEnv = 0, chFreq = 0, chNonZero = 0;
-    uint32_t dsPeak = 0, psgPeak = 0, cryPeak = 0;
+    uint32_t dsPeak = 0, psgPeak = 0, cryPeak = 0, clipped = 0;
     uint8_t  masterVol = 0, maxChans = 0;
     int32_t  spvb = 0;
     const char *verdict;
@@ -321,7 +321,7 @@ static void health_report(void)
     Rp2350AudioDebug(&ident, &spvb, &bgmStatus, &zeroRet);
     Rp2350MixerDebug(&masterVol, &maxChans, &active, &flags);
     Rp2350ChannelDebug(&chType, &chStatus, &chEnv, &chFreq, &chNonZero);
-    Rp2350AudioPeaks(&dsPeak, &psgPeak, &cryPeak);
+    Rp2350AudioPeaks(&dsPeak, &psgPeak, &cryPeak, &clipped);
 
     if (sPeak == 0) {
         // Name the first broken link rather than just reporting silence. Only
@@ -385,9 +385,9 @@ static void health_report(void)
     // Split by subsystem, so each stage of the sound work can be signed off
     // from the log rather than by ear: DirectSound, the PSG synthesiser, and
     // the compressed/reverse path each report their own peak.
-    CtrLog("emerald3ds: mix peaks - directSound=%lu psg=%lu cry=%lu\n",
+    CtrLog("emerald3ds: mix peaks - directSound=%lu psg=%lu cry=%lu clipped=%lu\n",
            (unsigned long)dsPeak, (unsigned long)psgPeak,
-           (unsigned long)cryPeak);
+           (unsigned long)cryPeak, (unsigned long)clipped);
     CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 

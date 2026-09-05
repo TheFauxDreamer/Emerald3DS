@@ -292,6 +292,10 @@ void Rp2350ChannelDebug(uint32_t *type, uint32_t *statusFlags, uint32_t *envVol,
 // apart. `dsPeak` and `cryPeak` are in the DirectSound sample domain (0..128);
 // `psgPeak` is in the s16 domain the two are summed in. Any pointer may be
 // NULL. Free-running maxima, never reset.
-void Rp2350AudioPeaks(uint32_t *dsPeak, uint32_t *psgPeak, uint32_t *cryPeak);
+//
+// `clipped` counts samples the final clamp had to catch, which is the one
+// figure that says whether the mix still has headroom. It should stay 0.
+void Rp2350AudioPeaks(uint32_t *dsPeak, uint32_t *psgPeak, uint32_t *cryPeak,
+                      uint32_t *clipped);
 
 #endif // CTR_BRIDGE_H

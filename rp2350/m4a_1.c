@@ -55,6 +55,7 @@ extern const s8 gDeltaEncodingTable[];
 volatile u32 gM4aDbgDsPeak;    // largest |sample| out of the DirectSound mix
 volatile u32 gM4aDbgPsgPeak;   // ... out of the PSG synthesiser
 volatile u32 gM4aDbgCryPeak;   // ... out of the compressed/reverse path
+volatile u32 gM4aDbgClipped;   // samples the final clamp had to catch
 extern void *const gMPlayJumpTableTemplate[];
 extern void ClearChain(void *x);
 extern void Clear64byte(void *x);
@@ -1301,11 +1302,12 @@ volatile u32 gM4aDbgBgmStatus;
 volatile u32 gM4aDbgZeroRet;   // count of frames Rp2350MixFrame returned 0
 
 
-void Rp2350AudioPeaks(u32 *dsPeak, u32 *psgPeak, u32 *cryPeak)
+void Rp2350AudioPeaks(u32 *dsPeak, u32 *psgPeak, u32 *cryPeak, u32 *clipped)
 {
     if (dsPeak)  *dsPeak = gM4aDbgDsPeak;
     if (psgPeak) *psgPeak = gM4aDbgPsgPeak;
     if (cryPeak) *cryPeak = gM4aDbgCryPeak;
+    if (clipped) *clipped = gM4aDbgClipped;
 }
 
 void Rp2350AudioDebug(u32 *ident, s32 *spvb, u32 *bgmStatus, u32 *zeroRet)
@@ -1500,9 +1502,26 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
         {
             s32 dsL = bufL[base + done + i];
             s32 dsR = bufR[base + done + i];
-            s32 l = (dsL << 8) + psg[i * 2];
-            s32 r = (dsR << 8) + psg[i * 2 + 1];
+            s32 l, r;
             u32 mag;
+
+            // Halved, because the two generators have to SHARE the int16
+            // range rather than each own it.
+            //
+            // A DirectSound sample is s8, so dsL << 8 alone reaches 32512 of
+            // the 32767 available -- which was fine while DirectSound was the
+            // only thing here. The PSG then adds up to another 30720 on top,
+            // putting the sum at 63232: 5.7 dB past full scale. The clamp
+            // below is not limiting that, it is hard-clipping every passage
+            // loud enough to drive both halves at once, which is heard as
+            // honking rather than as loudness.
+            //
+            // Shifting the SUM rather than scaling the two separately keeps
+            // their relative levels exactly as the GBA mixes them, and costs
+            // one rounding instead of two. Worst case is now
+            // (32512 + 30720) / 2 = 31616, inside the range with room spare.
+            l = (((s32)dsL << 8) + psg[i * 2]) >> 1;
+            r = (((s32)dsR << 8) + psg[i * 2 + 1]) >> 1;
 
             mag = (u32)(dsL < 0 ? -dsL : dsL);
             if (mag > gM4aDbgDsPeak)
@@ -1515,10 +1534,14 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
             if (mag > gM4aDbgPsgPeak)
                 gM4aDbgPsgPeak = mag;
 
-            if (l > 32767) l = 32767;
-            else if (l < -32768) l = -32768;
-            if (r > 32767) r = 32767;
-            else if (r < -32768) r = -32768;
+            // Unreachable with the halving above, and counted anyway: this
+            // is the one number that says whether the headroom argument still
+            // holds. A non-zero clipped= in the log means some generator got
+            // louder than this arithmetic assumed.
+            if (l > 32767)       { l = 32767;  gM4aDbgClipped++; }
+            else if (l < -32768) { l = -32768; gM4aDbgClipped++; }
+            if (r > 32767)       { r = 32767;  gM4aDbgClipped++; }
+            else if (r < -32768) { r = -32768; gM4aDbgClipped++; }
 
             out[(done + i) * 2] = (s16)l;
             out[(done + i) * 2 + 1] = (s16)r;
