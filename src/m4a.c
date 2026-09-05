@@ -157,6 +157,28 @@ void m4aSoundInit(void)
                | (12 << SOUND_MODE_MASVOL_SHIFT)
                | (5 << SOUND_MODE_MAXCHN_SHIFT));
 
+#if PLATFORM_3DS
+    // Every pointer the mixer is about to call through, printed once.
+    //
+    // src/m4a_1.s's SoundMain calls MPlayMainHead and CgbSound indirectly and
+    // only null-checks the first, then tail-jumps to SoundMainRAM_Buffer. A
+    // null in any of them is a NoExecuteFault at pc=0 with nothing in the
+    // register dump to say which one it was. This names it.
+    {
+        extern void CtrTraceHex(const char *label, unsigned int value);
+        extern char SoundMainRAM_Buffer[];
+        struct SoundInfo *si = SOUND_INFO_PTR;
+
+        CtrTraceHex("m4a SOUND_INFO_PTR   ", (unsigned int)si);
+        CtrTraceHex("m4a  .ident          ", (unsigned int)(si ? si->ident : 0));
+        CtrTraceHex("m4a  .MPlayMainHead  ", (unsigned int)(si ? (void *)si->MPlayMainHead : 0));
+        CtrTraceHex("m4a  .CgbSound       ", (unsigned int)(si ? (void *)si->CgbSound : 0));
+        CtrTraceHex("m4a  .MPlayJumpTable ", (unsigned int)(si ? (void *)si->MPlayJumpTable : 0));
+        CtrTraceHex("m4a SoundMainRAM_Buf ", (unsigned int)SoundMainRAM_Buffer);
+        CtrTraceHex("m4a SoundMainRAM     ", (unsigned int)(void *)SoundMainRAM);
+    }
+#endif
+
     for (i = 0; i < NUM_MUSIC_PLAYERS; i++)
     {
         struct MusicPlayerInfo *mplayInfo = gMPlayTable[i].info;

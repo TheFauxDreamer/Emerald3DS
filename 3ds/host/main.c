@@ -111,10 +111,20 @@ static void sample_touch(CtrTouchState *t)
     wasTouching = touching;
 }
 
-#if CTR_BOOT_DIAG
 // Callable from game-side code, which must never include <3ds.h> (the
-// two-worlds rule in 3ds/README.md). A plain `const char *` crosses the seam
-// safely -- no u8/u16/u32 and no string.h in the signature.
+// two-worlds rule in 3ds/README.md). Plain `const char *` and `unsigned int`
+// cross the seam safely -- no u8/u16/u32 and no string.h in the signature.
+//
+// NOT behind CTR_BOOT_DIAG, unlike CtrTraceMsg below. A null function pointer
+// cannot be found by reading code; the only thing that says WHICH pointer is
+// null is printing them, and that has to work in the build that actually
+// crashes rather than in a diagnostic build nobody ships.
+void CtrTraceHex(const char *label, unsigned int value)
+{
+    CtrLog("emerald3ds: %s = %08X\n", label, value);
+}
+
+#if CTR_BOOT_DIAG
 void CtrTraceMsg(const char *msg)
 {
     CtrTrace("%s", msg);
