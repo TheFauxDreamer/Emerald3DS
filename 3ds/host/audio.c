@@ -1,11 +1,11 @@
 // m4a -> NDSP audio.
 //
 // rp2350/m4a_1.c is the C port of the GBA's MP2K mixer and is compiled into the
-// game archive; it hands us interleaved stereo 16-bit samples through
-// Rp2350MixFrameStereo16(), which is DirectSound and the four PSG channels
-// already summed and panned. NDSP plays stereo PCM16 natively, so the samples
-// reach the DSP exactly as the mixer produced them, with no conversion, no
-// requantisation and no downmix.
+// game archive; it hands us signed 16-bit samples with DirectSound and the four
+// PSG channels already summed, through Rp2350MixFrameStereo16() (interleaved
+// L,R, already panned) or Rp2350MixFrame16() (downmixed). NDSP plays PCM16
+// natively either way, so the samples reach the DSP exactly as the mixer
+// produced them, with no conversion and no requantisation.
 //
 // The mixer runs once per game frame and can stall (a load spike, a save
 // flush), while the DSP consumes at a constant rate. A ring between them
@@ -15,6 +15,10 @@
 // The one thing that is NOT obvious here is thread priority; see
 // fix_thread_priority() below. It is why this file could look completely
 // correct and still produce silence on a console.
+//
+// CTR_AUDIO_STEREO below selects between that path and the mono one it
+// replaced. See the comment on it: it exists as a bisect handle, not as an
+// option anybody is meant to have a preference about.
 
 #include <3ds.h>
 #include <stdio.h>
@@ -46,6 +50,26 @@
 // (4 x 224 samples @ 13401 Hz = 67 ms worst case).
 #define NUM_WAVEBUFS 4
 #define BLOCK_SAMPLES SAMPLES_PER_FRAME
+
+// Stereo, or the mono path it replaced.
+//
+// This is a diagnostic handle, not a feature. Stereo landed in 3e3ab19 across
+// the mixer, the PSG and NDSP all at once, and the sound has not been confirmed
+// good by ear since. Rp2350MixFrame16() is still live code in the mixer, so
+// flipping this to 0 returns the whole chain to the last configuration that was
+// confirmed good, in one digit, and answers whether the fault is in the stereo
+// work or older than it.
+//
+// Everything downstream is sized from AUDIO_CHANNELS rather than a literal 2,
+// which is the specific mistake that put a 0x1C00 overrun in this file the
+// first time the channel count changed.
+#define CTR_AUDIO_STEREO 0
+
+#if CTR_AUDIO_STEREO
+#define AUDIO_CHANNELS 2
+#else
+#define AUDIO_CHANNELS 1
+#endif
 
 // In sample FRAMES, which is the unit sRingHead and sRingTail advance in, the
 // unit ring_fill() returns, and the unit BLOCK_SAMPLES is compared against.
@@ -84,9 +108,9 @@ static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
 // real DSP); it now also carries real precision, because the PSG channels are
 // generated at 16-bit and a console mixes them with DirectSound in the analog
 // domain rather than on an 8-bit grid.
-static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible, stereo
+static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
 
-static int16_t  sRing[RING_FRAMES * 2];   // interleaved L,R
+static int16_t  sRing[RING_FRAMES * AUDIO_CHANNELS];
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
 
 static int sReady;
@@ -113,12 +137,12 @@ static uint32_t sNonZero;     // how many samples were not silence
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
-// Where one frame lives. The frame index is doubled exactly once, here, rather
-// than at each of the four use sites -- doing it at the use sites is how the
-// array came to be declared at half the size those sites index.
+// Where one frame lives. The frame index is scaled by the channel count exactly
+// once, here, rather than at each of the four use sites -- doing it at the use
+// sites is how the array came to be declared at half the size those sites index.
 static int16_t *ring_slot(uint32_t frame)
 {
-    return &sRing[(frame % RING_FRAMES) * 2];
+    return &sRing[(frame % RING_FRAMES) * AUDIO_CHANNELS];
 }
 
 // Keep the DSP thread able to preempt the game loop.
@@ -219,16 +243,20 @@ void CtrAudioInit(void)
     // quietly land back on the zero-order hold.
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, SAMPLE_RATE);
+#if CTR_AUDIO_STEREO
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
+#else
+    ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
+#endif
 
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
-        sBlock[i] = linearAlloc(BLOCK_SAMPLES * 2 * sizeof(int16_t));
+        sBlock[i] = linearAlloc(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
         if (sBlock[i] == NULL) {
             CtrLog("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
-                   (int)(BLOCK_SAMPLES * 2 * sizeof(int16_t)));
+                   (int)(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t)));
             return;
         }
-        memset(sBlock[i], 0, BLOCK_SAMPLES * 2 * sizeof(int16_t));
+        memset(sBlock[i], 0, BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
         memset(&sWaveBuf[i], 0, sizeof(sWaveBuf[i]));
         sWaveBuf[i].data_vaddr = sBlock[i];
         sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // sample FRAMES, not bytes
@@ -239,7 +267,8 @@ void CtrAudioInit(void)
     fix_thread_priority();
 
     sReady = 1;
-    CtrLog("emerald3ds: audio ready (%d Hz, stereo PCM16)\n", (int)SAMPLE_RATE);
+    CtrLog("emerald3ds: audio ready (%d Hz, %s PCM16)\n", (int)SAMPLE_RATE,
+           AUDIO_CHANNELS == 2 ? "stereo" : "mono");
 }
 
 void CtrAudioExit(void)
@@ -366,7 +395,7 @@ static void health_report(void)
 // Rp2350PresentFrame() on the main thread.
 void CtrAudioFrame(void)
 {
-    int16_t mixed[SAMPLES_PER_FRAME * 2];   // interleaved L,R
+    int16_t mixed[SAMPLES_PER_FRAME * AUDIO_CHANNELS];
     int n, queuedThisFrame = 0;
 
     if (!sReady)
@@ -376,7 +405,11 @@ void CtrAudioFrame(void)
 
     // 1. Produce. Mix straight into the ring; drop the frame if the ring is
     //    full (the DSP is behind, which means we are running fast).
+#if CTR_AUDIO_STEREO
     n = Rp2350MixFrameStereo16(mixed, SAMPLES_PER_FRAME);
+#else
+    n = Rp2350MixFrame16(mixed, SAMPLES_PER_FRAME);
+#endif
     if (n <= 0)
         sZeroMix++;
 
@@ -384,9 +417,10 @@ void CtrAudioFrame(void)
         // Measured on the way past, before anything else can be blamed, and
         // over both sides so a hard-panned line still registers. Widened first:
         // -32768 negates to itself in int16.
-        for (int c = 0; c < 2; c++) {
-            int mag = mixed[i * 2 + c] < 0 ? -(int)mixed[i * 2 + c]
-                                           : (int)mixed[i * 2 + c];
+        for (int c = 0; c < AUDIO_CHANNELS; c++) {
+            int mag = mixed[i * AUDIO_CHANNELS + c] < 0
+                          ? -(int)mixed[i * AUDIO_CHANNELS + c]
+                          : (int)mixed[i * AUDIO_CHANNELS + c];
             if (mag > 0) {
                 sNonZero++;
                 if ((uint32_t)mag > sPeak)
@@ -402,8 +436,8 @@ void CtrAudioFrame(void)
         {
             int16_t *slot = ring_slot(sRingHead);
 
-            slot[0] = mixed[i * 2];
-            slot[1] = mixed[i * 2 + 1];
+            for (int c = 0; c < AUDIO_CHANNELS; c++)
+                slot[c] = mixed[i * AUDIO_CHANNELS + c];
         }
         sRingHead++;
     }
@@ -422,17 +456,17 @@ void CtrAudioFrame(void)
             break;
 
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
-            // Already interleaved stereo PCM16 from the mixer, so this is a
-            // copy rather than a conversion.
+            // Already PCM16 in the DSP's own layout from the mixer, so this
+            // is a copy rather than a conversion.
             const int16_t *slot = ring_slot(sRingTail);
 
-            sBlock[i][s * 2] = slot[0];
-            sBlock[i][s * 2 + 1] = slot[1];
+            for (int c = 0; c < AUDIO_CHANNELS; c++)
+                sBlock[i][s * AUDIO_CHANNELS + c] = slot[c];
             sRingTail++;
         }
 
         // The DSP reads this memory directly and does not see the ARM11 cache.
-        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES * 2 * sizeof(int16_t));
+        DSP_FlushDataCache(sBlock[i], BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
         ndspChnWaveBufAdd(0, &sWaveBuf[i]);
         sQueued++;
         queuedThisFrame++;
