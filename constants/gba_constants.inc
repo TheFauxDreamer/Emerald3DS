@@ -29,7 +29,19 @@
 
 	.set OAM, 0x7000000
 
+@ On the 3DS the GBA regions are one .bss array (3ds/gba_mem.c) rather than a
+@ hardware map, so these two become link-time offsets into it. Everything else
+@ in this file derives from REG_BASE and follows automatically.
+@
+@ tools/preproc expands .include itself, so this file is already inlined by the
+@ time cpp runs -- which is why a cpp guard here works at all, and why the
+@ include path cannot be used to override it instead. The GBA build never
+@ defines PLATFORM_3DS, so it takes the #else and `make compare` is unaffected.
+#if PLATFORM_3DS
+	.set SOUND_INFO_PTR, gGbaMem + 0x47FF0
+#else
 	.set SOUND_INFO_PTR, 0x3007FF0
+#endif
 	.set INTR_CHECK,     0x3007FF8
 	.set INTR_VECTOR,    0x3007FFC
 
@@ -51,7 +63,11 @@
 	.set VCOUNT_VBLANK, 160
 	.set TOTAL_SCANLINES, 228
 
+#if PLATFORM_3DS
+	.set REG_BASE, gGbaMem + 0x60800 @ I/O backing store inside gGbaMem
+#else
 	.set REG_BASE, 0x4000000 @ I/O register base address
+#endif
 
 @ I/O register offsets
 	.set OFFSET_REG_DISPCNT,     0x0
