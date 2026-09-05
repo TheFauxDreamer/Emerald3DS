@@ -1,6 +1,6 @@
 // m4a -> NDSP audio.
 //
-// rp2350/m4a_1.c is the C port of the GBA's MP2K mixer and is compiled into the
+// rp2350/m4a_mix.c is the port's mixer seam, compiled into the
 // game archive; it hands us signed 16-bit samples with DirectSound and the four
 // PSG channels already summed, through Rp2350MixFrameStereo16() (interleaved
 // L,R, already panned) or Rp2350MixFrame16() (downmixed). NDSP plays PCM16
@@ -286,7 +286,7 @@ void CtrAudioExit(void)
 // queued, which is the only case that can actually cost you audio.
 static void health_report(void)
 {
-    // Mirrors the M4A_DBG_* order in rp2350/m4a_1.c: each entry is what a CLEAR
+    // Mirrors the M4A_DBG_* order in rp2350/m4a_mix.c: each entry is what a CLEAR
     // bit means, and the first clear one is the answer. Kept as text here so the
     // log reads as a diagnosis rather than a number to decode by hand.
     static const char *const kChainFaults[] = {

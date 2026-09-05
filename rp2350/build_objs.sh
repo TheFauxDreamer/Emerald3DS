@@ -43,7 +43,8 @@ assemble_sound_data() { # $1 = .s, $2 = out .o
 
 echo "[1/3] compiling C sources..."
 n=0
-for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/m4a_1.c rp2350/psg.c; do
+for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/psg.c \
+           rp2350/m4a_engine.c rp2350/m4a_mix.c; do
   obj="$OBJ/$(basename "$src" .c).o"
   compile_c "$src" "$obj"
   n=$((n+1))

@@ -239,7 +239,7 @@ typedef struct {
 
 void Ctr3dsGetClock(CtrClock *out);
 
-// Mix one frame of PCM. Implemented game-side in rp2350/m4a_1.c.
+// Mix one frame of PCM. Implemented game-side in rp2350/m4a_mix.c.
 //
 // Prefer the 16-bit form. DirectSound is 8-bit at source and survives the wider
 // type exactly, but the PSG channels are generated at 16-bit precision and a
@@ -258,7 +258,7 @@ int Rp2350MixFrame16(int16_t *out, int n);
 int Rp2350MixFrameStereo16(int16_t *out, int n);
 
 // m4a engine telemetry, for the audio health report in 3ds/host/audio.c. Also
-// game-side in rp2350/m4a_1.c, which already snapshots these every mix.
+// game-side in rp2350/m4a_mix.c, which already snapshots these every mix.
 //
 // It answers the question the host side cannot: whether the SOUND ENGINE is
 // running at all. `ident` should read ID_NUMBER once m4aSoundInit has run,
