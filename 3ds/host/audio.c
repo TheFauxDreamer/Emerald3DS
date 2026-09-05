@@ -51,25 +51,19 @@
 #define NUM_WAVEBUFS 4
 #define BLOCK_SAMPLES SAMPLES_PER_FRAME
 
-// Stereo, or the mono path it replaced.
+// NDSP is always configured stereo, and the STEREO A/B switch downmixes into
+// both sides rather than reconfiguring the channel.
 //
-// This is a diagnostic handle, not a feature. Stereo landed in 3e3ab19 across
-// the mixer, the PSG and NDSP all at once, and the sound has not been confirmed
-// good by ear since. Rp2350MixFrame16() is still live code in the mixer, so
-// flipping this to 0 returns the whole chain to the last configuration that was
-// confirmed good, in one digit, and answers whether the fault is in the stereo
-// work or older than it.
+// That is deliberate. Changing ndspChnSetFormat under a running channel means
+// stopping it, clearing queued wave buffers and restarting, and a switch that
+// exists to diagnose a fault must not be able to introduce one. Filling both
+// sides with (L + R) / 2 is the same sample stream the mono format would have
+// produced, at the cost of one extra int16 per frame.
 //
-// Everything downstream is sized from AUDIO_CHANNELS rather than a literal 2,
+// Everything downstream sizes from AUDIO_CHANNELS rather than a literal 2,
 // which is the specific mistake that put a 0x1C00 overrun in this file the
 // first time the channel count changed.
-#define CTR_AUDIO_STEREO 0
-
-#if CTR_AUDIO_STEREO
 #define AUDIO_CHANNELS 2
-#else
-#define AUDIO_CHANNELS 1
-#endif
 
 // In sample FRAMES, which is the unit sRingHead and sRingTail advance in, the
 // unit ring_fill() returns, and the unit BLOCK_SAMPLES is compared against.
@@ -243,11 +237,7 @@ void CtrAudioInit(void)
     // quietly land back on the zero-order hold.
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, SAMPLE_RATE);
-#if CTR_AUDIO_STEREO
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
-#else
-    ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
-#endif
 
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
         sBlock[i] = linearAlloc(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
@@ -267,8 +257,7 @@ void CtrAudioInit(void)
     fix_thread_priority();
 
     sReady = 1;
-    CtrLog("emerald3ds: audio ready (%d Hz, %s PCM16)\n", (int)SAMPLE_RATE,
-           AUDIO_CHANNELS == 2 ? "stereo" : "mono");
+    CtrLog("emerald3ds: audio ready (%d Hz, stereo PCM16)\n", (int)SAMPLE_RATE);
 }
 
 void CtrAudioExit(void)
@@ -405,11 +394,20 @@ void CtrAudioFrame(void)
 
     // 1. Produce. Mix straight into the ring; drop the frame if the ring is
     //    full (the DSP is behind, which means we are running fast).
-#if CTR_AUDIO_STEREO
     n = Rp2350MixFrameStereo16(mixed, SAMPLES_PER_FRAME);
-#else
-    n = Rp2350MixFrame16(mixed, SAMPLES_PER_FRAME);
-#endif
+
+    // The STEREO A/B switch, applied here rather than in the mixer: what it is
+    // asking is whether the two sides being different is what sounds wrong, and
+    // collapsing them after the fact answers that without changing a single
+    // thing about how they were generated.
+    if (!Ctr3dsGetAudioDbg(CTR_AUDIO_DBG_STEREO)) {
+        for (int i = 0; i < n; i++) {
+            int16_t mono = (int16_t)(((int32_t)mixed[i * 2]
+                                    + (int32_t)mixed[i * 2 + 1]) / 2);
+            mixed[i * 2] = mono;
+            mixed[i * 2 + 1] = mono;
+        }
+    }
     if (n <= 0)
         sZeroMix++;
 

@@ -436,6 +436,51 @@ int Ctr3dsIsAudioFrame(void)
     return sFfAudio == CTR_FFAUDIO_FAST || sSubFrame == 0;
 }
 
+// Audio A/B switches. All three default ON, so a normal boot is the real mixer
+// and these only matter to someone deliberately hunting a sound fault.
+//
+// Kept as one small array rather than three named flags because they are read
+// and written generically by the EXTRA tab's row and by the settings file, and
+// naming them individually would triple all three of those for nothing.
+static uint8_t sAudioDbg[CTR_AUDIO_DBG_COUNT] = { 1, 1, 1 };
+
+// Set without persisting, for CtrSettingsLoad(), the same split as
+// Ctr3dsApplyFfAudio above.
+void Ctr3dsApplyAudioDbg(int which, int on)
+{
+    if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
+        return;
+
+    sAudioDbg[which] = (uint8_t)(on ? 1 : 0);
+
+    // STEREO is a host-side downmix and is read straight out of this array by
+    // CtrAudioFrame; the other two live in the mixer and have to be pushed.
+    Rp2350SetAudioDebug(sAudioDbg[CTR_AUDIO_DBG_PSG],
+                        sAudioDbg[CTR_AUDIO_DBG_REVERB]);
+}
+
+void Ctr3dsSetAudioDbg(int which, int on)
+{
+    int before;
+
+    if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
+        return;
+
+    before = sAudioDbg[which];
+    Ctr3dsApplyAudioDbg(which, on);
+
+    if (sAudioDbg[which] != before)
+        CtrSettingsSave();
+}
+
+int Ctr3dsGetAudioDbg(int which)
+{
+    if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
+        return 1;
+
+    return sAudioDbg[which];
+}
+
 // Fastest bound button currently held, else the resting speed. Fastest rather
 // than first so holding two never gives the slower of the two, which would feel
 // like the binding had been ignored.

@@ -38,7 +38,12 @@
 // v5 appended the fast-forward audio preference, and migrates the same way. A
 // zero there is CTR_FFAUDIO_NORMAL, which is the default anyway, so an older
 // file loads as exactly what it meant.
-#define SETTINGS_VERSION 5
+//
+// v6 claimed v5's three explicit padding bytes for the audio A/B switches, so
+// it is the same SIZE as v5 and needs no migration at all: every v5 file has
+// zeros there, and the sense is inverted (these store MUTED, not enabled)
+// precisely so that zero keeps meaning "the normal mixer".
+#define SETTINGS_VERSION 6
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -59,12 +64,14 @@ struct CtrSettings {
     uint8_t  bagSort;                  // CTR_BAGSORT_*
     // Appended in v5.
     uint8_t  ffAudio;                  // CTR_FFAUDIO_*
-    // Explicit, because without it the compiler adds three bytes of its own to
-    // round the struct to its 4-byte alignment and CtrSettingsSave would write
-    // uninitialised stack to the card. Named padding keeps the promise above
-    // that every byte on disk is accounted for, and gives v6 somewhere to go
-    // without another size change.
-    uint8_t  pad[3];
+    // v6, in the three bytes v5 reserved as explicit padding. They exist at all
+    // because without them the compiler would round the struct to its 4-byte
+    // alignment itself and CtrSettingsSave would write uninitialised stack to
+    // the card; v5 said they were somewhere for v6 to go, and this is v6.
+    //
+    // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
+    // "nothing is muted", which is the default and what that file meant.
+    uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
 };
 
 // How much of the struct each older layout fills: everything up to the fields
@@ -113,6 +120,14 @@ void CtrSettingsLoad(void)
         if (n != sizeof(s))
             return;
     }
+    else if (s.version == 5)
+    {
+        // Same size as v6: only the meaning of the last three bytes changed,
+        // and they were written as zero, which is what this version wants them
+        // to mean anyway.
+        if (n != sizeof(s))
+            return;
+    }
     else if (s.version == 4)
     {
         if (n != SETTINGS_V4_SIZE)
@@ -152,6 +167,10 @@ void CtrSettingsLoad(void)
     // Zero for a migrated v3 or v4 file, which is CTR_FFAUDIO_NORMAL and also
     // the default, so an older file loads as exactly what it meant.
     Ctr3dsApplyFfAudio(s.ffAudio);
+
+    // Zero for anything older than v6, which is "not muted" for all three.
+    for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
+        Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 }
 
 void CtrSettingsSave(void)
@@ -173,6 +192,9 @@ void CtrSettingsSave(void)
     s.randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
     s.bagSort    = (uint8_t)Ctr3dsGetBagSort();
     s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
+
+    for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
+        s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
 
     mkdir("sdmc:/3ds", 0777);
     mkdir(SETTINGS_DIR, 0777);
