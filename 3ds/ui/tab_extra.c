@@ -334,18 +334,27 @@ static void DrawPage2(void)
 //
 // A diagnostic page, and a third page rather than a squeeze onto page 2,
 // because these are not settings anybody is meant to have a preference about.
-// All three default ON, which is the real mixer; turning one off is how you
-// find out which half of it a fault lives in, since neither half can be judged
-// by ear while the other is playing.
+// All four default ON, which is the real mixer; turning one off is how you find
+// out which half of it a fault lives in, since neither half can be judged by
+// ear while the other is playing.
 //
-// Rows 1 to 3 reuse page 2's two-button geometry unchanged.
+// PSG and DIRECT together cover everything the mixer emits, so with both off
+// the output is silence by construction. Anything still audible then is not the
+// mixer at all -- it is the ring, NDSP, or the console.
+//
+// Columns reuse page 2's two-button geometry unchanged.
 static const struct { const char *label; u8 which; const char *note; } sAudioRows[] = {
     { "PSG",    CTR_AUDIO_DBG_PSG,    "the 4 GB voices"    },
+    { "DIRECT", CTR_AUDIO_DBG_DS,     "the sampled half"   },
     { "REVERB", CTR_AUDIO_DBG_REVERB, "479 of 529 songs"   },
     { "STEREO", CTR_AUDIO_DBG_STEREO, "off = downmix"      },
 };
 
-#define AUD_LABEL_Y(i)  (ROW1_LABEL_Y + (int)(i) * 50)
+// Four rows at a 42px pitch: labels at 8/50/92/134, buttons 17px below each, so
+// the last one ends at 177 inside the 184px floor. Tighter than page 1 and 2's
+// 50px because this page carries four rows rather than three plus a footer, and
+// the per-row notes beside each label are the footer.
+#define AUD_LABEL_Y(i)  (ROW1_LABEL_Y + (int)(i) * 42)
 #define AUD_BTN_Y(i)    (AUD_LABEL_Y(i) + LABEL_TO_BTN)
 
 static void DrawPage3(void)
@@ -374,10 +383,6 @@ static void DrawPage3(void)
                    UiAscii(label, "ON", sizeof(label)), on);
     }
 
-    UiText(TAB_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
-           UiAscii(label, "for finding sound bugs. all ON is normal.",
-                   sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
 }
 
 static void DrawPager(void)

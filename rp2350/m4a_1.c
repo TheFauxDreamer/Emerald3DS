@@ -67,11 +67,13 @@ volatile u32 gM4aDbgClipped;   // samples the final clamp had to catch
 // Default on, so a normal boot is the real mixer.
 volatile u8 gM4aPsgOn = 1;
 volatile u8 gM4aReverbOn = 1;
+volatile u8 gM4aDsOn = 1;
 
-void Rp2350SetAudioDebug(int psgOn, int reverbOn)
+void Rp2350SetAudioDebug(int psgOn, int reverbOn, int dsOn)
 {
     gM4aPsgOn = (u8)(psgOn ? 1 : 0);
     gM4aReverbOn = (u8)(reverbOn ? 1 : 0);
+    gM4aDsOn = (u8)(dsOn ? 1 : 0);
 }
 extern void *const gMPlayJumpTableTemplate[];
 extern void ClearChain(void *x);
@@ -1571,8 +1573,12 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
 
         for (i = 0; i < part; i++)
         {
-            s32 dsL = bufL[base + done + i];
-            s32 dsR = bufR[base + done + i];
+            // Read regardless and discarded when muted, never skipped: the
+            // point of the mute is to remove this half from the OUTPUT, and
+            // anything that also changed how the buffer is walked would be
+            // testing two things at once.
+            s32 dsL = gM4aDsOn ? bufL[base + done + i] : 0;
+            s32 dsR = gM4aDsOn ? bufR[base + done + i] : 0;
             s32 l, r;
             u32 mag;
 

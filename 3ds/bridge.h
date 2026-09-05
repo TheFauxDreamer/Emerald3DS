@@ -303,14 +303,15 @@ void Rp2350AudioPeaks(uint32_t *dsPeak, uint32_t *psgPeak, uint32_t *cryPeak,
 // Neither half can be judged by ear while the other is playing, and nothing in
 // the log can measure "sounds wrong", so this is the only instrument there is
 // for a fault about quality rather than plumbing. Both default on.
-void Rp2350SetAudioDebug(int psgOn, int reverbOn);
+void Rp2350SetAudioDebug(int psgOn, int reverbOn, int dsOn);
 
 // Audio A/B state. STEREO is host-side (it is a downmix, not a mixer setting),
 // the other two are pushed into the mixer by Rp2350SetAudioDebug.
 #define CTR_AUDIO_DBG_PSG    0
 #define CTR_AUDIO_DBG_REVERB 1
 #define CTR_AUDIO_DBG_STEREO 2
-#define CTR_AUDIO_DBG_COUNT  3
+#define CTR_AUDIO_DBG_DS     3   // the sampled half
+#define CTR_AUDIO_DBG_COUNT  4
 
 int  Ctr3dsGetAudioDbg(int which);
 void Ctr3dsSetAudioDbg(int which, int on);
