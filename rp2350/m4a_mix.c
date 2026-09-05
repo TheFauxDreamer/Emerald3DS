@@ -64,6 +64,42 @@ void Rp2350SetAudioDebug(int psgOn, int reverbOn, int dsOn)
 // engine has already filled gSoundInfo.pcmBuffer (right half then left half)
 // during VBlankIntr -> m4aSoundMain this frame.
 // ----------------------------------------------------------------------------
+// Which window of pcmBuffer the engine rendered into this frame.
+//
+// Transcribed from SoundMain in src/m4a_1.s rather than invented, because the
+// two have to agree exactly and only one of them is replaceable:
+//
+//     ldrb r4, [r0, o_SoundInfo_pcmDmaCounter]
+//     subs r7, r4, 1
+//     bls  SoundMain_5                  @ counter <= 1 -> window 0
+//     ldrb r1, [r0, o_SoundInfo_pcmDmaPeriod]
+//     subs r1, r7                       @ window = period - (counter - 1)
+//
+// m4aSoundVSync counts the counter down from period to 1 and reloads, so the
+// window walks 1, 2, ... period-1, 0 and back round. Deriving it from that
+// counter rather than from a private one of our own is what lets the original
+// assembly be dropped in underneath this file unchanged.
+s32 Rp2350MixWindowOffset(void)
+{
+    struct SoundInfo *si = SOUND_INFO_PTR;
+    s32 counter = si->pcmDmaCounter;
+    s32 period = si->pcmDmaPeriod;
+    s32 window;
+
+    if (period < 1)
+        return 0;
+
+    window = (counter <= 1) ? 0 : (period - counter + 1);
+
+    // The counter is a byte the engine owns; a value outside [1, period] means
+    // it has not been initialised yet, and window 0 is what the reference does
+    // in that case too.
+    if (window < 0 || window >= period)
+        window = 0;
+
+    return window * si->pcmSamplesPerVBlank;
+}
+
 extern struct SoundInfo gSoundInfo;
 extern struct MusicPlayerInfo gMPlayInfo_BGM;
 

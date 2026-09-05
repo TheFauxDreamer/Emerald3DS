@@ -471,15 +471,6 @@ apply_env:
 // ----------------------------------------------------------------------------
 // Which of the pcmDmaPeriod windows of pcmBuffer was written last, and the
 // window the reverb takes its delayed tap from. See SoundMain.
-static s32 sMixWindow;
-
-s32 Rp2350MixWindowOffset(void)
-{
-    struct SoundInfo *si = SOUND_INFO_PTR;
-
-    return sMixWindow * si->pcmSamplesPerVBlank;
-}
-
 static void MixAllChannels(struct SoundInfo *si, s8 *dma, const s8 *tap, s32 n)
 {
     // The frame starts from the reverb feedback rather than from silence,
@@ -561,30 +552,34 @@ void SoundMain(void)
     si->CgbSound();
 
     // Render into a rotating window of pcmBuffer, exactly as the GBA's DMA
-    // double-buffering does. There is no DMA here, so the rotation is not
-    // needed to feed anything -- it exists so the reverb above has a delay line
-    // with real history in it rather than one frame of its own output.
+    // double-buffering does. There is no DMA here, so the rotation feeds
+    // nothing -- it exists so the reverb has a delay line with real history in
+    // it rather than one frame of its own output.
     //
     // pcmDmaPeriod is PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank (1584 / 224 = 7),
     // so the delayed tap lands about 100 ms back, which is a reverb. Taking it
     // from the same window made it 16.7 ms, which is a comb filter.
+    //
+    // The window comes from Rp2350MixWindowOffset() rather than from a counter
+    // of our own, because the mixer seam has to read the SAME window this wrote
+    // and only one of the two is replaceable. See the transcription there.
     {
         s32 n = si->pcmSamplesPerVBlank;
         s32 period = si->pcmDmaPeriod;
+        s32 cur = Rp2350MixWindowOffset();
+        s32 old;
 
-        if (period < 2)
-            period = 2;   // a one-window ring has no history to tap
+        if (period < 1)
+            period = 1;
 
-        sMixWindow = (sMixWindow + 1) % period;
+        // The NEXT window round the ring holds the oldest data in it, which is
+        // the position the reference's `addne r7, r5, r8` picks, wrapping to
+        // window 0 exactly where its `cmp r4, 0x2` special case does.
+        old = cur + n;
+        if (old >= period * n)
+            old = 0;
 
-        // The NEXT window round the ring is the oldest data in it, which is
-        // the position the reference's `addne r7, r5, r8` picks.
-        {
-            s32 cur = sMixWindow * n;
-            s32 old = ((sMixWindow + 1) % period) * n;
-
-            MixAllChannels(si, si->pcmBuffer + cur, si->pcmBuffer + old, n);
-        }
+        MixAllChannels(si, si->pcmBuffer + cur, si->pcmBuffer + old, n);
     }
 }
 
@@ -594,6 +589,29 @@ void SoundMain(void)
 // ----------------------------------------------------------------------------
 void m4aSoundVSync(void)
 {
+    struct SoundInfo *si = SOUND_INFO_PTR;
+    s32 counter;
+
+    if (si == NULL || si->ident - ID_NUMBER > 1)
+        return;
+
+    // The counter half of the reference's m4aSoundVSync, and only that half.
+    //
+    // The rest of it re-arms the two DirectSound DMA channels, which is
+    // meaningless with no DMA engine: the mixer seam drains pcmBuffer directly.
+    // The counter is not meaningless, because it is what sequences the window
+    // SoundMain renders into -- see Rp2350MixWindowOffset. It used to be absent
+    // entirely, which pinned the window at 0 and left the reverb with no delay
+    // line to tap.
+    //
+    // Counts down to 1 and reloads, matching `subs r1, 1 / bgt / reload`: a
+    // counter that starts at 0 goes negative on the first tick and is reloaded,
+    // which is how the reference recovers from an uninitialised one too.
+    counter = (s32)si->pcmDmaCounter - 1;
+    if (counter <= 0)
+        counter = si->pcmDmaPeriod;
+
+    si->pcmDmaCounter = (u8)counter;
 }
 
 // ----------------------------------------------------------------------------
