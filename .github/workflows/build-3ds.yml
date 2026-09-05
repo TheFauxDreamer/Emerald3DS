@@ -25,6 +25,33 @@ jobs:
     timeout-minutes: 60
     container: devkitpro/devkitarm:latest
 
+    # Two mixers, built side by side.
+    #
+    # CTR_M4A_ASM=0 is the C reimplementation of src/m4a_1.s; =1 assembles the
+    # original instead, which the ARM11 can run and the RP2350's Cortex-M33
+    # cannot. Which one sounds right is the open question, and it cannot be
+    # answered without both in hand -- the builds happen here, not on a desk, so
+    # the choice has to be made here too.
+    #
+    # fail-fast is off deliberately. The assembly variant is unproven and may
+    # not even assemble; if it breaks it must not cancel the build that works.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - m4a: 0
+            variant: c-engine
+          - m4a: 1
+            variant: m4a-asm
+
+    name: build (${{ matrix.variant }})
+
+    env:
+      # Read by 3ds/build_objs.sh, which records it in 3ds/build/m4a_asm.flag so
+      # 3ds/Makefile stamps the same value into the boot log. Setting it once
+      # here is what keeps the binary and the log agreeing.
+      CTR_M4A_ASM: ${{ matrix.m4a }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -84,7 +111,7 @@ jobs:
       - name: Upload ELF + link map
         uses: actions/upload-artifact@v4
         with:
-          name: emerald3ds-elf
+          name: emerald3ds-elf-${{ matrix.variant }}
           path: |
             3ds/emerald3ds.elf
             3ds/build/emerald3ds.map
@@ -118,7 +145,7 @@ jobs:
       - name: Upload CIA and 3DS
         uses: actions/upload-artifact@v4
         with:
-          name: emerald3ds
+          name: emerald3ds-${{ matrix.variant }}
           path: |
             3ds/emerald3ds.cia
             3ds/emerald3ds.3ds
