@@ -54,7 +54,20 @@ CFLAGS="$ARCH -O2 -ffreestanding -fno-strict-aliasing -fomit-frame-pointer \
 # game-side, so without it here they silently compile to nothing while the
 # host-side traces still appear -- a half-instrumented build that looks fine.
 CTR_BOOT_DIAG="${CTR_BOOT_DIAG:-0}"
-CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=$CTR_BOOT_DIAG"
+
+# Run the ORIGINAL m4a mixer (src/m4a_1.s) instead of the C reimplementation.
+#
+# The C port exists because the RP2350's Cortex-M33 is Thumb-2 only and cannot
+# execute ARMv4T ARM-mode code. The ARM11 is ARMv6K and can, so on this target
+# the assembly is available -- and being the actual shipped code, it cannot be
+# wrong about the engine the way a reimplementation can.
+#
+# Off by default until it has been heard on hardware. Build with
+# `CTR_M4A_ASM=1 3ds/build_objs.sh` to try it; everything else is unchanged, so
+# a bad result costs one build rather than the branch.
+CTR_M4A_ASM="${CTR_M4A_ASM:-0}"
+
+CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=$CTR_BOOT_DIAG -DCTR_M4A_ASM=$CTR_M4A_ASM"
 
 if [ ! -d "$ASSETS" ]; then
   echo "error: $ASSETS missing. Run 'make tools && make wasm-assets' first." >&2
@@ -88,14 +101,33 @@ assemble_sound_data() { # $1 = .s, $2 = out .o
 
 echo "[1/3] compiling C sources..."
 n=0
+# m4a_engine.c is the C reimplementation of src/m4a_1.s. It is dropped when the
+# assembly is used, or the two define the same 31 symbols and the link fails.
+M4A_ENGINE=rp2350/m4a_engine.c
+if [ "$CTR_M4A_ASM" = "1" ]; then
+  M4A_ENGINE=
+fi
+
 for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/psg.c \
-           rp2350/m4a_engine.c rp2350/m4a_mix.c \
+           $M4A_ENGINE rp2350/m4a_mix.c \
            3ds/gba_mem.c 3ds/tweaks.c 3ds/ui/*.c; do
   obj="$OBJ/$(basename "$src" .c).o"
   compile_c "$src" "$obj"
   n=$((n+1))
 done
 echo "      $n C objects"
+
+if [ "$CTR_M4A_ASM" = "1" ]; then
+  echo "      m4a: assembling src/m4a_1.s (original mixer)"
+  # -DPLATFORM_3DS is what redirects SOUND_INFO_PTR and REG_BASE into gGbaMem;
+  # see the guard in constants/gba_constants.inc. tools/preproc expands the
+  # .include itself, so cpp is what evaluates that guard.
+  $PP src/m4a_1.s charmap.txt \
+    | $CC -E -DPLATFORM_3DS=1 -I include -I . - \
+    | $PP -ie src/m4a_1.s charmap.txt \
+    | $AS -march=armv6k -mfloat-abi=hard -I include -I . -o "$OBJ/m4a_1.o" -
+  $AS -march=armv6k -mfloat-abi=hard -o "$OBJ/m4a_arm11.o" 3ds/asm/m4a_arm11.s
+fi
 
 echo "[2/3] assembling data sources..."
 for s in maps map_events event_scripts battle_scripts_1 battle_scripts_2 battle_ai_scripts battle_anim_scripts; do

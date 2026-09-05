@@ -6,7 +6,14 @@ extern const u8 gCgb3Vol[];
 
 #define BSS_CODE __attribute__((section(".bss.code")))
 
+#if CTR_M4A_ASM
+// Defined in 3ds/asm/m4a_arm11.s as an alias for SoundMainRAM itself, because
+// there is nowhere writable AND executable to relocate the mixer into. See the
+// comment there.
+extern char SoundMainRAM_Buffer[];
+#else
 BSS_CODE ALIGNED(4) char SoundMainRAM_Buffer[0x800] = {0};
+#endif
 
 COMMON_DATA struct SoundInfo gSoundInfo = {0};
 COMMON_DATA struct PokemonCrySong gPokemonCrySongs[MAX_POKEMON_CRIES] = {0};
@@ -138,7 +145,9 @@ void m4aSoundInit(void)
 #if !RP2350
     // The GBA copies the mixer into fast IWRAM. On RP2350 the mixer is plain C
     // (rp2350/m4a_engine.c) called directly, so SoundMainRAM_Buffer is unused.
+#if !CTR_M4A_ASM
     CpuCopy32((void *)((s32)SoundMainRAM & ~1), SoundMainRAM_Buffer, sizeof(SoundMainRAM_Buffer));
+#endif
 #endif
 
     SoundInit(&gSoundInfo);
