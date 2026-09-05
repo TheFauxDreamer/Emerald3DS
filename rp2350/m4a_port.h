@@ -34,6 +34,17 @@ extern volatile u32 gM4aDbgPsgPeak;   // ... out of the PSG synthesiser
 extern volatile u32 gM4aDbgCryPeak;   // ... out of the compressed/reverse path
 extern volatile u32 gM4aDbgClipped;   // samples the final clamp had to catch
 
+// How often the DirectSound accumulator wrapped.
+//
+// MixChannel sums every active channel into an s8 buffer, so a sum past +-127
+// wraps to the opposite sign instead of saturating. That is what the GBA does,
+// and it is invisible to every other counter here: the peak stays <= 127 either
+// way, while the waveform takes a full-scale step. With five channels live it
+// is the first thing to rule in or out.
+//
+// Stays 0 in a build using the original assembly, which does its own mixing.
+extern volatile u32 gM4aDbgDsWrap;
+
 // Audio A/B switches, driven from the EXTRA tab. Default on, so a normal boot
 // is the real mixer. See Rp2350SetAudioDebug in 3ds/bridge.h.
 extern volatile u8 gM4aPsgOn;

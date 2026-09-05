@@ -39,6 +39,7 @@ volatile u32 gM4aDbgDsPeak;    // largest |sample| out of the DirectSound mix
 volatile u32 gM4aDbgPsgPeak;   // ... out of the PSG synthesiser
 volatile u32 gM4aDbgCryPeak;   // ... out of the compressed/reverse path
 volatile u32 gM4aDbgClipped;   // samples the final clamp had to catch
+volatile u32 gM4aDbgDsWrap;   // s8 accumulator overflows in MixChannel
 
 // Audio A/B switches, driven from the EXTRA tab.
 //

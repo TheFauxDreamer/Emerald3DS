@@ -70,6 +70,30 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
+
+# Point the original mixer's tail jump at itself.
+#
+# SoundMain (src/m4a_1.s) ends with `ldr r3, lt_SoundMainRAM_Buffer / bx r3`,
+# where that literal is `.word SoundMainRAM_Buffer + 1`. On a GBA the buffer is
+# an IWRAM copy m4aSoundInit makes, because IWRAM is zero-wait-state.
+#
+# Here it cannot be: IWRAM is an offset into gGbaMem (3ds/gba_mem.c), an
+# ordinary .bss array, and a CXI has no read/write/execute segment to put code
+# in. There is also nothing to gain, since the ARM11 runs .text at full speed.
+# So the buffer symbol simply IS the routine and src/m4a.c skips the copy.
+#
+# Done with --defsym rather than a .set in an assembly file: SoundMainRAM lives
+# in a different object, and `as` cannot resolve .set to an external symbol --
+# it emits a reference instead of a definition, which is an undefined symbol at
+# link time. --defsym is resolved by ld, which can see both.
+#
+# The Thumb bit works out because --defsym creates an ABSOLUTE symbol carrying
+# SoundMainRAM's plain (even) address rather than a function symbol. The `+ 1`
+# already in that literal is then the Thumb bit, exactly as it is for the real
+# buffer. A %function alias would have had the bit applied twice.
+ifeq ($(CTR_M4A_ASM),1)
+LDFLAGS  += -Wl,--defsym,SoundMainRAM_Buffer=SoundMainRAM
+endif
 LIBS     := -lcitro2d -lcitro3d -lctru -lm
 LIBDIRS  := -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
 
