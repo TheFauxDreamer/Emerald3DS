@@ -94,13 +94,17 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // already fill the 176px interior exactly, so a fifth row does not fit and the
 // spare half of a label line is the only room there is.
 //
-// "GAME SPEED" ends near x=76 and the pager's PAGE caption starts near x=226,
-// so 104..204 is clear of both. 17px tall at y=8 ends at y=24, abutting the
-// row-1 buttons at y=25 without overlapping, exactly as the pager does.
+// "GAME SPEED" ends near x=76. A third page moved the pager one button further
+// left, taking its PAGE caption from x=226 to x=198, so this shrank from 100 to
+// 88 to keep clear of it: 104..192 against a caption starting at 198. The
+// widest label it draws, "MUSIC FAST", is 54px, so 88 is still generous.
+//
+// 17px tall at y=8 ends at y=24, abutting the row-1 buttons at y=25 without
+// overlapping, exactly as the pager does.
 //
 // It belongs on this row because GAME SPEED is the only control it modifies.
 #define FFA_X         104
-#define FFA_W         100
+#define FFA_W         88
 #define FFA_Y         ROW1_LABEL_Y
 #define FFA_H         PGR_H
 
@@ -119,8 +123,14 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_W         26
 #define PGR_H         17
 #define PGR_Y         ROW1_LABEL_Y
-#define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - (2 - (i)) * PGR_W - (1 - (i)) * 4)
-#define PAGE_COUNT    2
+#define PAGE_COUNT    3
+
+// Right-aligned to the interior edge, growing leftwards as pages are added, so
+// the last button always lands in the same place however many there are. At
+// PAGE_COUNT 2 this is the same arithmetic the two-page version spelled out
+// longhand: 256 and 286.
+#define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
+                       - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
 // Page 2 rows 1 to 3 reuse the SCREEN SIZE geometry above unchanged. Row 4
 // carries its label beside its buttons, as page 1's does, and three 75px
@@ -320,6 +330,56 @@ static void DrawPage2(void)
                mode == CTR_BAGSORT_NAME);
 }
 
+// PAGE 3: the audio A/B switches.
+//
+// A diagnostic page, and a third page rather than a squeeze onto page 2,
+// because these are not settings anybody is meant to have a preference about.
+// All three default ON, which is the real mixer; turning one off is how you
+// find out which half of it a fault lives in, since neither half can be judged
+// by ear while the other is playing.
+//
+// Rows 1 to 3 reuse page 2's two-button geometry unchanged.
+static const struct { const char *label; u8 which; const char *note; } sAudioRows[] = {
+    { "PSG",    CTR_AUDIO_DBG_PSG,    "the 4 GB voices"    },
+    { "REVERB", CTR_AUDIO_DBG_REVERB, "479 of 529 songs"   },
+    { "STEREO", CTR_AUDIO_DBG_STEREO, "off = downmix"      },
+};
+
+#define AUD_LABEL_Y(i)  (ROW1_LABEL_Y + (int)(i) * 50)
+#define AUD_BTN_Y(i)    (AUD_LABEL_Y(i) + LABEL_TO_BTN)
+
+static void DrawPage3(void)
+{
+    u8 label[40];
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sAudioRows); i++)
+    {
+        int on = Ctr3dsGetAudioDbg(sAudioRows[i].which);
+
+        UiText(16, AUD_LABEL_Y((int)i),
+               UiAscii(label, sAudioRows[i].label, sizeof(label)),
+               UiThemeText(), UiThemeShadow());
+
+        // What the switch actually silences, because "PSG" means nothing
+        // without it and this page exists to be used by someone who does not
+        // already know the mixer.
+        UiText(P2_HINT_X, AUD_LABEL_Y((int)i),
+               UiAscii(label, sAudioRows[i].note, sizeof(label)),
+               UI_COL_DIM, UiThemeShadow());
+
+        DrawButton(WIDE_X(0), AUD_BTN_Y((int)i), WIDE_W,
+                   UiAscii(label, "OFF", sizeof(label)), !on);
+        DrawButton(WIDE_X(1), AUD_BTN_Y((int)i), WIDE_W,
+                   UiAscii(label, "ON", sizeof(label)), on);
+    }
+
+    UiText(TAB_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "for finding sound bugs. all ON is normal.",
+                   sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+}
+
 static void DrawPager(void)
 {
     u8 label[8];
@@ -347,8 +407,10 @@ void UiExtraDraw(void)
 
     if (sPage == 0)
         DrawPage1();
-    else
+    else if (sPage == 1)
         DrawPage2();
+    else
+        DrawPage3();
 
     DrawPager();
 }
@@ -376,9 +438,17 @@ u32 UiExtraStateKey(void)
     // Folded in even though the only way to change it is the button above,
     // which marks the screen dirty itself: a setting that can go stale on
     // screen is exactly what this hash exists to prevent.
+    // The three audio switches go at bit 24, clear of UiTweakStateKey's own
+    // range (it reaches bit 13, so bit 17 after the shift below).
+    u32 audio = 0;
+
+    for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
+        audio |= (u32)(Ctr3dsGetAudioDbg((int)i) != 0) << i;
+
     return (u32)sPage
          | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 2)
-         | (UiTweakStateKey() << 4);
+         | (UiTweakStateKey() << 4)
+         | (audio << 24);
 }
 
 static void TouchPage1(const CtrTouchState *t)
@@ -502,6 +572,27 @@ static void TouchPage2(const CtrTouchState *t)
     }
 }
 
+static void TouchPage3(const CtrTouchState *t)
+{
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sAudioRows); i++)
+    {
+        if (UiHit(t, WIDE_X(0), AUD_BTN_Y((int)i), WIDE_W, BTN_H))
+        {
+            Ctr3dsSetAudioDbg(sAudioRows[i].which, 0);
+            UiMarkDirty();
+            return;
+        }
+        if (UiHit(t, WIDE_X(1), AUD_BTN_Y((int)i), WIDE_W, BTN_H))
+        {
+            Ctr3dsSetAudioDbg(sAudioRows[i].which, 1);
+            UiMarkDirty();
+            return;
+        }
+    }
+}
+
 void UiExtraTouch(const CtrTouchState *t)
 {
     if (!t->justReleased)
@@ -521,6 +612,8 @@ void UiExtraTouch(const CtrTouchState *t)
 
     if (sPage == 0)
         TouchPage1(t);
-    else
+    else if (sPage == 1)
         TouchPage2(t);
+    else
+        TouchPage3(t);
 }

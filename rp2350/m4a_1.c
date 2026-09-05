@@ -56,6 +56,23 @@ volatile u32 gM4aDbgDsPeak;    // largest |sample| out of the DirectSound mix
 volatile u32 gM4aDbgPsgPeak;   // ... out of the PSG synthesiser
 volatile u32 gM4aDbgCryPeak;   // ... out of the compressed/reverse path
 volatile u32 gM4aDbgClipped;   // samples the final clamp had to catch
+
+// Audio A/B switches, driven from the EXTRA tab.
+//
+// The two halves of this mixer cannot be told apart by ear while both are
+// playing, and no counter in the log can measure "sounds wrong". These let a
+// listener silence one half at a time on the console itself, which is the only
+// instrument available for a fault that is about quality rather than plumbing.
+//
+// Default on, so a normal boot is the real mixer.
+volatile u8 gM4aPsgOn = 1;
+volatile u8 gM4aReverbOn = 1;
+
+void Rp2350SetAudioDebug(int psgOn, int reverbOn)
+{
+    gM4aPsgOn = (u8)(psgOn ? 1 : 0);
+    gM4aReverbOn = (u8)(reverbOn ? 1 : 0);
+}
 extern void *const gMPlayJumpTableTemplate[];
 extern void ClearChain(void *x);
 extern void Clear64byte(void *x);
@@ -512,7 +529,7 @@ static void MixAllChannels(struct SoundInfo *si, s8 *dma, const s8 *tap, s32 n)
     // metallically, moves the apparent balance between instruments, and smears
     // notes together -- on 479 of Emerald's 529 songs, which are built with
     // -R50 (sound/songs/midi/midi.cfg).
-    s32 reverb = si->reverb;
+    s32 reverb = gM4aReverbOn ? si->reverb : 0;
 
     if (reverb == 0)
     {
@@ -1541,6 +1558,16 @@ static void mix_stereo_range(s16 *out, int base, int cnt)
             part = PSG_CHUNK;
 
         PsgRender(psg, part, gSoundInfo.pcmFreq);
+
+        // Silenced AFTER rendering, never by skipping the render. The PSG
+        // carries its own phase, envelope and length state, so skipping would
+        // freeze all three and make the mute change the timing of what comes
+        // back when it is switched on again.
+        if (!gM4aPsgOn)
+        {
+            for (i = 0; i < part * 2; i++)
+                psg[i] = 0;
+        }
 
         for (i = 0; i < part; i++)
         {
