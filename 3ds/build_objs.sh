@@ -144,6 +144,11 @@ assemble_sound_data data/sound_data.s "$OBJ/data_sound_data.o"
 ls sound/songs/midi/*.s | xargs -P 8 -I{} bash -c \
   "$AS -march=armv6k -mfloat-abi=hard -I sound -o \"$OBJ/song_\$(basename \"{}\" .s).o\" \"{}\""
 
+# Record which mixer went into the archive, so 3ds/Makefile reports the truth
+# rather than whatever CTR_M4A_ASM happened to be set to when make was invoked.
+# The two are separate invocations and it is easy to pass the flag to one only.
+echo "$CTR_M4A_ASM" > "$OUT/m4a_asm.flag"
+
 echo "[3/3] archiving -> $OUT/libpokeemerald.a"
 rm -f "$OUT/libpokeemerald.a"
 $AR rcs "$OUT/libpokeemerald.a" "$OBJ"/*.o

@@ -55,9 +55,19 @@ ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-reloca
 # See 3ds/host/trace.h.
 CTR_BOOT_DIAG ?= 0
 
+# Regenerated on every make, so the boot log can never report a stale build.
+# The git description is what identifies WHICH build; the timestamp is what
+# distinguishes two builds of the same tree.
+# Read back from the archive build rather than set here: build_objs.sh and this
+# Makefile are separate invocations, and a flag passed to only one of them would
+# put a binary in your hands whose boot log names the wrong mixer.
+CTR_M4A_ASM := $(shell cat $(BUILD)/m4a_asm.flag 2>/dev/null || echo 0)
+BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --always --dirty 2>/dev/null || echo nogit)
+
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections \
-            -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
+            -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) -DCTR_M4A_ASM=$(CTR_M4A_ASM) \
+            -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 LIBS     := -lcitro2d -lcitro3d -lctru -lm
@@ -114,6 +124,11 @@ $(TARGET).elf: $(OBJS) $(GAME_LIB)
 
 $(GAME_LIB):
 	@echo "error: $@ missing. Run 3ds/build_objs.sh first." >&2; exit 1
+
+# main.o carries the build stamp, which changes on every invocation, so it is
+# forced rather than left to timestamps. Rebuilding one small file is cheaper
+# than a log line that lies about which binary is running.
+.PHONY: $(BUILD)/main.o
 
 $(BUILD)/%.o: host/%.c | $(BUILD)
 	@echo "compiling ... $<"
