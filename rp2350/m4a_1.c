@@ -473,7 +473,18 @@ apply_env:
 // SoundMainRAM: clear this frame's window of both PCM halves, then mix every
 // active channel into it. Restores the SoundInfo lock (ident) on exit.
 // ----------------------------------------------------------------------------
-static void MixAllChannels(struct SoundInfo *si, s8 *dma, s32 n)
+// Which of the pcmDmaPeriod windows of pcmBuffer was written last, and the
+// window the reverb takes its delayed tap from. See SoundMain.
+static s32 sMixWindow;
+
+s32 Rp2350MixWindowOffset(void)
+{
+    struct SoundInfo *si = SOUND_INFO_PTR;
+
+    return sMixWindow * si->pcmSamplesPerVBlank;
+}
+
+static void MixAllChannels(struct SoundInfo *si, s8 *dma, const s8 *tap, s32 n)
 {
     // The frame starts from the reverb feedback rather than from silence,
     // whenever a reverb depth is set.
@@ -485,13 +496,22 @@ static void MixAllChannels(struct SoundInfo *si, s8 *dma, s32 n)
     // 479 of Emerald's 529 songs are built with -R50 (sound/songs/midi/midi.cfg).
     // So nearly all of the soundtrack asks for reverb 50 and was getting none.
     //
-    // The pass itself is the reference's (SoundMainRAM_Reverb, src/m4a_1.s):
-    // seed each sample with the scaled sum of four taps of already-rendered
-    // audio, which is a one-frame feedback delay. The reference reads two
-    // windows of its DMA ring, one frame apart; this port renders into a single
-    // window (see SoundMain), so both taps come from the one frame of history
-    // the buffer holds. The tap COUNT and therefore the feedback gain are
-    // identical, only the second tap's extra frame of delay is lost.
+    // The pass is the reference's (SoundMainRAM_Reverb, src/m4a_1.s): seed each
+    // sample with the scaled sum of FOUR taps, being left and right at two
+    // DIFFERENT positions in the DMA ring. ipatix/agbplay implements the same
+    // thing as
+    //     (rbuf[pos].l + rbuf[pos].r + rbuf[pos2].l + rbuf[pos2].r) * intensity / 4
+    // over a delay line sized (rate / fps) * numAgbBuffers -- several frames,
+    // not one.
+    //
+    // This port used to render into a single window and take BOTH taps from it,
+    // doubling the current one. The gain came out identical, which is why the
+    // comment here used to call the missing delay unimportant. It is not: two
+    // taps at different delays is a reverb, and one tap at 16.7 ms fed back is
+    // a comb filter with a notch every 60 Hz. That colours everything
+    // metallically, moves the apparent balance between instruments, and smears
+    // notes together -- on 479 of Emerald's 529 songs, which are built with
+    // -R50 (sound/songs/midi/midi.cfg).
     s32 reverb = si->reverb;
 
     if (reverb == 0)
@@ -508,7 +528,9 @@ static void MixAllChannels(struct SoundInfo *si, s8 *dma, s32 n)
         {
             s32 r = dma[i];
             s32 l = dma[i + PCM_DMA_BUF_SIZE];
-            s32 v = ((r + l + r + l) * reverb) >> 9;
+            s32 r2 = tap[i];
+            s32 l2 = tap[i + PCM_DMA_BUF_SIZE];
+            s32 v = ((r + l + r2 + l2) * reverb) >> 9;
 
             // The reference's rounding fixup, kept verbatim.
             if (v & 0x80)
@@ -542,10 +564,32 @@ void SoundMain(void)
 
     si->CgbSound();
 
-    // RP2350: single-buffer model -- always render at the start of pcmBuffer and
-    // read it straight back out (the I2S ring decouples producer/consumer), so
-    // the GBA's pcmDmaCounter multi-buffer offset is not used here.
-    MixAllChannels(si, si->pcmBuffer, si->pcmSamplesPerVBlank);
+    // Render into a rotating window of pcmBuffer, exactly as the GBA's DMA
+    // double-buffering does. There is no DMA here, so the rotation is not
+    // needed to feed anything -- it exists so the reverb above has a delay line
+    // with real history in it rather than one frame of its own output.
+    //
+    // pcmDmaPeriod is PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank (1584 / 224 = 7),
+    // so the delayed tap lands about 100 ms back, which is a reverb. Taking it
+    // from the same window made it 16.7 ms, which is a comb filter.
+    {
+        s32 n = si->pcmSamplesPerVBlank;
+        s32 period = si->pcmDmaPeriod;
+
+        if (period < 2)
+            period = 2;   // a one-window ring has no history to tap
+
+        sMixWindow = (sMixWindow + 1) % period;
+
+        // The NEXT window round the ring is the oldest data in it, which is
+        // the position the reference's `addne r7, r5, r8` picks.
+        {
+            s32 cur = sMixWindow * n;
+            s32 old = ((sMixWindow + 1) % period) * n;
+
+            MixAllChannels(si, si->pcmBuffer + cur, si->pcmBuffer + old, n);
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -1557,7 +1601,8 @@ int Rp2350MixFrameStereo16(s16 *out, int n)
     if (n <= 0)
         return 0;
 
-    mix_stereo_range(out, 0, n);
+    // The window SoundMain just rendered into, not the start of the buffer.
+    mix_stereo_range(out, Rp2350MixWindowOffset(), n);
     return n;
 }
 
@@ -1579,7 +1624,7 @@ int Rp2350MixFrame16(s16 *out, int n)
         if (cnt > PSG_CHUNK)
             cnt = PSG_CHUNK;
 
-        mix_stereo_range(st, done, cnt);
+        mix_stereo_range(st, Rp2350MixWindowOffset() + done, cnt);
 
         for (i = 0; i < cnt; i++)
             out[done + i] = (s16)(((s32)st[i * 2] + (s32)st[i * 2 + 1]) >> 1);
@@ -1610,7 +1655,7 @@ int Rp2350MixFrame(s8 *out, int n)
         if (cnt > PSG_CHUNK)
             cnt = PSG_CHUNK;
 
-        mix_stereo_range(st, done, cnt);
+        mix_stereo_range(st, Rp2350MixWindowOffset() + done, cnt);
 
         for (i = 0; i < cnt; i++)
         {
