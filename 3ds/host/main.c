@@ -442,7 +442,7 @@ int Ctr3dsIsAudioFrame(void)
 // Kept as one small array rather than three named flags because they are read
 // and written generically by the EXTRA tab's row and by the settings file, and
 // naming them individually would triple all three of those for nothing.
-static uint8_t sAudioDbg[CTR_AUDIO_DBG_COUNT] = { 1, 1, 1 };
+static uint8_t sAudioDbg[CTR_AUDIO_DBG_COUNT] = { 1, 1, 1, 1 };
 
 // Set without persisting, for CtrSettingsLoad(), the same split as
 // Ctr3dsApplyFfAudio above.
@@ -456,7 +456,8 @@ void Ctr3dsApplyAudioDbg(int which, int on)
     // STEREO is a host-side downmix and is read straight out of this array by
     // CtrAudioFrame; the other two live in the mixer and have to be pushed.
     Rp2350SetAudioDebug(sAudioDbg[CTR_AUDIO_DBG_PSG],
-                        sAudioDbg[CTR_AUDIO_DBG_REVERB]);
+                        sAudioDbg[CTR_AUDIO_DBG_REVERB],
+                        sAudioDbg[CTR_AUDIO_DBG_DS]);
 }
 
 void Ctr3dsSetAudioDbg(int which, int on)

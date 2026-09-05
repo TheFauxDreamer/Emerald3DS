@@ -43,7 +43,11 @@
 // it is the same SIZE as v5 and needs no migration at all: every v5 file has
 // zeros there, and the sense is inverted (these store MUTED, not enabled)
 // precisely so that zero keeps meaning "the normal mixer".
-#define SETTINGS_VERSION 6
+//
+// v7 added a fourth switch, which does grow the struct. It migrates as a short
+// read like v3 and v4 did, and the byte it adds means "not muted" when zero, so
+// a v6 file still loads as the normal mixer.
+#define SETTINGS_VERSION 7
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -72,12 +76,19 @@ struct CtrSettings {
     // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
     // "nothing is muted", which is the default and what that file meant.
     uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
+    // Explicit again for the same reason v5's was: four bytes at offset 17 puts
+    // the struct at 21, which the compiler would round to 24 by itself and
+    // CtrSettingsSave would then write three bytes of uninitialised stack.
+    uint8_t  pad[3];
 };
 
 // How much of the struct each older layout fills: everything up to the fields
 // the next version appended.
 #define SETTINGS_V3_SIZE  offsetof(struct CtrSettings, expAll)
 #define SETTINGS_V4_SIZE  offsetof(struct CtrSettings, ffAudio)
+// v5 and v6 are the same shape as each other: 20 bytes, differing only in what
+// the last three mean.
+#define SETTINGS_V6_SIZE  (offsetof(struct CtrSettings, audioDbgMuted) + 3)
 
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
@@ -120,12 +131,12 @@ void CtrSettingsLoad(void)
         if (n != sizeof(s))
             return;
     }
-    else if (s.version == 5)
+    else if (s.version == 6 || s.version == 5)
     {
-        // Same size as v6: only the meaning of the last three bytes changed,
-        // and they were written as zero, which is what this version wants them
-        // to mean anyway.
-        if (n != sizeof(s))
+        // Both are 20 bytes. v5 wrote its last three as padding and v6 gave
+        // them meaning, but v5 always wrote zero and zero is "not muted", so
+        // the two load identically here.
+        if (n != SETTINGS_V6_SIZE)
             return;
     }
     else if (s.version == 4)
