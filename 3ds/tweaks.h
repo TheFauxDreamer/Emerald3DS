@@ -39,15 +39,34 @@ u16 Ctr3dsMapSpecies(u16 species);
 // have to be excluded. See the comment on the definition.
 u16 Ctr3dsMapWildSpecies(u16 species);
 
-// The shiny test switch, from EXTRA page 2.
+// The shiny test switch, from the EXTRA tab's debug page.
 //
 // Returns TRUE when it has created a guaranteed-shiny `mon` and disarmed
 // itself, in which case the caller must NOT create one of its own. FALSE, and
-// nothing touched, whenever the switch is off.
+// NOTHING touched, in every other case.
 //
-// Creating rather than editing is forced by the save format; see the comment on
-// the definition. Wild encounters only, which is what the notice it exists to
-// test reacts to.
+// The contract, because it is the whole point of the feature:
+//
+//   It only ever affects the next Pokemon ENCOUNTERED IN THE WILD, and it does
+//   that by CREATING one into an empty slot. It never edits, replaces or reads
+//   back a Pokemon that already exists -- not one in the party, not one in a
+//   box, not the roamer, not a gift, not an egg. `mon` is refused outright if
+//   the slot is not empty.
+//
+//   It can never touch a TRAINER battle. The only caller is CreateWildMon,
+//   which is static to src/wild_encounter.c with no callers outside it, so no
+//   trainer path reaches this code; and Emerald builds trainer parties with
+//   OT_ID_RANDOM_NO_SHINY, which rerolls until the mon is not shiny anyway.
+//   Being in a battle at all is refused as well, since every wild encounter is
+//   generated from the overworld before the battle begins.
+//
+// Creating rather than editing is also forced by the save format: personality
+// is the substructure order and half the encryption key, so writing one into a
+// finished Pokemon makes a Bad Egg. See the comment on the definition.
+//
+// Wild encounters only, and not the Battle Pike or Battle Pyramid, whose wild
+// tables do not hold species ids at all. The switch stays armed when it
+// declines, so it fires on the next encounter that does qualify.
 bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level);
 
 // Reorder one bag pocket in place. A no-op when the sort is set to OFF.

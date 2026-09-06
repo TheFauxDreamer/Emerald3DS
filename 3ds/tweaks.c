@@ -308,6 +308,51 @@ bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level)
     if (gSaveBlock2Ptr == NULL)
         return FALSE;
 
+    // The Battle Pike and Battle Pyramid reach CreateWildMon too, and they are
+    // excluded for the same reason Ctr3dsMapWildSpecies excludes them plus one
+    // more. Their wild tables hold a 1-BASED INDEX in the species field, not a
+    // species: the mon is created with the index and the real species is
+    // written over it afterwards (src/battle_pike.c:1113,
+    // src/battle_pyramid.c:1360), so what this function would make is not the
+    // Pokemon the player ends up facing. And nothing in the Frontier can be
+    // caught, so the notice this switch exists to test would not appear anyway.
+    // Staying armed rather than firing means walking through the Pyramid does
+    // not silently spend the arm.
+    if (InBattlePike() || InBattlePyramid_())
+        return FALSE;
+
+    // A WILD encounter, never a trainer battle. Structurally true and audited:
+    // CreateWildMon is static to src/wild_encounter.c and has no callers
+    // outside it, so a trainer battle cannot reach this function at all --
+    // trainer parties are built by CreateNPCTrainerParty (src/battle_main.c),
+    // which never comes near the wild path. Emerald backs that up from the
+    // other side: those parties are created with OT_ID_RANDOM_NO_SHINY, which
+    // rerolls the trainer's ID until the mon is NOT shiny, so an opposing
+    // trainer's Pokemon cannot be shiny in this game whatever this switch does.
+    //
+    // The one thing not settled by where the code sits is WHEN it runs, so that
+    // is checked. Every wild encounter is generated in the overworld before the
+    // battle starts (gMain.inBattle is not set until src/battle_main.c:708), so
+    // being in a battle here means something other than a wild encounter is
+    // asking, and the arm is kept for a real one.
+    if (gMain.inBattle)
+        return FALSE;
+
+    // NEVER an existing Pokemon. This only ever fills a slot that is already
+    // empty, and it creates rather than edits, so no Pokemon that already
+    // exists -- in the party, in a box, a roamer, a gift, an egg -- can be
+    // reached by it. The roamer is the one worth naming: it lives in the save
+    // (gSaveBlock1Ptr->roamer) and is rebuilt by BattleSetup_StartRoamerBattle,
+    // which does not come through here at all.
+    //
+    // Checked rather than assumed. CreateWildMon calls ZeroEnemyPartyMons()
+    // immediately above this, so the slot is empty by construction today; the
+    // check is what keeps that true if this is ever called from anywhere else,
+    // because the failure it prevents is silently replacing a live Pokemon
+    // with a different one.
+    if (GetMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
+        return FALSE;
+
     // The same trainer ID CreateBoxMon would give the mon a moment from now
     // under OT_ID_PLAYER_ID (src/pokemon.c), because shininess is a property of
     // the pair and we have to know one to choose the other.
