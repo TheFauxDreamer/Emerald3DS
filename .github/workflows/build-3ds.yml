@@ -115,6 +115,42 @@ jobs:
           # Fail here, with a clear message, rather than mid-package.
           makerom -? >/dev/null 2>&1 || makerom 2>&1 | head -2
 
+      # bannertool builds the .bnr from 3ds/meta/. Like makerom it is not a
+      # devkitPro package, so it is fetched from upstream and pinned by hash --
+      # another third-party binary entering the build.
+      #
+      # Deliberately Epicpkmn11's 2022 mirror, and the reasoning matters because
+      # the obvious choices both fail. Upstream Steveice10/bannertool has been
+      # DELETED from GitHub, so its releases cannot be pinned at all. The
+      # maintained fork (carstene1ns/3ds-bannertool) publishes Linux builds
+      # needing glibc 2.39+, which is the same wall documented on makerom above
+      # ("GLIBC_2.38 not found"); building it from source instead wants cmake
+      # 3.28+, which this container also predates. This build needs only
+      # GLIBC_2.14, the same bar as makerom v0.18.3, and runs here as-is.
+      #
+      # Installed unconditionally, even before any art exists, so that the
+      # pinned URL and hash are exercised on every build. A download that only
+      # runs the day someone adds banner art is a download that rots unnoticed.
+      - name: Install bannertool
+        env:
+          BANNERTOOL_URL: https://github.com/Epicpkmn11/bannertool/releases/download/v1.2.2/bannertool.zip
+          BANNERTOOL_SHA256: e4259c08fe8944ebadd5f4b96f9a8603e5427338074cfc46323fbbc3410d51ed
+        run: |
+          curl -sSL -o /tmp/bannertool.zip "$BANNERTOOL_URL"
+          echo "$BANNERTOOL_SHA256  /tmp/bannertool.zip" | sha256sum -c -
+          # -j with an explicit member: this zip nests one directory per
+          # platform, unlike makerom's flat one. Copying that step verbatim
+          # would drop four platform dirs into /usr/local/bin and leave
+          # nothing on PATH.
+          unzip -oj /tmp/bannertool.zip 'linux-x86_64/bannertool' -d /usr/local/bin
+          chmod +x /usr/local/bin/bannertool
+          # Prove it actually loaded, rather than trusting the unzip. A glibc
+          # mismatch fails right here with a clear message instead of midway
+          # through packaging. Note this build has no --version flag: it would
+          # be read as an invalid command, so the usage banner is the check.
+          bannertool 2>&1 | head -3
+          bannertool 2>&1 | grep -q makebanner || { echo "bannertool failed to run"; exit 1; }
+
       # Produces emerald3ds.cia (install to a console) and emerald3ds.3ds
       # (CCI -- boots directly in an emulator, no install step).
       - name: Package .cia and .3ds

@@ -34,7 +34,19 @@ GAME_LIB := $(BUILD)/libpokeemerald.a
 APP_TITLE       := Pokemon Emerald 3DS
 APP_DESCRIPTION := Experience Pokemon Emerald with second-screen features!
 APP_AUTHOR      := TheFauxDreamer
-APP_ICON        := $(CTRULIB)/default_icon.png
+
+# Home-menu identity. All three assets live in meta/; see meta/README.md for the
+# specs, which the tools enforce exactly rather than rounding off.
+#
+# The icon falls back to devkitPro's default, so the build behaves as it always
+# has until meta/icon.png exists and then switches over on its own. Dropping the
+# file in is the whole action; no edit here is needed.
+APP_ICON        := $(firstword $(wildcard meta/icon.png) $(CTRULIB)/default_icon.png)
+
+# Banner inputs. BOTH are required for a banner to be built at all, because
+# bannertool refuses to make one without audio.
+APP_BANNER_IMG  := meta/banner.png
+APP_BANNER_WAV  := meta/banner.wav
 
 # rp2350/ppu.c is host-side: it includes only <stdint.h> and its own header, and
 # takes the GBA region pointers at runtime via ppu_set_memory(). That is what
@@ -95,6 +107,7 @@ LIBS     := -lcitro2d -lcitro3d -lctru -lm
 LIBDIRS  := -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
 
 MAKEROM  ?= makerom
+BANNERTOOL ?= bannertool
 RSF      := emerald3ds.rsf
 
 .PHONY: all clean cia cci 3dsx
@@ -120,19 +133,37 @@ ifneq ($(wildcard $(APP_ICON)),)
 SMDH_DEP  := $(TARGET).smdh
 ICON_FLAG := -icon $(TARGET).smdh
 
-$(TARGET).smdh: | $(BUILD)
+$(TARGET).smdh: $(APP_ICON) | $(BUILD)
 	$(TOOLS)/smdhtool --create "$(APP_TITLE)" "$(APP_DESCRIPTION)" "$(APP_AUTHOR)" $(APP_ICON) $@
 else
 SMDH_DEP  :=
 ICON_FLAG :=
 endif
 
-$(TARGET).cia: $(TARGET).elf $(SMDH_DEP) $(RSF)
-	$(MAKEROM) -f cia -target t -exefslogo -o $@ -elf $(TARGET).elf -rsf $(RSF) $(ICON_FLAG)
+# The banner is the top-screen visual and jingle shown while the title is
+# highlighted. Same optional-asset treatment as the icon above: no art, no
+# banner, but still a build.
+#
+# Both inputs are required together. bannertool errors out when given an image
+# and no audio, so guarding on only one of them would turn a missing wav into a
+# hard build failure instead of a degrade.
+ifneq ($(and $(wildcard $(APP_BANNER_IMG)),$(wildcard $(APP_BANNER_WAV))),)
+BANNER_DEP  := $(TARGET).bnr
+BANNER_FLAG := -banner $(TARGET).bnr
+
+$(TARGET).bnr: $(APP_BANNER_IMG) $(APP_BANNER_WAV) | $(BUILD)
+	$(BANNERTOOL) makebanner -i $(APP_BANNER_IMG) -a $(APP_BANNER_WAV) -o $@
+else
+BANNER_DEP  :=
+BANNER_FLAG :=
+endif
+
+$(TARGET).cia: $(TARGET).elf $(SMDH_DEP) $(BANNER_DEP) $(RSF)
+	$(MAKEROM) -f cia -target t -exefslogo -o $@ -elf $(TARGET).elf -rsf $(RSF) $(ICON_FLAG) $(BANNER_FLAG)
 	@echo "built ... $@"
 
-$(TARGET).3ds: $(TARGET).elf $(SMDH_DEP) $(RSF)
-	$(MAKEROM) -f cci -target t -exefslogo -o $@ -elf $(TARGET).elf -rsf $(RSF) $(ICON_FLAG)
+$(TARGET).3ds: $(TARGET).elf $(SMDH_DEP) $(BANNER_DEP) $(RSF)
+	$(MAKEROM) -f cci -target t -exefslogo -o $@ -elf $(TARGET).elf -rsf $(RSF) $(ICON_FLAG) $(BANNER_FLAG)
 	@echo "built ... $@"
 
 # Kept only so the failure stays reproducible; see the comment on `all`.
@@ -176,4 +207,4 @@ $(BUILD):
 
 clean:
 	@rm -rf $(BUILD)/*.o $(BUILD)/*.d $(TARGET).elf $(TARGET).3dsx $(TARGET).3ds \
-	        $(TARGET).cia $(TARGET).smdh $(BUILD)/$(TARGET).map
+	        $(TARGET).cia $(TARGET).smdh $(TARGET).bnr $(BUILD)/$(TARGET).map
