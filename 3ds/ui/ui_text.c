@@ -35,7 +35,16 @@ static u32 GlyphPixel(const u16 *glyph, int x, int y)
 
 // u16, not u8: CHAR_EXTRA_SYMBOL selects glyph `operand | 0x100` out of the same
 // tables (src/text.c:1455). latin_normal.png is 256x512, so all 512 slots exist.
-static void BlitGlyph(int x, int y, u16 glyphId, u16 fg, u16 shadow)
+// `scale` turns one source pixel into a scale x scale block. Nearest-neighbour
+// rather than a second font, because there is no larger Latin font in the ROM
+// to reach for: the game only ever needed one size on a 240px screen.
+//
+// The loop is nested so the destination row pointer is still hoisted once per
+// DESTINATION row and GlyphPixel is still called once per SOURCE pixel, which
+// is what keeps the scale-1 path -- every other caller in the UI -- costing
+// what it did before. Bounds are tested per destination pixel, so a string may
+// safely run off any edge.
+static void BlitGlyph(int x, int y, u16 glyphId, u16 fg, u16 shadow, int scale)
 {
     const u16 *glyph = gFontNormalLatinGlyphs + (0x20 * glyphId);
     int width = gFontNormalLatinGlyphWidths[glyphId];
@@ -45,23 +54,36 @@ static void BlitGlyph(int x, int y, u16 glyphId, u16 fg, u16 shadow)
 
     for (int row = 0; row < UI_GLYPH_H; row++)
     {
-        int py = y + row;
-        if (py < 0 || py >= UI_H)
-            continue;
-
-        u16 *dst = &UiFb()[py * UI_W];
-
-        for (int col = 0; col < width; col++)
+        for (int sy = 0; sy < scale; sy++)
         {
-            int px = x + col;
-            if (px < 0 || px >= UI_W)
+            int py = y + row * scale + sy;
+            u16 *dst;
+
+            if (py < 0 || py >= UI_H)
                 continue;
 
-            u32 v = GlyphPixel(glyph, col, row);
-            if (v == 0)
-                continue;                       // background: leave it alone
+            dst = &UiFb()[py * UI_W];
 
-            dst[px] = (v == 2) ? shadow : fg;
+            for (int col = 0; col < width; col++)
+            {
+                u32 v = GlyphPixel(glyph, col, row);
+                u16 colour;
+
+                if (v == 0)
+                    continue;                   // background: leave it alone
+
+                colour = (v == 2) ? shadow : fg;
+
+                for (int sx = 0; sx < scale; sx++)
+                {
+                    int px = x + col * scale + sx;
+
+                    if (px < 0 || px >= UI_W)
+                        continue;
+
+                    dst[px] = colour;
+                }
+            }
         }
     }
 }
@@ -93,7 +115,11 @@ static bool8 Truncated(const u8 *str)
 // code away from doing the same.
 //
 // UiTextWidth below MUST stay in step with this: centring compares the two.
-int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
+//
+// Every pen movement scales with the glyphs -- the three control codes that
+// move without printing, and the newline's line height -- so a scaled string
+// lays out as the same shape, just larger.
+static int DrawText(int x, int y, const u8 *str, u16 fg, u16 shadow, int scale)
 {
     int startX = x;
     int guard = UI_TEXT_MAX;
@@ -117,9 +143,9 @@ int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
 
             switch (code)
             {
-            case EXT_CTRL_CODE_CLEAR:    x += arg;                            break;
-            case EXT_CTRL_CODE_SKIP:     x  = startX + arg;                   break;
-            case EXT_CTRL_CODE_CLEAR_TO: if (startX + arg > x) x = startX + arg; break;
+            case EXT_CTRL_CODE_CLEAR:    x += arg * scale;                    break;
+            case EXT_CTRL_CODE_SKIP:     x  = startX + arg * scale;           break;
+            case EXT_CTRL_CODE_CLEAR_TO: if (startX + arg * scale > x) x = startX + arg * scale; break;
             default: break;   // colours, pauses, sounds: nothing to draw here
             }
 
@@ -139,8 +165,8 @@ int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
             {
                 u16 glyph = (u16)(str[1] | 0x100);
 
-                BlitGlyph(x, y, glyph, fg, shadow);
-                x += gFontNormalLatinGlyphWidths[glyph];
+                BlitGlyph(x, y, glyph, fg, shadow, scale);
+                x += gFontNormalLatinGlyphWidths[glyph] * scale;
             }
 
             str += 2;
@@ -150,17 +176,32 @@ int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
         if (*str == CHAR_NEWLINE)
         {
             x = startX;
-            y += UI_LINE_H;
+            y += UI_LINE_H * scale;
             str++;
             continue;
         }
 
-        BlitGlyph(x, y, *str, fg, shadow);
-        x += gFontNormalLatinGlyphWidths[*str];
+        BlitGlyph(x, y, *str, fg, shadow, scale);
+        x += gFontNormalLatinGlyphWidths[*str] * scale;
         str++;
     }
 
     return x - startX;
+}
+
+int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow)
+{
+    return DrawText(x, y, str, fg, shadow, 1);
+}
+
+int UiTextBig(int x, int y, const u8 *str, u16 fg, u16 shadow)
+{
+    return DrawText(x, y, str, fg, shadow, UI_GLYPH_BIG_SCALE);
+}
+
+int UiTextBigWidth(const u8 *str)
+{
+    return UiTextWidth(str) * UI_GLYPH_BIG_SCALE;
 }
 
 // Mirrors UiText, and mirrors GetStringWidth's handling of the three pen codes

@@ -140,17 +140,58 @@ static void EnsureTabVisible(void)
 // first second of a battle whose transition the player may not have been
 // watching, and neither of them survives being missed.
 //
-// It is an OVERLAY, not a band the tabs make room for. Every tab's layout is
-// hand-fitted to a 192px content area, which 3ds/UI_SKIN_PLAN.md declares
-// load-bearing, so reserving space would mean re-fitting five tabs for a state
-// that occurs once in 8192 encounters. Covering the top 24px for the length of
-// one battle is the cheaper trade, and one tap dismisses it.
-#define NOTICE_H  24
+// It is a MODAL PANEL, centred, not a strip along an edge. A thin band at the
+// top was the first attempt and it was easy to miss entirely: it sat where the
+// eye is not, it was the height of one line, and on the PARTY tab it looked
+// like part of the cheat tag strip. This takes the middle of the screen, states
+// the species at double size, and has to be dismissed on purpose.
+//
+// Nothing is reserved for it. Every tab's layout is hand-fitted to a 192px
+// content area, which 3ds/UI_SKIN_PLAN.md declares load bearing, so the panel
+// is drawn over whatever is behind it and takes every touch inside its rect.
+// UiWindowFrame's centre tiles are opaque, so it genuinely covers rather than
+// floating over a readable background.
+//
+// 30x14 tiles is 240x112, which centres exactly in 320x192 on whole 8px
+// boundaries -- (320-240)/2 and (192-112)/2 are both 40 -- and UiWindowFrame
+// takes tiles, so that is not a coincidence to be broken casually.
+#define NOTICE_TX     5
+#define NOTICE_TY     5
+#define NOTICE_TW     30
+#define NOTICE_TH     14
+
+#define NOTICE_X      (NOTICE_TX * 8)     // 40
+#define NOTICE_Y      (NOTICE_TY * 8)     // 40
+#define NOTICE_W      (NOTICE_TW * 8)     // 240
+#define NOTICE_H      (NOTICE_TH * 8)     // 112
+
+// The interior, inside the frame's 8px border: x 48..272, y 48..144.
+#define NOTICE_IN_X   (NOTICE_X + 8)
+#define NOTICE_IN_W   (NOTICE_W - 16)
+#define NOTICE_IN_Y   (NOTICE_Y + 8)
+
+// Three rows. The headline pairs the mon's icon with SHINY! at double size, the
+// species gets a line of its own also at double size, and the dismiss button
+// closes it. 52+30, 84+30, 118+22 ends at 140 inside the 144px floor.
+#define NOTICE_HEAD_Y  (NOTICE_IN_Y + 4)                  // 52
+#define NOTICE_NAME_Y  (NOTICE_HEAD_Y + UI_GLYPH_BIG_H + 2)   // 84
+#define NOTICE_ICON_W  32
+#define NOTICE_ICON_GAP 10
+
+#define NOTICE_BTN_W  100
+#define NOTICE_BTN_H  22
+#define NOTICE_BTN_X  (NOTICE_IN_X + (NOTICE_IN_W - NOTICE_BTN_W) / 2)
+#define NOTICE_BTN_Y  (NOTICE_NAME_Y + UI_GLYPH_BIG_H + 4)    // 118
 
 // Which encounter the player has already dismissed the notice for. Keyed on the
 // mon rather than on a bare flag, so the next shiny still gets its own notice.
 // The separate "is set" flag is not redundant: a personality of 0 is legal, and
 // without it that mon's notice could never be shown.
+//
+// Nothing has to clear this when the battle ends. UiShinyOpponent goes FALSE on
+// gBattleOutcome, so the panel dismisses itself on a catch or a faint or a run
+// whether or not the player ever touched it, and the next encounter carries a
+// different identity anyway.
 static u32   sNoticeDismissed;
 static bool8 sNoticeDismissedSet;
 
@@ -167,35 +208,45 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
     return !(sNoticeDismissedSet && id == sNoticeDismissed);
 }
 
-static void DrawNotice(u16 species)
+static void DrawNotice(u16 species, u32 personality)
 {
     u8  label[16];
-    int textY = (NOTICE_H - UI_GLYPH_H) / 2;
     int w, x;
 
-    // Solid ground and a doubled border, so it reads as something sitting ON
-    // the view rather than as the view having gone wrong. Fixed colours rather
-    // than the window-frame theme: this is our chrome, and it has to carry
-    // equally over all 20 of Emerald's borders.
-    UiFillRect(0, 0, CTR_BOTTOM_WIDTH, NOTICE_H, UI_COL_HP_BACK);
-    UiRect(0, 0, CTR_BOTTOM_WIDTH, NOTICE_H, UI_COL_ACCENT);
-    UiRect(1, 1, CTR_BOTTOM_WIDTH - 2, NOTICE_H - 2, UI_COL_ACCENT);
+    UiWindowFrame(NOTICE_TX, NOTICE_TY, NOTICE_TW, NOTICE_TH);
 
-    // The word and the species centred as one block. Worst case is 6 characters
-    // plus the longest species name, about 100px of a 320px bar, so the dismiss
-    // hint at the right-hand end is never reached.
+    // Icon and headline as one centred block, so the pair stays balanced rather
+    // than the icon hanging off a fixed left margin.
+    //
+    // The icon is the party icon, not the Pokedex front sprite. Neither has a
+    // shiny palette in Gen 3 -- the shiny colours are a battle-sprite palette
+    // the dex art never loads -- and a 64x64 portrait in ordinary colours on a
+    // panel shouting SHINY would read as a contradiction. An icon is small
+    // enough to be taken as a label for the species rather than a picture of
+    // this individual.
     UiAscii(label, "SHINY!", sizeof(label));
-    w = UiTextWidth(label) + 6 + UiTextWidth(gSpeciesNames[species]);
-    x = (CTR_BOTTOM_WIDTH - w) / 2;
+    w = NOTICE_ICON_W + NOTICE_ICON_GAP + UiTextBigWidth(label);
+    x = NOTICE_IN_X + (NOTICE_IN_W - w) / 2;
 
-    x += UiText(x, textY, label, UI_COL_ACCENT, UI_COL_SHADOW);
-    UiText(x + 6, textY, gSpeciesNames[species], UI_COL_TEXT, UI_COL_SHADOW);
+    UiMonIcon(x, NOTICE_HEAD_Y + (UI_GLYPH_BIG_H - NOTICE_ICON_W) / 2,
+              species, personality);
+    UiTextBig(x + NOTICE_ICON_W + NOTICE_ICON_GAP, NOTICE_HEAD_Y, label,
+              UI_COL_ACCENT, UiThemeShadow());
 
-    // Said rather than left to be discovered: nothing else on this screen is
-    // dismissed by tapping it, so there is no habit to fall back on.
-    UiTextRight(CTR_BOTTOM_WIDTH - 10, textY,
-                UiAscii(label, "TAP TO HIDE", sizeof(label)),
-                UI_COL_DIM, UI_COL_SHADOW);
+    // The species on its own line, also doubled: it is the half of the message
+    // the player actually has to act on.
+    UiTextBig(NOTICE_IN_X + (NOTICE_IN_W - UiTextBigWidth(gSpeciesNames[species])) / 2,
+              NOTICE_NAME_Y, gSpeciesNames[species],
+              UiThemeText(), UiThemeShadow());
+
+    // A real control rather than "tap anywhere". Only this rect dismisses, so
+    // a stray touch on a panel the player is still reading does not throw it
+    // away; the rest of the panel absorbs touches without acting on them.
+    UiRect(NOTICE_BTN_X, NOTICE_BTN_Y, NOTICE_BTN_W, NOTICE_BTN_H, UI_COL_DIM);
+    UiAscii(label, "DISMISS", sizeof(label));
+    UiText(NOTICE_BTN_X + (NOTICE_BTN_W - UiTextWidth(label)) / 2,
+           NOTICE_BTN_Y + (NOTICE_BTN_H - UI_GLYPH_H) / 2,
+           label, UI_COL_ACCENT, UiThemeShadow());
 }
 
 // ------------------------------------------------------------- lifecycle ---
@@ -325,6 +376,7 @@ static void Redraw(void)
     u8 vis[UI_TAB_COUNT];
     u32 n;
     u16 noticeSpecies = SPECIES_NONE;
+    u32 noticePersonality = 0;
 
     // Before the game proper is running there is nothing meaningful to show,
     // and a menu floating under the title screen looks broken.
@@ -352,8 +404,8 @@ static void Redraw(void)
 
     // Last, and over the top of whichever tab just drew: it is an alert, and an
     // alert a view can paint over is not one.
-    if (NoticeActive(&noticeSpecies, NULL))
-        DrawNotice(noticeSpecies);
+    if (NoticeActive(&noticeSpecies, &noticePersonality))
+        DrawNotice(noticeSpecies, noticePersonality);
 
     DrawTabBar(vis, n);
 
@@ -383,13 +435,21 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     if (!sInGame)
         touch = NULL;
 
-    // The notice is an overlay, so it takes every touch in its band before the
+    // The panel is modal, so it takes every touch inside its rect before the
     // tabs see it -- a press that never becomes a release included, or a drag
-    // begun on the notice would carry on into whatever it is covering.
-    if (touch != NULL && touch->y < NOTICE_H
+    // begun on the panel would carry on into whatever it is covering. Only the
+    // DISMISS button does anything; the rest of the panel absorbs and ignores.
+    //
+    // The tab bar is deliberately still live. The panel sits entirely in the
+    // content area, so a player who wants to check their party before throwing
+    // a ball can still switch tabs, and the panel follows them there.
+    if (touch != NULL
+        && UiHit(touch, NOTICE_X, NOTICE_Y, NOTICE_W, NOTICE_H)
         && NoticeActive(NULL, &noticeIdentity))
     {
-        if (touch->justReleased)
+        if (touch->justReleased
+            && UiHit(touch, NOTICE_BTN_X, NOTICE_BTN_Y,
+                     NOTICE_BTN_W, NOTICE_BTN_H))
         {
             sNoticeDismissed = noticeIdentity;
             sNoticeDismissedSet = TRUE;

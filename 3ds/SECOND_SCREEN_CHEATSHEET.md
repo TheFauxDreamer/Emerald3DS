@@ -72,10 +72,10 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 447 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 507 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 609 / 114 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 319 / 42 | Emerald font rendering, numbers, ASCII to game encoding |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
 | [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 654 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
@@ -106,18 +106,38 @@ tab bar is painted **after** it returns, so it must not draw below
 
 ### Overlays
 
-An overlay is drawn over whichever tab just painted, and claims its band of
+An overlay is drawn over whichever tab just painted, and claims its rect of
 touches before any tab sees them. The shiny notice
-([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the pattern: a 24px alert
-band at the top of the content area, dismissed by a tap, keyed on the encounter
+([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the pattern: a 240x112 modal
+panel centred in the content area, with a DISMISS button, keyed on the encounter
 rather than on a bare flag so the next shiny still gets its own notice.
 
 It is an overlay rather than a band the tabs make room for because every tab's
 layout is hand-fitted to a 192px content area, which `UI_SKIN_PLAN.md` declares
 load bearing. Reserving space would mean re-fitting five tabs for a state that
-occurs once in 8192 encounters. Follow this shape for anything else that has to
-interrupt: paint last, take touches first, and fold a "is it up" bit into
-`UiStateHash`.
+occurs once in 8192 encounters. `UiWindowFrame`'s centre tiles are opaque, so a
+panel genuinely covers what is behind it rather than floating over readable
+content.
+
+Four rules, all of them learned the hard way on this one:
+
+1. **Paint last**, after the tab's `Draw` and before the tab bar.
+2. **Take touches first**, on the whole rect, `justReleased` or not — otherwise
+   a press that never becomes a release, or a drag begun on the panel, carries
+   through into what it is covering. Absorb everything; act only on the control.
+3. **Give it a real control.** "Tap anywhere to dismiss" throws the panel away
+   under a stray touch while the player is still reading it.
+4. **Let it expire on its own.** The shiny panel closes itself on
+   `gBattleOutcome`, so a catch, a faint, a flee or a run clears it whether or
+   not anyone pressed anything. An overlay that can only be dismissed by hand is
+   an overlay that gets left up.
+
+And fold an "is it up" bit into `UiStateHash`, or it will not appear until
+something else happens to dirty the screen.
+
+**Do not size a panel in pixels and hope.** `UiWindowFrame` takes 8px TILES, so
+pick tile counts that centre exactly: 30x14 tiles is 240x112, and (320-240)/2
+and (192-112)/2 are both 40.
 
 ### Adding a tab
 
@@ -129,8 +149,8 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
 3. Add a row to `sTabs[]` at [bottom_screen.c:57](ui/bottom_screen.c#L57):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:344](ui/bottom_screen.c#L344))
-   and to the one in `CtrBottomUpdate()` ([:416](ui/bottom_screen.c#L416)).
+4. Add a `case` to the `switch` in `Redraw()` ([:396](ui/bottom_screen.c#L396))
+   and to the one in `CtrBottomUpdate()` ([:476](ui/bottom_screen.c#L476)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
    section 12.**
@@ -154,13 +174,15 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:375](ui/bottom_screen.c#L375)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:427](ui/bottom_screen.c#L427)),
 in order:
 
-- An **active overlay** claims its whole band first. The shiny notice takes
-  every touch with `y < NOTICE_H` (24px), release or not, so a press that never
-  becomes a release, or a drag begun on the notice, cannot carry through into
-  the tab underneath.
+- An **active overlay** claims its whole rect first. The shiny panel takes every
+  touch inside its 240x112 centre rect, release or not, so a press that never
+  becomes a release, or a drag begun on the panel, cannot carry through into the
+  tab underneath. Only its DISMISS button acts; the rest absorbs and ignores.
+  The tab bar is deliberately left live, so the panel can be carried between
+  tabs rather than trapping the player on one.
 - `justReleased && y >= UI_CONTENT_H` switches tab. The tab bar is handled by
   the shell, tabs never see it.
 - `y < UI_CONTENT_H` calls the active tab's `Touch`, **on every frame**, not only
@@ -236,7 +258,7 @@ Do not conflate them. Two ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:220](ui/bottom_screen.c#L220)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:271](ui/bottom_screen.c#L271)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -361,6 +383,13 @@ whole 256-entry BG palette, not a 16-colour bank.
 ---
 
 ## 9. Text
+
+**There is one font and one size.** `gFontNormalLatinGlyphs` at `UI_GLYPH_H` 15
+is all the ROM has — the game never needed another on a 240px screen. For a
+headline that must be read rather than looked for, `UiTextBig` scales those same
+glyphs 2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four
+times the fill per glyph, so it is not a general-purpose call. Pair it with
+`UiTextBigWidth` for centring, and `UI_GLYPH_BIG_H` (30) for row pitch.
 
 **Strings are game-encoded (`charmap.txt`), EOS-terminated, not ASCII.**
 `GetSpeciesName()`, `GetItemName()`, `gMoveNames[]`, `gRegionMapEntries[].name`
