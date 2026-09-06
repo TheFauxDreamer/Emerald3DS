@@ -112,7 +112,7 @@ static void sample_touch(CtrTouchState *t)
 }
 
 // Callable from game-side code, which must never include <3ds.h> (the
-// two-worlds rule in 3ds/README.md). Plain `const char *` and `unsigned int`
+// two-worlds rule in 3ds/bridge.h). Plain `const char *` and `unsigned int`
 // cross the seam safely -- no u8/u16/u32 and no string.h in the signature.
 //
 // NOT behind CTR_BOOT_DIAG, unlike CtrTraceMsg below. A null function pointer

@@ -1,4 +1,4 @@
-// Type matchup readout. See matchup.h.
+// Readouts about the opposing mon. See matchup.h.
 //
 // The chart walk mirrors the authoritative one in src/battle_script_commands.c
 // (around line 1386), NOT the simplified copy in battle_ai_switch_items.c.
@@ -140,4 +140,71 @@ u32 UiMatchupOpponentKey(void)
     return (u32)gBattleMons[foe].species
          | ((u32)gBattleMons[foe].types[0] << 16)
          | ((u32)gBattleMons[foe].types[1] << 24);
+}
+
+// ----------------------------------------------------------- shiny check ---
+//
+// Battles the player cannot throw a ball in. BATTLE_TYPE_TRAINER covers far
+// more than it looks: the whole Battle Frontier, the Battle Tower, secret bases
+// and Trainer Hill all set it, so it is one test rather than seven. The rest
+// are the battles that are wild but still not yours to catch in -- Wally's
+// tutorial catch, Birch's bag on Route 101, and the replay paths, where the
+// player is not the one choosing actions at all.
+//
+// The Safari Zone is deliberately NOT here. Safari Balls are balls.
+#define UNCATCHABLE_BATTLE (BATTLE_TYPE_TRAINER          \
+                          | BATTLE_TYPE_LINK             \
+                          | BATTLE_TYPE_RECORDED         \
+                          | BATTLE_TYPE_RECORDED_LINK    \
+                          | BATTLE_TYPE_EREADER_TRAINER  \
+                          | BATTLE_TYPE_WALLY_TUTORIAL   \
+                          | BATTLE_TYPE_FIRST_BATTLE)
+
+bool8 UiShinyOpponent(u16 *species, u32 *identity)
+{
+    struct Pokemon *foe = &gEnemyParty[0];
+    u32 otId, personality;
+
+    if (!gMain.inBattle)
+        return FALSE;
+
+    if (gBattleTypeFlags & UNCATCHABLE_BATTLE)
+        return FALSE;
+
+    // gEnemyParty, not gBattleMons, and the difference is not cosmetic.
+    // BattleStartClearSetData() does not zero gBattleMons, so between
+    // gMain.inBattle going true (src/battle_main.c:708) and the intro's
+    // BattleIntroGetMonsData completing, that array still holds the PREVIOUS
+    // battle's mons. A stale type matchup during the transition is a shrug; a
+    // shiny alert for a mon that is no longer there is not. gEnemyParty is
+    // written before inBattle is set in both cases -- CreateWildMon during the
+    // encounter, CreateNPCTrainerParty on the line above it -- so it is correct
+    // from the first frame of the battle.
+    //
+    // Slot 0 is the whole answer here because Emerald has no wild double
+    // battles: every battle with a second opponent is a trainer battle, and
+    // those returned above.
+    if (!GetMonData(foe, MON_DATA_SANITY_HAS_SPECIES))
+        return FALSE;
+
+    // These two sit BEFORE MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h:8-19),
+    // so they answer from the plaintext header and cost no decryption. The
+    // shell polls this every frame, so that matters; the species read below
+    // does decrypt, which is why it is last and only reached for a real shiny.
+    otId        = GetMonData(foe, MON_DATA_OT_ID);
+    personality = GetMonData(foe, MON_DATA_PERSONALITY);
+
+    if (!IsShinyOtIdPersonality(otId, personality))
+        return FALSE;
+
+    if (species != NULL)
+        *species = (u16)GetMonData(foe, MON_DATA_SPECIES);
+
+    // The personality alone, which is rerolled for every wild mon and is what
+    // the shininess above was computed from. Two encounters sharing one is as
+    // likely as two sharing a shiny, which is to say it does not happen.
+    if (identity != NULL)
+        *identity = personality;
+
+    return TRUE;
 }

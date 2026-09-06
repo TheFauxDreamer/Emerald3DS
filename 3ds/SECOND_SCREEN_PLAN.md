@@ -1,7 +1,16 @@
 # Second-screen feature expansion
 
-Design record. Nothing here is implemented yet. Sits alongside `3ds/UI_SKIN_PLAN.md`
-(which reskins what already exists) and `3ds/ROADMAP.md`.
+Design record. Sits alongside `3ds/UI_SKIN_PLAN.md` (which reskins what already
+exists) and `3ds/ROADMAP.md`.
+
+**Status.** The structural work in Parts 2 and 3 is not started; assume steps 0
+to 9 are all outstanding. One catalogue item has shipped ahead of it, out of
+order and without the view stack: **#6, the EV/IV and stat spread**, as a panel
+in the existing party detail view. A shiny-encounter notice shipped with it,
+which was not on this list at all and became the first example of the overlay
+pattern now documented in `SECOND_SCREEN_CHEATSHEET.md`. Neither needed the
+refactor, which is the point worth carrying forward: the Tier 1 items that fit
+inside a view that already exists do not have to wait for step 0.
 
 ## Context
 
@@ -36,7 +45,7 @@ Origin column names where the feature comes from. Everything in Tier 1 is a pure
 | 3 | **Trainer card / records.** Badges, play time, money, dex counts, and the game stats Emerald tracks but never shows (steps taken, battles won, Pokémon caught, times saved). | Every gen; **B2W2 Medals** is the extended version | `gSaveBlock2Ptr` fields (`include/global.h:537-551`), `GetMoney` (`include/money.h:4`), `GetGameStat` (`include/overworld.h:63`), `FlagGet(FLAG_BADGE01_GET + n)`. Money, coins and game stats are XOR-encrypted: the accessors are not optional. |
 | 4 | **Berry tracker.** Every planted tree: berry, growth stage, minutes to next stage, watered flags, expected yield. | DPPt **Pokétch Berry Searcher** | `gSaveBlock1Ptr->berryTrees` (`include/global.h:1054`), `GetBerryInfo`, `GetStageByBerryTreeId`. Timer only advances on `DoTimeBasedEvents`, so display it as "as of last update", and never call `BerryTreeTimeUpdate` (it mutates save state). |
 | 5 | **Day-care checker.** The two deposited mons, level gained, and whether an egg is waiting. | DPPt **Pokétch app #7** | `gSaveBlock1Ptr->daycare` (`include/global.h:1090`, `include/daycare.h`). |
-| 6 | **EV / IV / stat spread.** Six bars per mon, EV total against the 510 cap, IVs, and the nature's plus/minus stats marked. | XY **Super Training** chart, Gen 7 **judge** | `MON_DATA_*_EV` / `*_IV` (`include/pokemon.h:34-52`), `GetMonEVCount` (`:495`), `gNatureStatTable` (`:392`). |
+| 6 | ✅ **SHIPPED.** **EV / IV / stat spread.** Six bars per mon, EV total against the 510 cap, IVs, and the nature's plus/minus stats marked. | XY **Super Training** chart, Gen 7 **judge** | `MON_DATA_*_EV` / `*_IV` (`include/pokemon.h:34-52`), `GetMonEVCount` (`:495`), `gNatureStatTable` (`:392`). Built as a left-column tenant of the party detail view (`3ds/ui/tab_party.c:516`) rather than as a pushed view: four columns (computed stat, base, IV, EV) over six rows, EV total against the 510 cap, perfect IVs and 252+ EVs marked, nature signed on the row label. Bars were dropped for numbers -- an EV trainer reads exact values, and 176px of column does not carry six bars and their numbers both. |
 | 7 | **Learnset and evolution preview.** Next moves by level, full level-up list, what it evolves into and how, TM/HM compatibility. | Gen 8 summary screen, Gen 6 **move reminder** | `gLevelUpLearnsets` (`include/pokemon.h:385`), `gEvolutionTable` (declare locally, as `src/daycare.c:31` does), `GetEvolutionTargetSpecies` (`:478`), `CanMonLearnTMHM` (`:502`). |
 | 8 | **Type matchup chart.** Attacking type against all 17 defending types, paged by attacking type. | DPPt **Pokétch Move Tester** | `gTypeEffectiveness` (`include/battle_main.h:85`). Reuse `TypeMultiplier()` from `3ds/ui/matchup.c:36`, which already handles the `TYPE_FORESIGHT` mid-table marker correctly. |
 | 9 | **Clock and counters.** Wall clock, play time, steps, Repel steps remaining, egg-hatch step estimate. | DPPt **Pokétch** digital watch + pedometer | `Ctr3dsGetClock()` (`3ds/bridge.h:240`, side-effect free; prefer it over `RtcCalcLocalTime`, which is part of the game's time-event chain), `VAR_REPEL_STEP_COUNT`, `GetGameStat(GAME_STAT_STEPS)`. |
@@ -127,7 +136,7 @@ Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots
 
 **Gap worth naming.** None of the three chosen first features stresses `UiGrid` or a long scrolling list hard. HOME's 4x3 launcher (step 3) is therefore the only `UiGrid` proving ground before several views pile on it, and the read-only PC box viewer (#2) is the real structural stress test: 14-row list, 30-cell grid, pushed detail, windowed plaintext key, and long player-authored box names through `UiTextClipped`. Recommend scheduling it immediately after step 6 rather than leaving it until the widget layer has calcified around easier callers.
 
-**Later, in rough value order:** PC boxes read-only (#2), EV/IV and stat spread (#6), learnset and evolution preview (#7), type matchup chart (#8), clock and counters (#9), Dig/Escape Rope on the map tab (#14), then Tier 3.
+**Later, in rough value order:** PC boxes read-only (#2), learnset and evolution preview (#7), type matchup chart (#8), clock and counters (#9), Dig/Escape Rope on the map tab (#14), then Tier 3.
 
 ### Deliberately not built yet
 

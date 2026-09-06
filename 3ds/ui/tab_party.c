@@ -1,5 +1,9 @@
 // PARTY tab: a 2x3 grid of the player's team, and a detail view per mon.
 //
+// The detail view's left column has three tenants and only ever one at a time:
+// the computed stats plus the ability/nature/item block, the tapped move's
+// details, or the IV/EV spread. The moves list on the right survives all three.
+//
 // Everything shown here comes from the game's own accessors -- GetMonData,
 // GetMonAbility, gMoveNames, gAbilityNames -- so it cannot drift out of sync
 // with what Emerald's own party and summary screens report. Nothing in this
@@ -14,6 +18,7 @@
 #include "party_menu.h"         // GetMonAilment
 #include "pokemon_summary_screen.h"
 #include "constants/species.h"
+#include "constants/pokemon.h"
 #include "constants/party_menu.h"
 
 #include "../bridge.h"
@@ -103,7 +108,38 @@
 #define BACK_W          38
 #define BACK_H          22
 
+// The IV/EV toggle, on the level line and clear of everything already there:
+// the longest species name ends near x=170 and BACK starts at 274, so 196..252
+// has margin on both sides. y=26..48 sits under BACK and above the HP row at 52.
+#define SPREAD_X        196
+#define SPREAD_Y        26
+#define SPREAD_W        56
+#define SPREAD_H        22
+
+// The spread table, in the same left column the move panel uses, so its right
+// edge is MOVEINFO's. Seven 16px rows -- one header, six stats -- fill y=72..183
+// inside a 184px floor, which is what fixes the row count: there is no eighth
+// row for a totals line, so the EV total goes in the header's empty label cell.
+//
+// Columns are right-aligned, because these are numbers read down a column and a
+// three-digit value beside a one-digit one has to line up. The four edges below
+// leave at least 14px of gutter between adjacent columns at their widest --
+// "STAT" is 24px, a three-digit number 18px.
+#define SPREAD_ROW_H    16
+#define SPREAD_LABEL_X  MOVEINFO_X            // 12
+#define SPREAD_STAT_R   88
+#define SPREAD_BASE_R   126
+#define SPREAD_IV_R     156
+#define SPREAD_EV_R     188
+
 static bool8 sDetailOpen;
+
+// Whether the left column is showing the IV/EV spread rather than the computed
+// stats. Deliberately NOT reset with sMoveSel below: that one names a specific
+// mon's move and goes stale the moment the selection moves, while this is a
+// preference about the column itself. Someone comparing spreads across the team
+// wants it to stay put.
+static bool8 sSpreadOpen;
 
 // Which move the detail view is describing, or -1 for none, in which case the
 // left column shows the stats and the ability/nature/item block as before.
@@ -471,6 +507,124 @@ static void DrawMoveInfo(struct Pokemon *mon, u8 i)
            UiThemeText(), UiThemeShadow());
 }
 
+// The IV/EV spread, in the space the stats block otherwise occupies.
+//
+// Everything Emerald computes a stat from but never shows: the species' base
+// value, the mon's IV, and the EVs it has trained. Read-only, and read through
+// the same accessors CalculateMonStats uses, so the four columns multiply out
+// to the STAT column beside them.
+static void DrawSpread(struct Pokemon *mon, u16 species)
+{
+    // Row order is the summary screen's -- HP, ATK, DEF, SPA, SPD, SPE -- and
+    // the parallel tables below all follow it. gNatureStatTable does NOT: its
+    // columns run ATK, DEF, SPEED, SPATK, SPDEF (src/pokemon.c:1370), so the
+    // last table remaps rather than indexing straight in. -1 is HP, which no
+    // nature has ever touched.
+    static const char *const names[6] = { "HP", "ATK", "DEF", "SPA", "SPD", "SPE" };
+    static const u8 statField[6] = {
+        MON_DATA_MAX_HP, MON_DATA_ATK, MON_DATA_DEF,
+        MON_DATA_SPATK, MON_DATA_SPDEF, MON_DATA_SPEED,
+    };
+    static const u8 ivField[6] = {
+        MON_DATA_HP_IV, MON_DATA_ATK_IV, MON_DATA_DEF_IV,
+        MON_DATA_SPATK_IV, MON_DATA_SPDEF_IV, MON_DATA_SPEED_IV,
+    };
+    static const u8 evField[6] = {
+        MON_DATA_HP_EV, MON_DATA_ATK_EV, MON_DATA_DEF_EV,
+        MON_DATA_SPATK_EV, MON_DATA_SPDEF_EV, MON_DATA_SPEED_EV,
+    };
+    static const s8 natureCol[6] = { -1, 0, 1, 3, 4, 2 };
+
+    // struct SpeciesInfo names its six base stats rather than holding an array,
+    // so this is the one place the row order has to be spelled out by hand.
+    const u8 base[6] = {
+        gSpeciesInfo[species].baseHP,
+        gSpeciesInfo[species].baseAttack,
+        gSpeciesInfo[species].baseDefense,
+        gSpeciesInfo[species].baseSpAttack,
+        gSpeciesInfo[species].baseSpDefense,
+        gSpeciesInfo[species].baseSpeed,
+    };
+    u8  nature = GetNature(mon);
+    u8  label[16];
+    int y = MOVES_Y;
+    int x;
+
+    // The EV total, in the header row's label cell, which is the only space in
+    // the table not spoken for. 510 is the game's own ceiling (MAX_TOTAL_EVS),
+    // and GetMonEVCount is its own summing routine, not a reimplementation.
+    x = SPREAD_LABEL_X;
+    x += UiNum(x, y, (s32)GetMonEVCount(mon), UiThemeText(), UiThemeShadow());
+    UiText(x, y, UiAscii(label, "/510", sizeof(label)), UI_COL_DIM, UiThemeShadow());
+
+    UiTextRight(SPREAD_STAT_R, y, UiAscii(label, "STAT", sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+    UiTextRight(SPREAD_BASE_R, y, UiAscii(label, "BASE", sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+    UiTextRight(SPREAD_IV_R, y, UiAscii(label, "IV", sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+    UiTextRight(SPREAD_EV_R, y, UiAscii(label, "EV", sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+
+    for (int i = 0; i < 6; i++)
+    {
+        s32 iv = (s32)GetMonData(mon, ivField[i]);
+        s32 ev = (s32)GetMonData(mon, evField[i]);
+        s8  mod = (natureCol[i] < 0) ? 0 : gNatureStatTable[nature][natureCol[i]];
+        u16 natureColour = (mod > 0) ? UI_COL_HP_HIGH
+                         : (mod < 0) ? UI_COL_HP_LOW
+                                     : UI_COL_DIM;
+
+        y += SPREAD_ROW_H;
+
+        // The nature is carried by the label: its colour, and a sign beside it
+        // so the two boosted-and-hindered rows are still distinguishable
+        // without relying on colour alone. The nature's NAME stays on the
+        // stats page one tap away, where it always was.
+        x = SPREAD_LABEL_X;
+        x += UiText(x, y, UiAscii(label, names[i], sizeof(label)),
+                    natureColour, UiThemeShadow());
+
+        if (mod != 0)
+            UiText(x + 2, y, UiAscii(label, (mod > 0) ? "+" : "-", sizeof(label)),
+                   natureColour, UiThemeShadow());
+
+        UiNumRight(SPREAD_STAT_R, y, (s32)GetMonData(mon, statField[i]),
+                   UiThemeText(), UiThemeShadow());
+        UiNumRight(SPREAD_BASE_R, y, base[i], UiThemeText(), UiThemeShadow());
+
+        // A perfect IV marked, because finding them is the entire point of
+        // looking. The EV column marks 252 rather than 255: Gen 3 stats use
+        // EV/4, so the last three points buy nothing and 252 is where a trainer
+        // actually stops.
+        UiNumRight(SPREAD_IV_R, y, iv,
+                   (iv == MAX_PER_STAT_IVS) ? UI_COL_HP_HIGH : UiThemeText(),
+                   UiThemeShadow());
+        UiNumRight(SPREAD_EV_R, y, ev,
+                   (ev >= 252) ? UI_COL_HP_HIGH : UiThemeText(),
+                   UiThemeShadow());
+    }
+}
+
+// The IV/EV toggle. Dim frame with accent text when it is off, matching BACK;
+// the doubled inset outline of the EXTRA tab's active choices when it is on, so
+// "this is the selected one" looks the same everywhere on this screen.
+static void DrawSpreadButton(void)
+{
+    u8 label[12];
+
+    UiRect(SPREAD_X, SPREAD_Y, SPREAD_W, SPREAD_H,
+           sSpreadOpen ? UI_COL_ACCENT : UI_COL_DIM);
+    if (sSpreadOpen)
+        UiRect(SPREAD_X + 1, SPREAD_Y + 1, SPREAD_W - 2, SPREAD_H - 2,
+               UI_COL_ACCENT);
+
+    UiAscii(label, "IV/EV", sizeof(label));
+    UiText(SPREAD_X + (SPREAD_W - UiTextWidth(label)) / 2,
+           SPREAD_Y + (SPREAD_H - UI_GLYPH_H) / 2,
+           label, UI_COL_ACCENT, UiThemeShadow());
+}
+
 static void DrawDetail(void)
 {
     struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
@@ -511,6 +665,8 @@ static void DrawDetail(void)
 
     UiText(110, 30, gSpeciesNames[species], UI_COL_DIM, UiThemeShadow());
 
+    DrawSpreadButton();
+
     // HP
     y = 52;
     UiText(12, y, UiAscii(label, "HP", sizeof(label)), UI_COL_DIM, UiThemeShadow());
@@ -523,12 +679,23 @@ static void DrawDetail(void)
     UiHpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
             GetMonData(mon, MON_DATA_MAX_HP));
 
-    // Left column: the stats and the ability/nature/item block, UNLESS a move
-    // is selected, in which case that move's details take this space instead.
-    // The moves list on the right is drawn either way.
+    // Left column: the stats and the ability/nature/item block, UNLESS a move is
+    // selected or the IV/EV spread is up, either of which takes this space
+    // instead. The moves list on the right is drawn whichever wins.
+    //
+    // The move panel is checked first because it is the transient one: it is
+    // opened by a tap on a specific row and closed by the next tap, whereas the
+    // spread is a mode the player left switched on.
     if (sMoveSel >= 0)
     {
         DrawMoveInfo(mon, (u8)sMoveSel);
+        DrawMoveList(mon);
+        return;
+    }
+
+    if (sSpreadOpen)
+    {
+        DrawSpread(mon, (u16)species);
         DrawMoveList(mon);
         return;
     }
@@ -591,6 +758,29 @@ static void DrawDetail(void)
     DrawMoveList(mon);
 }
 
+// Cheap identity of what this tab is showing that nothing else in the shell's
+// hash tracks. Two things, and only one of them is always live.
+//
+// The cheat tags print the current level cap, which steps up the moment a badge
+// is earned and touches nothing else in the hash. The IV/EV panel prints EVs,
+// which move on every battle the mon takes part in and can move WITHOUT its
+// level, HP or status moving with them -- a full-health mon that lands the last
+// hit and does not level. So the EV total joins the key, but only while the
+// panel is actually on screen: it is six reads, and paying for them on the
+// other four tabs would be paying for a panel nobody is looking at.
+//
+// IVs and base stats are absent on purpose. Neither can change after the mon
+// exists, so neither can go stale.
+u32 UiPartyStateKey(void)
+{
+    u32 key = UiTweakStateKey();
+
+    if (sDetailOpen && sSpreadOpen)
+        key ^= (u32)GetMonEVCount(&gPlayerParty[UiSelectedMon()]) * 2654435761u;
+
+    return key;
+}
+
 void UiPartyDraw(void)
 {
     if (sDetailOpen)
@@ -616,6 +806,25 @@ void UiPartyTouch(const CtrTouchState *t)
         {
             sDetailOpen = FALSE;
             sMoveSel = -1;
+            UiMarkDirty();
+            return;
+        }
+
+        // An empty slot draws neither this button nor anything it would switch
+        // between, and a control that is not on screen must not be tappable:
+        // the toggle would otherwise carry, silently, into the next mon opened.
+        if (UiHit(t, SPREAD_X, SPREAD_Y, SPREAD_W, SPREAD_H)
+            && GetMonData(&gPlayerParty[UiSelectedMon()], MON_DATA_SPECIES)
+               != SPECIES_NONE)
+        {
+            // A move panel is borrowing the same column, so the first tap here
+            // hands the column back to this button rather than toggling a mode
+            // the player cannot currently see the state of.
+            if (sMoveSel >= 0)
+                sMoveSel = -1;
+            else
+                sSpreadOpen = !sSpreadOpen;
+
             UiMarkDirty();
             return;
         }

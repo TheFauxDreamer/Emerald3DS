@@ -1,7 +1,7 @@
 # Builds the 3DS port end-to-end in devkitPro's official container, so the
 # .3dsx is reproducible without a local toolchain.
 #
-# Mirrors the manual sequence in 3ds/README.md exactly:
+# Mirrors the manual sequence in README.md exactly:
 #   make tools && make generated
 #   tools/generate_wasm_assets.py    -> build/assets
 #   rp2350/gen_sound_assets.sh       -> sample .bin + song .s

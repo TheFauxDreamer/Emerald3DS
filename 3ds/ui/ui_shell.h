@@ -69,6 +69,12 @@ void UiPartyTouch(const CtrTouchState *t);
 // screen happens not to be repainting.
 bool8 UiPartyTick(void);
 
+// Cheap identity of what the PARTY tab is showing: the live level cap behind
+// the cheat tags, plus the selected mon's EV total while the IV/EV panel is up.
+// Walks save data (badge flags), so the shell only asks while the tab is on
+// screen and there is a save block to read.
+u32 UiPartyStateKey(void);
+
 void UiBagDraw(void);
 void UiBagTouch(const CtrTouchState *t);
 

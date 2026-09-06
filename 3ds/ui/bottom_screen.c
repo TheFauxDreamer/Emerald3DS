@@ -16,6 +16,7 @@
 #include "global.h"
 #include "main.h"
 #include "pokemon.h"
+#include "data.h"              // gSpeciesNames
 #include "event_data.h"
 #include "overworld.h"
 #include "constants/flags.h"
@@ -131,6 +132,72 @@ static void EnsureTabVisible(void)
     sTab = vis[0];
 }
 
+// --------------------------------------------------------- shiny notice ----
+//
+// A shiny you can actually catch is the one thing on this screen worth
+// interrupting the player for. Emerald says so twice already -- the sprite is
+// recoloured and the encounter opens with a sparkle -- but both land in the
+// first second of a battle whose transition the player may not have been
+// watching, and neither of them survives being missed.
+//
+// It is an OVERLAY, not a band the tabs make room for. Every tab's layout is
+// hand-fitted to a 192px content area, which 3ds/UI_SKIN_PLAN.md declares
+// load-bearing, so reserving space would mean re-fitting five tabs for a state
+// that occurs once in 8192 encounters. Covering the top 24px for the length of
+// one battle is the cheaper trade, and one tap dismisses it.
+#define NOTICE_H  24
+
+// Which encounter the player has already dismissed the notice for. Keyed on the
+// mon rather than on a bare flag, so the next shiny still gets its own notice.
+// The separate "is set" flag is not redundant: a personality of 0 is legal, and
+// without it that mon's notice could never be shown.
+static u32   sNoticeDismissed;
+static bool8 sNoticeDismissedSet;
+
+static bool8 NoticeActive(u16 *species, u32 *identity)
+{
+    u32 id;
+
+    if (!UiShinyOpponent(species, &id))
+        return FALSE;
+
+    if (identity != NULL)
+        *identity = id;
+
+    return !(sNoticeDismissedSet && id == sNoticeDismissed);
+}
+
+static void DrawNotice(u16 species)
+{
+    u8  label[16];
+    int textY = (NOTICE_H - UI_GLYPH_H) / 2;
+    int w, x;
+
+    // Solid ground and a doubled border, so it reads as something sitting ON
+    // the view rather than as the view having gone wrong. Fixed colours rather
+    // than the window-frame theme: this is our chrome, and it has to carry
+    // equally over all 20 of Emerald's borders.
+    UiFillRect(0, 0, CTR_BOTTOM_WIDTH, NOTICE_H, UI_COL_HP_BACK);
+    UiRect(0, 0, CTR_BOTTOM_WIDTH, NOTICE_H, UI_COL_ACCENT);
+    UiRect(1, 1, CTR_BOTTOM_WIDTH - 2, NOTICE_H - 2, UI_COL_ACCENT);
+
+    // The word and the species centred as one block. Worst case is 6 characters
+    // plus the longest species name, about 100px of a 320px bar, so the dismiss
+    // hint at the right-hand end is never reached.
+    UiAscii(label, "SHINY!", sizeof(label));
+    w = UiTextWidth(label) + 6 + UiTextWidth(gSpeciesNames[species]);
+    x = (CTR_BOTTOM_WIDTH - w) / 2;
+
+    x += UiText(x, textY, label, UI_COL_ACCENT, UI_COL_SHADOW);
+    UiText(x + 6, textY, gSpeciesNames[species], UI_COL_TEXT, UI_COL_SHADOW);
+
+    // Said rather than left to be discovered: nothing else on this screen is
+    // dismissed by tapping it, so there is no habit to fall back on.
+    UiTextRight(CTR_BOTTOM_WIDTH - 10, textY,
+                UiAscii(label, "TAP TO HIDE", sizeof(label)),
+                UI_COL_DIM, UI_COL_SHADOW);
+}
+
 // ------------------------------------------------------------- lifecycle ---
 //
 // The screen must stay blank on the title screen and through the intro, but
@@ -154,7 +221,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[5];
+    u32 top[6];
     top[0] = UiFrameId();
     top[1] = sInGame;
     // The override is host-side and always safe to read; the three flags are
@@ -190,11 +257,18 @@ static u32 UiStateHash(void)
         else if (sTab == UI_TAB_EXTRA)
             top[4] = UiExtraStateKey();
         // The party grid's cheat tags print the live level cap, which steps
-        // up the moment a badge is earned. That can happen with this tab on
-        // screen and touches nothing else in the hash.
+        // up the moment a badge is earned, and the detail view's IV/EV panel
+        // prints EVs, which move after a battle without necessarily moving
+        // anything else in this hash. Neither touches another slot.
         else if (sTab == UI_TAB_PARTY)
-            top[4] = UiTweakStateKey();
+            top[4] = UiPartyStateKey();
     }
+
+    // The shiny notice, which nothing else here covers: it appears when a
+    // catchable shiny does, disappears when the player dismisses it, and
+    // disappears again when the battle ends. Safe before there is a save block,
+    // because everything behind it is a plain global gated on gMain.inBattle.
+    top[5] = NoticeActive(NULL, NULL);
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
@@ -250,6 +324,7 @@ static void Redraw(void)
 {
     u8 vis[UI_TAB_COUNT];
     u32 n;
+    u16 noticeSpecies = SPECIES_NONE;
 
     // Before the game proper is running there is nothing meaningful to show,
     // and a menu floating under the title screen looks broken.
@@ -275,6 +350,11 @@ static void Redraw(void)
     case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
+    // Last, and over the top of whichever tab just drew: it is an alert, and an
+    // alert a view can paint over is not one.
+    if (NoticeActive(&noticeSpecies, NULL))
+        DrawNotice(noticeSpecies);
+
     DrawTabBar(vis, n);
 
     sNeedsRepaint = 0;
@@ -287,12 +367,15 @@ void CtrBottomInit(void)
     sSelectedMon = 0;
     sLastStateHash = 0;
     sInGame = FALSE;
+    sNoticeDismissed = 0;
+    sNoticeDismissedSet = FALSE;
     Redraw();
 }
 
 void CtrBottomUpdate(const CtrTouchState *touch)
 {
     u32 hash;
+    u32 noticeIdentity = 0;
 
     UpdateInGameLatch();
 
@@ -300,10 +383,23 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     if (!sInGame)
         touch = NULL;
 
+    // The notice is an overlay, so it takes every touch in its band before the
+    // tabs see it -- a press that never becomes a release included, or a drag
+    // begun on the notice would carry on into whatever it is covering.
+    if (touch != NULL && touch->y < NOTICE_H
+        && NoticeActive(NULL, &noticeIdentity))
+    {
+        if (touch->justReleased)
+        {
+            sNoticeDismissed = noticeIdentity;
+            sNoticeDismissedSet = TRUE;
+            sNeedsRepaint = 1;
+        }
+    }
     // A tap on the tab bar switches views; anything above it belongs to the
     // active view. Acting on release rather than press means a touch that
     // slides off a tab does not trigger it.
-    if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
+    else if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
     {
         u8 vis[UI_TAB_COUNT];
         u32 n = VisibleTabs(vis);
