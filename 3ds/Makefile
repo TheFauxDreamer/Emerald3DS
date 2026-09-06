@@ -58,10 +58,6 @@ CTR_BOOT_DIAG ?= 0
 # Regenerated on every make, so the boot log can never report a stale build.
 # The git description is what identifies WHICH build; the timestamp is what
 # distinguishes two builds of the same tree.
-# Read back from the archive build rather than set here: build_objs.sh and this
-# Makefile are separate invocations, and a flag passed to only one of them would
-# put a binary in your hands whose boot log names the wrong mixer.
-CTR_M4A_ASM := $(shell cat $(BUILD)/m4a_asm.flag 2>/dev/null || echo 0)
 BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --always --dirty 2>/dev/null || echo nogit)
 
 # -MMD -MP is load bearing, not hygiene. Without it these objects depend only on
@@ -74,7 +70,7 @@ BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --alwa
 # does not wedge the build with "no rule to make target".
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections -MMD -MP \
-            -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) -DCTR_M4A_ASM=$(CTR_M4A_ASM) \
+            -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map

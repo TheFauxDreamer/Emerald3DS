@@ -258,10 +258,9 @@ latency at 67 ms.
 
 ### The five faults, and what fixed them
 
-All five are fixed in the tree. **None has been signed off by ear on real
-hardware**, so read this as correct in Azahar and unverified on a console. The
-one thing that cannot be judged in an emulator is which of the two mixers below
-sounds right.
+All five are fixed in the tree. The mixer question this list used to end on is
+settled: the original `src/m4a_1.s` runs on the ARM11, sounds right on a
+console, and is now the only mixer this port builds.
 
 **1. Thread priority: silence with everything else correct.** libctru hardcodes
 the NDSP service thread at priority `0x18` (`ndspInit`, `libctru/source/ndsp/ndsp.c`).
@@ -295,13 +294,16 @@ bit from clipping. `Rp2350MixFrame16()` and `Rp2350MixFrameStereo16()` replaced
 it; the 8-bit form remains only because the RP2350 port's I2S ring is built on
 it.
 
-**5. DPCM and reverse-playback instruments were silent stubs.**
-`MixChannelSpecial()` in `rp2350/m4a_engine.c` now decodes the BDPCM block
-format (64 samples per 33-byte block: one verbatim sample, then 4-bit deltas
-indexing `gDeltaEncodingTable`) and honours `TONEDATA_TYPE_REV`. The decoded
-block is cached on the wave and block index rather than on the channel, so two
-channels reading different compressed samples cannot see each other's buffer.
-Cries and every compressed instrument were affected.
+**5. DPCM and reverse-playback instruments were silent stubs.** A fault in the
+C reimplementation only -- `src/m4a_1.s` always decoded compressed samples, so
+this port stopped being affected the moment it switched to the assembly. The fix
+still matters to the RP2350, which has no such option: `MixChannelSpecial()` in
+`rp2350/m4a_engine.c` decodes the BDPCM block format (64 samples per 33-byte
+block: one verbatim sample, then 4-bit deltas indexing `gDeltaEncodingTable`)
+and honours `TONEDATA_TYPE_REV`. The decoded block is cached on the wave and
+block index rather than on the channel, so two channels reading different
+compressed samples cannot see each other's buffer. Cries and every compressed
+instrument were affected.
 
 Related, though it was never a fault: fast-forward used to play the soundtrack
 at the multiplier and drop the surplus, because the engine advances one tick per
@@ -310,25 +312,20 @@ at the multiplier and drop the surplus, because the engine advances one tick per
 game runs fast. `CTR_FFAUDIO_FAST` keeps the old behaviour, because a rising
 pitch is a useful cue that fast-forward is engaged.
 
-### Two mixers, and which one ships
+### Which mixer ships
 
 `rp2350/m4a_engine.c` is a C reimplementation of `src/m4a_1.s`, written because
 the RP2350's Cortex-M33 is Thumb-2 only and physically cannot execute ARMv4T
-ARM-mode code. **The ARM11 is ARMv6K and can**, so this port can run the
-original assembly instead, and being the actual shipped code it cannot be wrong
-about the engine the way a reimplementation can.
+ARM-mode code. **The ARM11 is ARMv6K and can**, so this port runs the original
+assembly: the code Game Freak shipped, which cannot be wrong about the engine
+the way a reimplementation can.
 
-```sh
-3ds/build_objs.sh              # C engine (default)
-CTR_M4A_ASM=1 3ds/build_objs.sh   # assemble src/m4a_1.s instead
-```
-
-CI builds both on every push as a two-job matrix (`c-engine`, `m4a-asm`), with
-`fail-fast` off so an unproven assembly variant cannot cancel the build that
-works. The build script records the choice in `3ds/build/m4a_asm.flag` so the
-Makefile and the boot log report which mixer is actually in the binary, which is
-the one thing that cannot be told apart from the outside. Which of the two
-sounds right is still open and can only be answered by ear.
+That was a `CTR_M4A_ASM` build switch and a two-job CI matrix for as long as it
+was unproven. It has since been heard on a console, so there is one build and no
+switch. `3ds/build_objs.sh` always assembles `src/m4a_1.s` plus
+`3ds/asm/m4a_arm11.s`, and never compiles `m4a_engine.c` -- the two define the
+same 31 symbols, so building both is a link error rather than a choice. The C
+engine stays in the tree for the RP2350 port that has no alternative.
 
 ### Diagnostics
 
