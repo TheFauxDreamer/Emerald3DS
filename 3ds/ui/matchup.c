@@ -171,6 +171,16 @@ bool8 UiShinyOpponent(u16 *species, u32 *identity)
     if (gBattleTypeFlags & UNCATCHABLE_BATTLE)
         return FALSE;
 
+    // The encounter is over the moment the game says so, however it ended:
+    // B_OUTCOME_CAUGHT, _WON (you knocked it out), _RAN, _MON_FLED, _LOST and
+    // the rest all land here. gBattleOutcome is 0 while the fight is live and
+    // is cleared by BattleStartClearSetData (src/battle_main.c:3149), so it is
+    // the game's own answer to "is there still something to catch", and a
+    // better one than gMain.inBattle, which stays true through the catch
+    // sequence, the nickname prompt and the fade out.
+    if (gBattleOutcome != 0)
+        return FALSE;
+
     // gEnemyParty, not gBattleMons, and the difference is not cosmetic.
     // BattleStartClearSetData() does not zero gBattleMons, so between
     // gMain.inBattle going true (src/battle_main.c:708) and the intro's

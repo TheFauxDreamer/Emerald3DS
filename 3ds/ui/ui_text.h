@@ -26,6 +26,18 @@
 int UiText(int x, int y, const u8 *str, u16 fg, u16 shadow);
 int UiTextWidth(const u8 *str);
 
+// The same glyphs at double size, nearest-neighbour. There is no larger Latin
+// font in the ROM to reach for -- the game only ever needed one size on a 240px
+// screen -- so this scales the one there is.
+//
+// For headlines that have to be read rather than looked for. Costs four times
+// the fill per glyph, so it is not a general-purpose text call.
+#define UI_GLYPH_BIG_SCALE 2
+#define UI_GLYPH_BIG_H     (UI_GLYPH_H * UI_GLYPH_BIG_SCALE)   // 30
+
+int UiTextBig(int x, int y, const u8 *str, u16 fg, u16 shadow);
+int UiTextBigWidth(const u8 *str);
+
 // Right-aligned variant, for HP and quantities that should line up.
 int UiTextRight(int xRight, int y, const u8 *str, u16 fg, u16 shadow);
 

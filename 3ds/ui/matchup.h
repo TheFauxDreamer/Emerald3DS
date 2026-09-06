@@ -35,6 +35,10 @@ u32 UiMatchupOpponentKey(void);
 // TRUE when the mon on the other side is shiny AND the player could actually
 // throw a ball at it, which is the only case worth interrupting them for.
 //
+// Goes FALSE the moment the encounter is decided -- caught, knocked out, fled
+// from or run from -- so anything drawn from it clears itself without needing
+// to be told the battle ended.
+//
 // `species` receives what it is and `identity` a value that changes with the
 // encounter, so a dismissed notice cannot carry over to the next one. Either
 // may be NULL; neither is written unless the answer is TRUE.

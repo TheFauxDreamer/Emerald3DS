@@ -120,13 +120,18 @@ turning it off also pins those three settings to their harmless values, so a
 channel and no control to unmute it.
 
 **Shiny alerts, over every tab.** Not a sixth tab and not a setting. When a wild
-Pokémon is shiny, a band across the top of whichever tab you happen to be on
-says so and names it; a tap dismisses it. It appears only for a Pokémon you
-could actually throw a ball at, so a trainer's shiny, a link battle and the
-whole Battle Frontier stay quiet. Emerald does already tell you twice, with a
-recoloured sprite and a sparkle, but both land in the first second of a battle
-whose transition you may not have been watching, and neither of them survives
-being missed.
+Pokémon is shiny, a panel takes the middle of the bottom screen and names it at
+double size, whichever tab you happen to be on. It stays until you press
+DISMISS, and clears itself the moment the encounter is decided one way or the
+other — caught, knocked out, fled or run from — so it can never be left up over
+a battle that is already over. The tab bar keeps working underneath, so you can
+still check your team before deciding what to throw.
+
+It appears only for a Pokémon you could actually throw a ball at, so a trainer's
+shiny, a link battle and the whole Battle Frontier stay quiet. Emerald does
+already tell you twice, with a recoloured sprite and a sparkle, but both land in
+the first second of a battle whose transition you may not have been watching,
+and neither of them survives being missed.
 
 The whole thing follows your **Options → Frame** border choice, live, as you
 cycle through it.
