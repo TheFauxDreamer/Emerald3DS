@@ -294,8 +294,14 @@ u16 Ctr3dsMapWildSpecies(u16 species)
 // through the new one: the checksum fails and the game marks it a Bad Egg.
 // Which is to say the obvious implementation quietly destroys the Pokemon it
 // was asked to make shiny.
-bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level)
+bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level)
 {
+    // The target is not a parameter, and that is the point. The only slot this
+    // is ever allowed to fill is the wild encounter's, so it names that slot
+    // itself rather than accepting one: there is no argument a caller could
+    // pass that would aim this at gPlayerParty. CreateWildMon hardcodes the
+    // same slot in both of its own creation calls, for the same reason.
+    struct Pokemon *mon = &gEnemyParty[0];
     u32 otId, personality;
     u16 lo, hi;
 
@@ -338,18 +344,22 @@ bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level)
     if (gMain.inBattle)
         return FALSE;
 
-    // NEVER an existing Pokemon. This only ever fills a slot that is already
-    // empty, and it creates rather than edits, so no Pokemon that already
-    // exists -- in the party, in a box, a roamer, a gift, an egg -- can be
-    // reached by it. The roamer is the one worth naming: it lives in the save
-    // (gSaveBlock1Ptr->roamer) and is rebuilt by BattleSetup_StartRoamerBattle,
-    // which does not come through here at all.
+    // NEVER an existing Pokemon, and never one of the player's. gPlayerParty and
+    // gEnemyParty are separate arrays (src/pokemon.c:83-84) and the only write
+    // below is CreateMon into the enemy slot named above, so the player's team
+    // is not merely left alone, it is unreachable from here. Nor is anything
+    // else that already exists: a box mon, a gift, an egg, or the roamer, which
+    // lives in the save and is rebuilt by BattleSetup_StartRoamerBattle without
+    // coming through this path at all.
     //
-    // Checked rather than assumed. CreateWildMon calls ZeroEnemyPartyMons()
-    // immediately above this, so the slot is empty by construction today; the
-    // check is what keeps that true if this is ever called from anywhere else,
-    // because the failure it prevents is silently replacing a live Pokemon
-    // with a different one.
+    // The slot itself is still checked for emptiness. CreateWildMon calls
+    // ZeroEnemyPartyMons() immediately above this, so it is empty by
+    // construction today; the check is what keeps a future caller from
+    // silently replacing a live Pokemon with a different one.
+    //
+    // A pure read: GetBoxMonData only runs its decrypt/encrypt bracket for a
+    // field ABOVE MON_DATA_ENCRYPT_SEPARATOR, and this one is below it, so
+    // asking the question does not disturb the mon being asked about.
     if (GetMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
         return FALSE;
 

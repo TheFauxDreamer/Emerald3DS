@@ -48,10 +48,12 @@ u16 Ctr3dsMapWildSpecies(u16 species);
 // The contract, because it is the whole point of the feature:
 //
 //   It only ever affects the next Pokemon ENCOUNTERED IN THE WILD, and it does
-//   that by CREATING one into an empty slot. It never edits, replaces or reads
-//   back a Pokemon that already exists -- not one in the party, not one in a
-//   box, not the roamer, not a gift, not an egg. `mon` is refused outright if
-//   the slot is not empty.
+//   that by CREATING one into gEnemyParty[0], which it names itself rather
+//   than taking as an argument: THE PLAYER'S TEAM IS NOT REACHABLE FROM HERE,
+//   there being no parameter that could aim it there. It never edits, replaces
+//   or reads back a Pokemon that already exists -- not one in the party, not
+//   one in a box, not the roamer, not a gift, not an egg -- and it refuses
+//   outright if the slot it is about to fill is not empty.
 //
 //   It can never touch a TRAINER battle. The only caller is CreateWildMon,
 //   which is static to src/wild_encounter.c with no callers outside it, so no
@@ -67,7 +69,7 @@ u16 Ctr3dsMapWildSpecies(u16 species);
 // Wild encounters only, and not the Battle Pike or Battle Pyramid, whose wild
 // tables do not hold species ids at all. The switch stays armed when it
 // declines, so it fires on the next encounter that does qualify.
-bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level);
+bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level);
 
 // Reorder one bag pocket in place. A no-op when the sort is set to OFF.
 void Ctr3dsSortBagPocket(u8 pocketId);
