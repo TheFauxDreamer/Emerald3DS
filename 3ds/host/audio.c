@@ -28,7 +28,8 @@
 #include "trace.h"
 
 // m4a produces this many samples per VBlank at Emerald's SOUND_MODE_FREQ_13379
-// (gPcmSamplesPerVBlankTable index 4, m4a_internal.h).
+// (gPcmSamplesPerVBlankTable[3], src/m4a_tables.c: m4a.c indexes it as
+// freq - 1, and SOUND_MODE_FREQ_13379 is freq 4).
 #define SAMPLES_PER_FRAME 224
 
 // The game is paced by the 3DS panel, not by the GBA's 59.7275 Hz, so it

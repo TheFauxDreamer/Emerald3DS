@@ -304,6 +304,7 @@ u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
         else if (c == '?')             out = CHAR_QUESTION_MARK;
         else if (c == '%')             out = CHAR_PERCENT;
         else if (c == '+')             out = CHAR_PLUS;
+        else if (c == '!')             out = CHAR_EXCL_MARK;
         // Feet and inches, for the Pokedex height readout.
         else if (c == '\'')            out = CHAR_SGL_QUOTE_RIGHT;
         else if (c == '"')             out = CHAR_DBL_QUOTE_RIGHT;

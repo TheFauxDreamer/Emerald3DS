@@ -1,8 +1,8 @@
 # Second screen cheatsheet
 
 Working reference for changing the 3DS bottom screen. Read this before touching
-anything under `3ds/ui/`. Companion documents: `3ds/README.md` (why the port is
-built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
+anything under `3ds/ui/`. Companion documents: the root `README.md` (why the
+port is built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
 catalogue, **not implemented**), `3ds/UI_SKIN_PLAN.md` (a proposed visual
 reskin, **not implemented**). This file describes the code as it actually is.
 
@@ -28,7 +28,7 @@ Rp2350PresentFrame()                 3ds/host/main.c:522   (end of every game fr
   if (sSubFrame == 0)                                      once per DISPLAYED frame
      hidScanInput()
      sample_touch(&touch)            3ds/host/main.c:84
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:293
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:374
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
@@ -72,16 +72,16 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 351 | Tab list, tab bar, dispatch, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 106 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 447 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 609 / 114 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 318 / 42 | Emerald font rendering, numbers, ASCII to game encoding |
-| [ui/tab_party.c](ui/tab_party.c) | 673 | 2x3 party grid, cheat tag strip, per-mon detail view, HP animation |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 319 / 42 | Emerald font rendering, numbers, ASCII to game encoding |
+| [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 654 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 624 | Three pages of port settings, gameplay tweaks, audio A/B |
-| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 143 / 31 | Type effectiveness for the party grid's badges |
+| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 210 / 43 | Reads about the opposing mon: type effectiveness for the party badges, and `UiShinyOpponent` behind the notice |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload),
@@ -102,7 +102,22 @@ u32  UiXxxStateKey(void);                    // optional, see section 7
 
 `Draw` may assume the framebuffer was just cleared to `UI_COL_BG` and that the
 tab bar is painted **after** it returns, so it must not draw below
-`UI_CONTENT_H`.
+`UI_CONTENT_H`. Overlays are painted after the tab and before the bar.
+
+### Overlays
+
+An overlay is drawn over whichever tab just painted, and claims its band of
+touches before any tab sees them. The shiny notice
+([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the pattern: a 24px alert
+band at the top of the content area, dismissed by a tap, keyed on the encounter
+rather than on a bare flag so the next shiny still gets its own notice.
+
+It is an overlay rather than a band the tabs make room for because every tab's
+layout is hand-fitted to a 192px content area, which `UI_SKIN_PLAN.md` declares
+load bearing. Reserving space would mean re-fitting five tabs for a state that
+occurs once in 8192 encounters. Follow this shape for anything else that has to
+interrupt: paint last, take touches first, and fold a "is it up" bit into
+`UiStateHash`.
 
 ### Adding a tab
 
@@ -112,10 +127,10 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 
 1. Add to `enum UiTab` in [ui_shell.h:19](ui/ui_shell.h#L19), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:56](ui/bottom_screen.c#L56):
+3. Add a row to `sTabs[]` at [bottom_screen.c:57](ui/bottom_screen.c#L57):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:249](ui/bottom_screen.c#L249))
-   and to the one in `CtrBottomUpdate()` ([:293](ui/bottom_screen.c#L293)).
+4. Add a `case` to the `switch` in `Redraw()` ([:344](ui/bottom_screen.c#L344))
+   and to the one in `CtrBottomUpdate()` ([:416](ui/bottom_screen.c#L416)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
    section 12.**
@@ -139,8 +154,13 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:293](ui/bottom_screen.c#L293)):
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:375](ui/bottom_screen.c#L375)),
+in order:
 
+- An **active overlay** claims its whole band first. The shiny notice takes
+  every touch with `y < NOTICE_H` (24px), release or not, so a press that never
+  becomes a release, or a drag begun on the notice, cannot carry through into
+  the tab underneath.
 - `justReleased && y >= UI_CONTENT_H` switches tab. The tab bar is handled by
   the shell, tabs never see it.
 - `y < UI_CONTENT_H` calls the active tab's `Touch`, **on every frame**, not only
@@ -180,8 +200,20 @@ as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:243](ui/tab_dex.c#L2
   Cheap on a resistive panel and keeps a one-tap mis-touch harmless.
 - **A destructive or stateful action takes a second deliberate tap** on a
   dedicated button (BAG's USE, MAP's YES/NO confirm).
+- **One column, several tenants.** The party detail view's left column shows the
+  stat block, a tapped move's details, or the IV/EV spread
+  ([tab_party.c:516](ui/tab_party.c#L516)), never two at once, while the moves
+  list beside it survives all three. Two rules make that legible: the transient
+  tenant (the move panel, opened by a tap on a specific row) is tested first in
+  `DrawDetail`, and the persistent one has a button that reports its own state
+  ([:612](ui/tab_party.c#L612), dim frame off, doubled accent outline on). A
+  mode with no on-screen state is a mode the player cannot tell they left on.
+- **A control that is not drawn must not be tappable.** The IV/EV button is not
+  drawn for an empty party slot, so its hit test carries the same species check
+  ([tab_party.c:816](ui/tab_party.c#L816)). Without it the toggle would flip
+  invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in three different places:
-  [tab_party.c:101](ui/tab_party.c#L101) (38x22),
+  [tab_party.c:106](ui/tab_party.c#L106) (38x22),
   [tab_dex.c:96](ui/tab_dex.c#L96) (42x22),
   [tab_bag.c:104](ui/tab_bag.c#L104) (56x20 cancel).
 - **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`) are file
@@ -204,7 +236,7 @@ Do not conflate them. Two ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:153](ui/bottom_screen.c#L153)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:220](ui/bottom_screen.c#L220)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -218,6 +250,7 @@ in Options, being handed the Pokedex.
 | `top[2]` | show-all-tabs override, plus the three unlock flags **only if `SaveDataLive()`** |
 | `top[3]` | `UiMatchupOpponentKey()` |
 | `top[4]` | the active tab's own key, dispatched by `sTab` |
+| `top[5]` | whether the shiny notice is up |
 | then | 6 party mons x 5 fields (species, HP, max HP, level, status) |
 
 ### Rules for writing a state key
@@ -230,14 +263,23 @@ in Options, being handed the Pokedex.
   hash exists to prevent. See the comment at [tab_map.c:583](ui/tab_map.c#L583).
 - **Most new views need no key at all.** Static data (a learnset, a type chart,
   base stats) changes only under the view's own touch handler, which already
-  calls `UiMarkDirty()`.
+  calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
+  is created and can never go stale.
+- **Key only what is actually on screen, and only while it is.**
+  `UiPartyStateKey()` ([tab_party.c:774](ui/tab_party.c#L774)) folds in the
+  selected mon's EV total *only* while the IV/EV panel is open. EVs are the
+  awkward case the party hash misses: they move after a battle without
+  necessarily moving level, HP or status with them, so a full-health mon that
+  lands the last hit would leave the panel stale. Six reads is the right price
+  for a panel that is up; it is the wrong price on the four tabs that cannot
+  show it.
 - **`GetMonData` decrypts in place** (`src/pokemon.c:3745`). Hashing many mons
   through it costs a decrypt round trip each. `MON_DATA_PERSONALITY`,
   `MON_DATA_OT_ID` and `MON_DATA_SANITY_HAS_SPECIES` sit before
   `MON_DATA_ENCRYPT_SEPARATOR` (`include/pokemon.h:8-19`) and answer from the
   plaintext header, so a `personality ^ otId` fold is a plain load.
 
-`UiPartyTick()` ([tab_party.c:127](ui/tab_party.c#L127)) is the one animation.
+`UiPartyTick()` ([tab_party.c:163](ui/tab_party.c#L163)) is the one animation.
 It must be called once per frame, not once per redraw, or it stalls whenever the
 screen happens not to be repainting. It returns TRUE while a bar is still
 moving, which the shell turns into a repaint request. It currently runs on every
@@ -377,7 +419,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:83
+static bool8 SaveDataLive(void);   // bottom_screen.c:84
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
