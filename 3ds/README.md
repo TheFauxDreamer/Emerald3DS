@@ -107,6 +107,8 @@ reproducible.
 ```
 3ds/
   bridge.h          the only thing both worlds include
+  SECOND_SCREEN_CHEATSHEET.md
+                    how the bottom screen works; read before editing ui/
   gba_mem.c         GBA regions + save-flash backing        (game side)
   build_objs.sh     game sources -> libpokeemerald.a (ARM11)
   emerald3ds.rsf    makerom ROM spec (CIA/CCI packaging)
@@ -117,7 +119,10 @@ reproducible.
     audio.c         m4a -> NDSP
     save.c          Rp2350Save* -> SD card
   ui/
-    bottom_screen.c bottom-screen UI                        (game side)
+    bottom_screen.c shell: tabs, dispatch, repaint policy   (game side)
+    tab_*.c         one tab each: party, bag, map, dex, extra
+    ui_draw.c       framebuffer, blitters, window frames, icons
+    ui_text.c       Emerald-font text
 ```
 
 ## Status
