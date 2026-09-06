@@ -620,11 +620,21 @@ value without writing the file back out during the load that produced it.
    `UiExtraStateKey()` ([:515](ui/tab_extra.c#L515)) in a bit range nothing else
    claims.
 
-The file is `sdmc:/3ds/emerald3ds/settings.bin`, written atomically through a
-`.tmp` and a rename, on a `CTR_SETTINGS_QUIET_MS` debounce so a burst of taps
-costs one write. Unlike the save image, a failed write is not retried: one
-attempt per change, or a read-only card would turn one tap into an FS attempt
-on every frame for the rest of the session.
+The file is `sdmc:/3ds/emerald3ds/settings.bin`. It is opened once at boot and
+rewritten in place, on a `CTR_SETTINGS_QUIET_MS` debounce so a pass through the
+settings costs one write. Two things it deliberately does NOT copy from
+`save.c`, both because they were measured on a console and found expensive for
+no gain at 24 bytes:
+
+- **No `.tmp` and rename.** The payload is one sector, so there is no torn
+  state to protect against, and the magic/version check turns anything odd into
+  "use the defaults". The remove-and-rename half alone measured 51-56 ms.
+- **No reopen per write.** Creating, closing, deleting and renaming each mutate
+  the directory and each is its own round trip to the FS process.
+
+A failed write is also not retried: one attempt per change, or a read-only card
+would turn one tap into an FS attempt on every frame for the rest of the
+session.
 
 **Two settings deliberately break the pattern**, and both are worth knowing
 before you copy it:
