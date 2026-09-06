@@ -278,6 +278,65 @@ u16 Ctr3dsMapWildSpecies(u16 species)
     return Ctr3dsMapSpecies(species);
 }
 
+// ---- Shiny test switch -----------------------------------------------------
+//
+// Makes the next wild encounter shiny, so the bottom screen's shiny notice can
+// be exercised without waiting out the real odds of one encounter in 8192.
+//
+// It CREATES the mon rather than editing one the game already made, and that is
+// not a preference. In Gen 3 the personality is both the substructure order
+// (GetSubstruct, src/pokemon.c:71) and half the encryption key
+// (EncryptBoxMon, :3541, keyed on otId ^ personality). SetMonData does not
+// re-encrypt for MON_DATA_PERSONALITY -- the field is below
+// MON_DATA_ENCRYPT_SEPARATOR, so SetBoxMonData's decrypt/encrypt bracket does
+// not run for it at all (:4163). Writing a new personality into a finished mon
+// therefore leaves four substructs encrypted under the old key and read back
+// through the new one: the checksum fails and the game marks it a Bad Egg.
+// Which is to say the obvious implementation quietly destroys the Pokemon it
+// was asked to make shiny.
+bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level)
+{
+    u32 otId, personality;
+    u16 lo, hi;
+
+    if (!Ctr3dsGetShinyTest())
+        return FALSE;
+
+    // Same hazard RandomizerSeed() guards above: NULL until a file exists.
+    // Left armed rather than consumed, so arming it from the title screen is
+    // not silently thrown away.
+    if (gSaveBlock2Ptr == NULL)
+        return FALSE;
+
+    // The same trainer ID CreateBoxMon would give the mon a moment from now
+    // under OT_ID_PLAYER_ID (src/pokemon.c), because shininess is a property of
+    // the pair and we have to know one to choose the other.
+    otId = T1_READ_32(gSaveBlock2Ptr->playerTrainerId);
+
+    // Solve GET_SHINY_VALUE(otId, p) == 0 for the high half. The low half stays
+    // random, so gender, the stored ability slot and the nature still vary
+    // between test shinies instead of every one being the same Pokemon.
+    //
+    // Constructed, not searched. CreateBoxMon's OT_ID_RANDOM_NO_SHINY loop
+    // spins Random32 until it does NOT get a shiny, which is cheap because it
+    // almost always exits first time; inverting it would average 8192 spins and
+    // drag the RNG far enough to change what the game does next. A test switch
+    // must not alter the run it is being used to observe.
+    lo = Random();
+    hi = (u16)(HIHALF(otId) ^ LOHALF(otId) ^ lo);
+    personality = ((u32)hi << 16) | lo;
+
+    CreateMon(mon, species, level, USE_RANDOM_IVS, TRUE, personality,
+              OT_ID_PLAYER_ID, 0);
+
+    // One shot, which is what the button says. Cleared here rather than by the
+    // UI because this is the only place that knows the encounter happened, and
+    // an armed switch nobody disarms means every Zigzagoon is gold.
+    Ctr3dsSetShinyTest(0);
+
+    return TRUE;
+}
+
 // ---- Bag sort --------------------------------------------------------------
 
 static void SwapSlots(struct ItemSlot *a, struct ItemSlot *b)

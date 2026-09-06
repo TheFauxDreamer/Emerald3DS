@@ -178,6 +178,22 @@ int  Ctr3dsUiModifierHeld(void);
 void Ctr3dsSetTopScale(int mode);
 int  Ctr3dsGetTopScale(void);
 
+// ---- the debug menu -------------------------------------------------------
+//
+// Whether EXTRA carries its third page: the shiny test switch, the tab-unlock
+// override, and the audio A/B switches. Three things that exist to test the
+// port rather than to play the game, which is why they sit together behind one
+// value instead of scattered through the pages a player uses.
+//
+// SET THIS TO 0 TO SHIP. That is the whole interface: the page disappears, the
+// pager drops to two buttons, and nothing else moves.
+//
+// Turning it off also neutralises the three settings themselves, not just their
+// controls (3ds/host/main.c). Two of them persist in settings.bin, so a build
+// with the menu compiled out could otherwise inherit "show every tab" or a
+// muted PSG channel from a debug session and offer the player no way back.
+#define CTR_DEBUG_MENU 1
+
 // Show every bottom-screen tab, including the ones the save has not unlocked.
 //
 // A testing aid, not a cheat: the tabs are gated on the same flags the start
@@ -219,6 +235,24 @@ int  Ctr3dsGetRandomizer(void);
 
 void Ctr3dsSetBagSort(int mode);    // CTR_BAGSORT_*
 int  Ctr3dsGetBagSort(void);
+
+// Shiny test switch (EXTRA page 2).
+//
+// Arms the NEXT wild encounter to be shiny, then disarms itself. It exists
+// because the bottom screen's shiny notice is otherwise unreachable for
+// testing: the real odds are SHINY_ODDS/65536, which is one encounter in 8192.
+//
+// Deliberately NOT persisted, unlike every other tweak on that page. Two
+// reasons, and they point the same way: this is the only one that expires on
+// its own, so a saved "armed" would fire on an encounter in some later session
+// the player had forgotten arming it for, and the mon it makes is kept if
+// caught. Fast-forward resets each launch for the same reason.
+//
+// Cleared game-side by 3ds/tweaks.c the moment it fires, which is why the
+// EXTRA tab has to poll it rather than assume its own button is the only thing
+// that can change it.
+void Ctr3dsSetShinyTest(int on);
+int  Ctr3dsGetShinyTest(void);
 
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by

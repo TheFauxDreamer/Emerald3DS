@@ -275,7 +275,12 @@ static uint8_t sShowAllTabs;
 // Ctr3dsApplyTurboBind above.
 void Ctr3dsApplyShowAllTabs(int on)
 {
-    sShowAllTabs = on ? 1 : 0;
+    // Refused outright with the debug menu compiled out. Guarded HERE rather
+    // than in the getter because CtrSettingsLoad() calls this directly and
+    // never asks the getter: without it a shipping build would inherit "show
+    // every tab" from a debug session's settings.bin, with no control to undo
+    // it. Held at 0 rather than merely reported as 0, so every reader agrees.
+    sShowAllTabs = (CTR_DEBUG_MENU && on) ? 1 : 0;
 }
 
 void Ctr3dsSetShowAllTabs(int on)
@@ -290,7 +295,7 @@ void Ctr3dsSetShowAllTabs(int on)
 
 int Ctr3dsGetShowAllTabs(void)
 {
-    return sShowAllTabs;
+    return sShowAllTabs;   // held at 0 by Apply when the debug menu is off
 }
 
 // Gameplay tweaks (EXTRA page 2). Same Apply/Set/Get split as everything above:
@@ -306,6 +311,22 @@ static uint8_t sExpAll;
 static uint8_t sLevelCap;    // CTR_CAP_*
 static uint8_t sRandomizer;
 static uint8_t sBagSort;     // CTR_BAGSORT_*
+
+// The shiny test switch. No Apply/Set split and no CtrSettingsSave() call,
+// because it is the one tweak that is not persisted -- see the note in
+// bridge.h. Game-side code clears it through Ctr3dsSetShinyTest(0) when the
+// armed encounter fires, so the setter has to stay callable from both worlds.
+static uint8_t sShinyTest;
+
+void Ctr3dsSetShinyTest(int on)
+{
+    sShinyTest = (CTR_DEBUG_MENU && on) ? 1 : 0;
+}
+
+int Ctr3dsGetShinyTest(void)
+{
+    return sShinyTest;   // held at 0 by the setter when the debug menu is off
+}
 
 void Ctr3dsApplyExpAll(int on)
 {
@@ -471,6 +492,13 @@ void Ctr3dsApplyAudioDbg(int which, int on)
     if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
         return;
 
+    // Same reasoning as Ctr3dsApplyShowAllTabs: this is what CtrSettingsLoad()
+    // calls, and ON is the neutral value because ON is the real mixer. Forcing
+    // the stored byte rather than the returned one also covers CtrAudioFrame,
+    // which reads the STEREO entry out of this array directly.
+    if (!CTR_DEBUG_MENU)
+        on = 1;
+
     sAudioDbg[which] = (uint8_t)(on ? 1 : 0);
 
     // STEREO is a host-side downmix and is read straight out of this array by
@@ -499,7 +527,7 @@ int Ctr3dsGetAudioDbg(int which)
     if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
         return 1;
 
-    return sAudioDbg[which];
+    return sAudioDbg[which];   // held at 1 by Apply when the debug menu is off
 }
 
 // Fastest bound button currently held, else the resting speed. Fastest rather

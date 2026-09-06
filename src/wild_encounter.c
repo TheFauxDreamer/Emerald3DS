@@ -393,6 +393,17 @@ static void CreateWildMon(u16 species, u8 level)
 #endif
 
     ZeroEnemyPartyMons();
+
+#if PLATFORM_3DS
+    // The shiny test switch, which creates the mon itself when it is armed.
+    // After ZeroEnemyPartyMons (CreateMon clears only its own slot, not the
+    // five stale ones a previous trainer battle left) and ahead of Cute Charm,
+    // which has no gender left to bias once the personality is chosen. A test
+    // shiny is not the encounter to be precious about that on.
+    if (Ctr3dsTryCreateShinyTestMon(&gEnemyParty[0], species, level))
+        return;
+#endif
+
     checkCuteCharm = TRUE;
 
     switch (gSpeciesInfo[species].genderRatio)

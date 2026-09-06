@@ -39,6 +39,17 @@ u16 Ctr3dsMapSpecies(u16 species);
 // have to be excluded. See the comment on the definition.
 u16 Ctr3dsMapWildSpecies(u16 species);
 
+// The shiny test switch, from EXTRA page 2.
+//
+// Returns TRUE when it has created a guaranteed-shiny `mon` and disarmed
+// itself, in which case the caller must NOT create one of its own. FALSE, and
+// nothing touched, whenever the switch is off.
+//
+// Creating rather than editing is forced by the save format; see the comment on
+// the definition. Wild encounters only, which is what the notice it exists to
+// test reacts to.
+bool8 Ctr3dsTryCreateShinyTestMon(struct Pokemon *mon, u16 species, u8 level);
+
 // Reorder one bag pocket in place. A no-op when the sort is set to OFF.
 void Ctr3dsSortBagPocket(u8 pocketId);
 
