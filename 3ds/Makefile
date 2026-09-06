@@ -151,8 +151,25 @@ ifneq ($(and $(wildcard $(APP_BANNER_IMG)),$(wildcard $(APP_BANNER_WAV))),)
 BANNER_DEP  := $(TARGET).bnr
 BANNER_FLAG := -banner $(TARGET).bnr
 
-$(TARGET).bnr: $(APP_BANNER_IMG) $(APP_BANNER_WAV) | $(BUILD)
-	$(BANNERTOOL) makebanner -i $(APP_BANNER_IMG) -a $(APP_BANNER_WAV) -o $@
+# Two steps rather than one, purely to get the tune to loop.
+#
+# `makebanner -a file.wav` converts the audio itself, and hardcodes looping OFF
+# while doing it -- convert_to_cwav(audio, false, 0, 0) in the tool's source,
+# with no flag to change it. The jingle would play once and stop, where a retail
+# banner loops for as long as the title stays highlighted.
+#
+# `makecwav` is the same conversion with the loop flag exposed, and
+# `makebanner -ca` takes the finished CWAV instead of a wav. So: convert with
+# -l true, then hand the result over. Same output size, loop flag set.
+#
+# Loop points are left at the default, which is the whole file (start frame 0,
+# end frame = the last one). A shorter loop would need the frame numbers, and
+# they are a property of the music rather than of the build.
+$(BUILD)/$(TARGET).cwav: $(APP_BANNER_WAV) | $(BUILD)
+	$(BANNERTOOL) makecwav -i $(APP_BANNER_WAV) -o $@ -l true
+
+$(TARGET).bnr: $(APP_BANNER_IMG) $(BUILD)/$(TARGET).cwav | $(BUILD)
+	$(BANNERTOOL) makebanner -i $(APP_BANNER_IMG) -ca $(BUILD)/$(TARGET).cwav -o $@
 else
 BANNER_DEP  :=
 BANNER_FLAG :=
@@ -207,4 +224,5 @@ $(BUILD):
 
 clean:
 	@rm -rf $(BUILD)/*.o $(BUILD)/*.d $(TARGET).elf $(TARGET).3dsx $(TARGET).3ds \
-	        $(TARGET).cia $(TARGET).smdh $(TARGET).bnr $(BUILD)/$(TARGET).map
+	        $(TARGET).cia $(TARGET).smdh $(TARGET).bnr $(BUILD)/$(TARGET).cwav \
+	        $(BUILD)/$(TARGET).map
