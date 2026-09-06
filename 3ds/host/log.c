@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
+#include "../bridge.h"
 #include "trace.h"
 
 #define LOG_DIR   "sdmc:/3ds/emerald3ds"
@@ -98,4 +99,67 @@ void CtrLog(const char *fmt, ...)
     // The line matters most when the next thing that happens is a data abort,
     // which never returns here to close the file.
     fflush(sFile);
+}
+
+// ---- stall diagnostics ------------------------------------------------------
+//
+// See the comment on these in 3ds/bridge.h. Two rules shape what is written:
+//
+//   Only overruns. A line per stage per frame would be the log's whole budget
+//   spent on the frames where nothing was wrong, and would itself cost an SD
+//   write per frame -- measuring the fault by causing it.
+//
+//   Capped per stage. One pathological stage must not push every other stage's
+//   evidence past LOG_MAX_LINES. Each gets SLOW_MAX lines and then says it has
+//   stopped, once, so a missing line is never mistaken for a fast stage.
+
+// Three frames at 60 Hz. Below this a stage is merely expensive; above it the
+// player sees the game stop.
+#define SLOW_MS      50
+#define SLOW_MAX     8
+#define SLOW_STAGES  12
+
+unsigned int CtrTimeNowMs(void)
+{
+    // Truncated to 32 bits on purpose: the callers only ever subtract two of
+    // these, and unsigned arithmetic carries that across the wrap correctly.
+    return (unsigned int)osGetTime();
+}
+
+void CtrLogSlow(const char *stage, unsigned int startMs)
+{
+    // Keyed on the POINTER, not on strcmp: every caller passes a string
+    // literal, so identical stages share an address and the table stays a
+    // handful of compares on a path that runs every frame.
+    static const char *sStage[SLOW_STAGES];
+    static unsigned    sCount[SLOW_STAGES];
+    static int         sUsed;
+
+    unsigned int elapsed = CtrTimeNowMs() - startMs;
+    int i;
+
+    if (elapsed < SLOW_MS)
+        return;
+
+    for (i = 0; i < sUsed; i++)
+        if (sStage[i] == stage)
+            break;
+
+    if (i == sUsed) {
+        if (sUsed == SLOW_STAGES)
+            return;             // more stages than expected: drop the newcomer
+        sStage[sUsed++] = stage;
+    }
+
+    sCount[i]++;
+
+    if (sCount[i] > SLOW_MAX + 1)
+        return;
+
+    if (sCount[i] == SLOW_MAX + 1) {
+        CtrLog("emerald3ds: slow %s - further overruns not logged\n", stage);
+        return;
+    }
+
+    CtrLog("emerald3ds: slow %s %u ms\n", stage, elapsed);
 }

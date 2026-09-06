@@ -4,10 +4,16 @@
 // truncated or wrong-version file is an ordinary situation, not an error: the
 // defaults apply and the game boots. Nothing here is allowed to block startup.
 //
-// Kept separate from save.c because the two have opposite requirements. The
-// save image is 128 KB written on a debounce because Emerald writes a sector as
-// thousands of single-byte programs; this is six bytes written when the player
-// taps a button, which happens rarely enough that a debounce would be noise.
+// Kept separate from save.c because the two have different contents, but they
+// now share its WRITE DISCIPLINE, and the reason is worth recording. This used
+// to write the file synchronously from the setter, i.e. from inside
+// CtrBottomUpdate() in the middle of a game frame, on the grounds that a
+// handful of bytes written on a button tap was too rare for a debounce to earn
+// its keep. That reasoning counted bytes and not FS calls: the sequence below
+// is seven or more blocking round trips to the FS process however small the
+// payload, and on a console -- unlike in an emulator -- the player sees the
+// game stop for it. So the setters mark dirty and the frame loop flushes,
+// exactly as save.c does, and a burst of taps costs one write.
 //
 // The write-to-temp-then-rename discipline is borrowed from save.c all the same:
 // an interrupted write leaves the previous settings intact rather than a
@@ -70,7 +76,7 @@ struct CtrSettings {
     uint8_t  ffAudio;                  // CTR_FFAUDIO_*
     // v6, in the three bytes v5 reserved as explicit padding. They exist at all
     // because without them the compiler would round the struct to its 4-byte
-    // alignment itself and CtrSettingsSave would write uninitialised stack to
+    // alignment itself and settings_write() would write uninitialised stack to
     // the card; v5 said they were somewhere for v6 to go, and this is v6.
     //
     // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
@@ -78,7 +84,7 @@ struct CtrSettings {
     uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
     // Explicit again for the same reason v5's was: four bytes at offset 17 puts
     // the struct at 21, which the compiler would round to 24 by itself and
-    // CtrSettingsSave would then write three bytes of uninitialised stack.
+    // settings_write() would then write three bytes of uninitialised stack.
     uint8_t  pad[3];
 };
 
@@ -108,9 +114,50 @@ extern void Ctr3dsApplyBagSort(int mode);
 extern int  Ctr3dsGetFfAudio(void);
 extern void Ctr3dsApplyFfAudio(int mode);
 
+// How long after the last change to write. Matched to save.c's own quiet
+// period: both are "the player has stopped poking at it", and two different
+// answers to that question would be two things to reason about rather than one.
+#define CTR_SETTINGS_QUIET_MS 100
+
+static int      sDirty;
+static uint64_t sLastChangeMs;
+
+// The directory, made once per boot rather than before every write.
+//
+// Two mkdir calls is two FS round trips, and after the first one they can only
+// ever report "already there". Called from CtrSettingsLoad() so it lands during
+// boot where a pause costs nothing, and from the writer as well so a write
+// still works in a build that never loaded.
+static void ensure_dir(void)
+{
+    static int done;
+
+    if (done)
+        return;
+
+    done = 1;
+
+    unsigned int t0 = CtrTimeNowMs();
+
+    mkdir("sdmc:/3ds", 0777);
+    mkdir(SETTINGS_DIR, 0777);
+
+    CtrLogSlow("settings.mkdir", t0);
+}
+
+// Queue a write. This is what every Ctr3dsSetFoo() calls; nothing touches the
+// card until CtrSettingsFlush() runs from the frame loop.
+void CtrSettingsMarkDirty(void)
+{
+    sDirty = 1;
+    sLastChangeMs = osGetTime();
+}
+
 void CtrSettingsLoad(void)
 {
     struct CtrSettings s;
+
+    ensure_dir();
 
     FILE *f = fopen(SETTINGS_PATH, "rb");
     if (f == NULL)
@@ -184,9 +231,10 @@ void CtrSettingsLoad(void)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 }
 
-void CtrSettingsSave(void)
+static void settings_write(void)
 {
     struct CtrSettings s;
+    unsigned int t0, t1;
 
     // Zeroed first so the padding above is written as zero rather than as
     // whatever the stack held.
@@ -207,22 +255,58 @@ void CtrSettingsSave(void)
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
 
-    mkdir("sdmc:/3ds", 0777);
-    mkdir(SETTINGS_DIR, 0777);
+    ensure_dir();
+
+    t0 = CtrTimeNowMs();
 
     FILE *f = fopen(SETTINGS_PATH ".tmp", "wb");
-    if (f == NULL)
+    if (f == NULL) {
+        CtrLogSlow("settings.write", t0);
         return;                       // read-only card, full card: not fatal
+    }
 
     size_t n = fwrite(&s, 1, sizeof(s), f);
     int flushed = (fflush(f) == 0);
-    fclose(f);
+    // Checked, not just called, for the reason save.c gives at its own fclose:
+    // on 3DS newlib it is the CLOSE that reaches the FS service, so a failure
+    // here means the bytes never landed however well fwrite and fflush went.
+    int closed = (fclose(f) == 0);
 
-    if (n != sizeof(s) || !flushed) {
+    CtrLogSlow("settings.write", t0);
+
+    if (n != sizeof(s) || !flushed || !closed) {
         remove(SETTINGS_PATH ".tmp");
         return;
     }
 
+    t1 = CtrTimeNowMs();
     remove(SETTINGS_PATH);
     rename(SETTINGS_PATH ".tmp", SETTINGS_PATH);
+    CtrLogSlow("settings.swap", t1);
+}
+
+// Write the queued change out, if the player has stopped changing things.
+//
+// Called from Rp2350PresentFrame() beside CtrSaveFlush(), which is the frame's
+// designated point for touching the card, and with force from the close path.
+//
+// sDirty is cleared whether or not the write succeeded, which is the one place
+// this deliberately differs from save.c. Losing a save is worth retrying every
+// frame for; losing a display preference is not, and a read-only card would
+// otherwise turn one tap into an FS attempt on every frame for the rest of the
+// session. This matches what the old write-on-the-tap code did: one attempt.
+void CtrSettingsFlush(int force)
+{
+    unsigned int t0;
+
+    if (!sDirty)
+        return;
+    if (!force && osGetTime() - sLastChangeMs < CTR_SETTINGS_QUIET_MS)
+        return;
+
+    sDirty = 0;
+
+    t0 = CtrTimeNowMs();
+    settings_write();
+    CtrLogSlow("settings", t0);
 }

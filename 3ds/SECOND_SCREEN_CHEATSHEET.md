@@ -24,11 +24,11 @@ file, drawn with rectangles and blits at hand-measured coordinates.
 ## 2. Frame path
 
 ```
-Rp2350PresentFrame()                 3ds/host/main.c:522   (end of every game frame)
+Rp2350PresentFrame()                 3ds/host/main.c:551   (end of every game frame)
   if (sSubFrame == 0)                                      once per DISPLAYED frame
      hidScanInput()
-     sample_touch(&touch)            3ds/host/main.c:84
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:374
+     sample_touch(&touch)            3ds/host/main.c:85
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:436
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
@@ -36,9 +36,16 @@ Rp2350PresentFrame()                 3ds/host/main.c:522   (end of every game fr
                                        Redraw() if needed -> paints sFb
   if (++sSubFrame >= sSpeed)
      CtrVideoPresent()               3ds/host/video.c:269
-        if (CtrBottomIsDirty())      video.c:301
+        if (CtrBottomIsDirty())      video.c:313
            upload(CtrBottomFramebuffer()); CtrBottomClearDirty()
+     CtrSaveFlush(0)                 3ds/host/save.c      the save image
+     CtrSettingsFlush(0)             3ds/host/settings.c  settings.bin
 ```
+
+The two flushes are at the bottom for a reason: this is the only point in the
+frame where blocking on the SD card is affordable, because `CtrVideoPresent()`
+has already waited for VBlank. Nothing on the touch path may write to the card
+itself -- see section 13.
 
 Key consequences:
 
@@ -47,7 +54,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:664](host/main.c#L664),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:675](host/main.c#L675),
   after audio init and before `AgbMain()`.
 
 ---
@@ -72,7 +79,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 507 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 522 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 609 / 114 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
@@ -547,7 +554,17 @@ make -C 3ds                              # -> 3ds/emerald3ds.{cia,3ds}
 
 **A change under `3ds/ui/` needs `3ds/build_objs.sh` rerun, then `make -C 3ds`.**
 A change under `3ds/host/` needs only `make -C 3ds`. A change to `bridge.h`
-needs both.
+needs both: `build_objs.sh` recompiles every game-side source unconditionally,
+and `3ds/Makefile` tracks header dependencies with `-MMD -MP`, so the host
+objects that include it rebuild too.
+
+That second half was not true until recently. The host rule had no header
+dependencies at all and only `main.o` carried a `FORCE` prerequisite (for the
+build stamp), so `make -C 3ds` after a `bridge.h` edit happily relinked stale
+`settings.o`, `video.o`, `audio.o`, `save.o`, `log.o` and `ppu.o`. A macro or
+enum whose value changed would then have been compiled two different ways into
+one binary, with no error at any stage. If you ever see a symptom that has no
+cause in the source, `make -C 3ds clean` first and see whether it survives.
 
 Diagnostics build (traces, boot splash, liveness bars). The flag must be passed
 to **both** or you get a half-instrumented build:
@@ -581,29 +598,39 @@ value without writing the file back out during the load that produced it.
    ```c
    void Ctr3dsApplyFoo(int v) { sFoo = clamp(v); }        // mutate, no persist
    void Ctr3dsSetFoo(int v)   { int b = sFoo; Ctr3dsApplyFoo(v);
-                                if (sFoo != b) CtrSettingsSave(); }
+                                if (sFoo != b) CtrSettingsMarkDirty(); }
    int  Ctr3dsGetFoo(void)    { return sFoo; }
    ```
+
+   `CtrSettingsMarkDirty()` queues; it does not write. The write happens in
+   `CtrSettingsFlush()`, called from `Rp2350PresentFrame()` beside
+   `CtrSaveFlush()`. Setters run from `CtrBottomUpdate()`, i.e. from the middle
+   of a game frame, and the write is seven-plus blocking FS round trips however
+   few bytes it carries -- on a console the player sees that. Never call the
+   writer from a setter.
 
    Range-check inside `Apply`, never trust the caller: a corrupt settings byte
    must leave the default standing.
 3. **`3ds/host/settings.c`**: append a `uint8_t` to `struct CtrSettings`, bump
    `SETTINGS_VERSION`, add a `SETTINGS_Vn_SIZE` short-read migration, add the
    `extern` and the load/save lines. Keep the struct's every byte spoken for
-   with explicit `pad`, or `CtrSettingsSave` writes uninitialised stack to the
+   with explicit `pad`, or `settings_write()` writes uninitialised stack to the
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
    `UiExtraStateKey()` ([:515](ui/tab_extra.c#L515)) in a bit range nothing else
    claims.
 
 The file is `sdmc:/3ds/emerald3ds/settings.bin`, written atomically through a
-`.tmp` and a rename.
+`.tmp` and a rename, on a `CTR_SETTINGS_QUIET_MS` debounce so a burst of taps
+costs one write. Unlike the save image, a failed write is not retried: one
+attempt per change, or a read-only card would turn one tap into an FS attempt
+on every frame for the rest of the session.
 
 **Two settings deliberately break the pattern**, and both are worth knowing
 before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsSave` ([host/main.c:321](host/main.c#L321)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:322](host/main.c#L322)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
@@ -657,6 +684,8 @@ appears.
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
+| The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms and is always compiled. |
+| A symptom with no cause anywhere in the source | A stale host object. `make -C 3ds clean` and rebuild before reading any more code. |
 
 ---
 

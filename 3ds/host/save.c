@@ -100,10 +100,18 @@ void CtrSaveLoad(void)
 // on the next frame rather than silently dropped.
 void CtrSaveFlush(int force)
 {
+    unsigned int t0;
+
     if (!sDirty)
         return;
     if (!force && now_ms() - sLastWriteMs < CTR_SAVE_QUIET_MS)
         return;
+
+    // 128 KB and a three-way rename, in the same frame tail the settings write
+    // now shares. Measured for the same reason: it runs from the frame loop, so
+    // if it ever overruns the player sees the game stop and nothing else says
+    // this was the cause.
+    t0 = CtrTimeNowMs();
 
     mkdir("sdmc:/3ds", 0777);
     mkdir(SAVE_DIR, 0777);
@@ -111,6 +119,7 @@ void CtrSaveFlush(int force)
     FILE *f = fopen(SAVE_TMP, "wb");
     if (f == NULL) {
         printf("save: cannot open " SAVE_TMP "\n");
+        CtrLogSlow("saveflush", t0);
         return;
     }
 
@@ -125,6 +134,7 @@ void CtrSaveFlush(int force)
         printf("save: write failed (%u/%u, flush %d, close %d)\n",
                (unsigned)n, SAVE_SIZE, flushed, closed);
         remove(SAVE_TMP);
+        CtrLogSlow("saveflush", t0);
         return;
     }
 
@@ -147,6 +157,7 @@ void CtrSaveFlush(int force)
         if (hadOld)
             rename(SAVE_BAK, SAVE_PATH);
         remove(SAVE_TMP);
+        CtrLogSlow("saveflush", t0);
         return;
     }
 
@@ -154,6 +165,7 @@ void CtrSaveFlush(int force)
         remove(SAVE_BAK);
 
     sDirty = 0;
+    CtrLogSlow("saveflush", t0);
 }
 
 // Write the image out NOW, whatever the debounce says.
