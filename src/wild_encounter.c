@@ -400,7 +400,7 @@ static void CreateWildMon(u16 species, u8 level)
     // five stale ones a previous trainer battle left) and ahead of Cute Charm,
     // which has no gender left to bias once the personality is chosen. A test
     // shiny is not the encounter to be precious about that on.
-    if (Ctr3dsTryCreateShinyTestMon(&gEnemyParty[0], species, level))
+    if (Ctr3dsTryCreateShinyTestMon(species, level))
         return;
 #endif
 
