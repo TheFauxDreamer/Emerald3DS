@@ -1,18 +1,21 @@
 # Give Emerald3DS its own Home-menu identity
 
-> **Status: planned, not started.** Written 2026-09-06, re-verified against the
-> tree on 2026-09-06 after five unrelated commits landed. Nothing in this
-> document has been applied.
+> **Status: applied.** Written 2026-09-06, re-verified and implemented the same
+> day. The build changes are in: `3ds/Makefile` and
+> `.github/workflows/build-3ds.yml` both carry the changes described below.
 >
-> **Where to pick it up:** everything here is now checked against the repo,
-> including the `bannertool` release and its CLI flags, which were the one open
-> decision in the first draft. That decision is settled under "Change 2". The
-> only remaining blocker is that the three art files do not exist yet.
+> **What is left is art, not code.** Drop `icon.png`, `banner.png` and
+> `banner.wav` into `3ds/meta/` and the build picks them up with no further
+> edits. `3ds/meta/README.md` restates the exact specs. Until then the build
+> behaves as it always has: devkitPro's default icon, and no banner.
 >
-> **Quickest possible win**, if you only want the icon and not the banner: drop
-> a 48x48 PNG at `3ds/icon.png`, change `APP_ICON` on `3ds/Makefile:37` to
-> `icon.png`, and apply the one-line SMDH prerequisite fix under "Change 1".
-> That is self-contained and needs no new tooling.
+> **Icon only, if you never get to the banner:** a 48x48 PNG at
+> `3ds/meta/icon.png` is sufficient on its own. `APP_ICON` already prefers it
+> over devkitPro's default the moment it exists.
+>
+> Two things differ from the first draft. The assets live in `3ds/meta/` rather
+> than loose at the top of `3ds/`, and `APP_TITLE` / `APP_DESCRIPTION` /
+> `APP_AUTHOR` were filled in directly rather than left to this document.
 
 ## Context
 
@@ -31,14 +34,14 @@ that looks like its own game rather than an untitled homebrew slot.
 
 Two things are in scope beyond the assets themselves:
 
-1. **A rebuild papercut.** `$(TARGET).smdh` has no dependency on the icon file
-   (`3ds/Makefile:123`), so once it exists, editing the PNG will not rebuild
-   it. You get the old icon with no warning until a `make clean`. Fixed here.
-   This is not a hypothetical class of bug in this file: `3ds/Makefile:63-70`
-   already carries a long comment on why `-MMD -MP` is "load bearing, not
-   hygiene", because without it a header edit silently relinks stale objects.
-   The missing icon prerequisite is that same bug one layer up, in the only
-   rule the dependency files do not cover.
+1. **A rebuild papercut.** `$(TARGET).smdh` had no dependency on the icon file,
+   so once one existed, editing the PNG would not have rebuilt it: you would get
+   the old icon with no warning until a `make clean`. Fixed. This was not a
+   hypothetical class of bug in this file. The Makefile already carries a long
+   comment on why `-MMD -MP` is "load bearing, not hygiene", because without it
+   a header edit silently relinks stale objects. The missing icon prerequisite
+   was that same bug one layer up, in the one rule those dependency files do
+   not cover.
 2. **Banner tooling.** `.bnr` files need `bannertool`, which is not a devkitPro
    package. That is the same situation as `makerom`, which CI already fetches
    from upstream pinned by SHA256.
@@ -47,56 +50,60 @@ Two things are in scope beyond the assets themselves:
 
 ## Assets to create
 
-All three are new source files, committed to the repo. Nothing in `.gitignore`
-excludes them.
+All three are new source files, committed to the repo, and they belong in
+`3ds/meta/` (created, with a `README.md` restating these specs). Nothing in
+`.gitignore` excludes them.
 
 | File | Spec | Notes |
 |---|---|---|
-| `3ds/icon.png` | **48x48** PNG | The Home-menu tile. |
-| `3ds/banner.png` | **256x128** PNG | The top-screen visual. Exact, not advisory: `bannertool` hard-errors on any other size rather than scaling (`BANNER_GFX_WIDTH` / `BANNER_GFX_HEIGHT`, checked in `load_image`). Flat image only; an animated or 3D banner needs a CGFX authored elsewhere and is out of scope. |
-| `3ds/banner.wav` | Short **16-bit PCM** WAV, about 3 s | `bannertool` **requires** audio and will not build a banner without it (verified in source: `makebanner` returns -1 when both `--audio` and `--cwavaudio` are absent). Converted to CWAV internally. This is the jingle that plays when the title is highlighted. Keep it plain 16-bit PCM: the build pinned in Change 2 is the older codebase, and the maintained fork's wider format support (OGG, anything `dr_wav` decodes) does not apply to it. |
+| `3ds/meta/icon.png` | **48x48** PNG | The Home-menu tile. |
+| `3ds/meta/banner.png` | **256x128** PNG | The top-screen visual. Exact, not advisory: `bannertool` hard-errors on any other size rather than scaling (`BANNER_GFX_WIDTH` / `BANNER_GFX_HEIGHT`, checked in `load_image`). Flat image only; an animated or 3D banner needs a CGFX authored elsewhere and is out of scope. |
+| `3ds/meta/banner.wav` | Short **16-bit PCM** WAV, about 3 s | `bannertool` **requires** audio and will not build a banner without it (verified in source: `makebanner` returns -1 when both `--audio` and `--cwavaudio` are absent). Converted to CWAV internally. This is the jingle that plays when the title is highlighted. Keep it plain 16-bit PCM: the build pinned in Change 2 is the older codebase, and the maintained fork's wider format support (OGG, anything `dr_wav` decodes) does not apply to it. |
 
 Until the art exists the build keeps working. Both the existing icon rule and
 the new banner rule are wrapped in `wildcard` guards, so a missing asset
-degrades to "no icon / no banner" rather than a build failure. That guard is
-already the established pattern at `3ds/Makefile:119`.
+degrades to "no icon / no banner" rather than a build failure. That guard was
+already the established pattern for the icon; the banner now follows it.
 
 ---
 
-## Change 1: `3ds/Makefile`
+## Change 1: `3ds/Makefile` (applied)
 
-**Variables** (lines 34-37). Replace the placeholder text and point at the new
-assets:
+Line numbers are deliberately omitted here. This is now describing code that
+exists, so read the file; the first draft's references went stale twice in a
+day and would go stale again.
+
+**Variables.** `APP_ICON` prefers the repo asset and falls back to devkitPro's
+default, so the build is unchanged until the art lands and switches over on its
+own with no edit here:
 
 ```make
-APP_TITLE       := <your title>
-APP_DESCRIPTION := <your description>
-APP_AUTHOR      := <your name>
-APP_ICON        := icon.png
+APP_ICON        := $(firstword $(wildcard meta/icon.png) $(CTRULIB)/default_icon.png)
 
-# Banner inputs. Both are required for a banner to be built at all.
-APP_BANNER_IMG  := banner.png
-APP_BANNER_WAV  := banner.wav
+APP_BANNER_IMG  := meta/banner.png
+APP_BANNER_WAV  := meta/banner.wav
 ```
 
 Paths are relative to `3ds/`, because the Makefile is always run as
-`make -C 3ds`.
+`make -C 3ds`. `APP_TITLE`, `APP_DESCRIPTION` and `APP_AUTHOR` were filled in
+directly and are a one-line change each if they need revising.
 
-**Tool variable**, beside the existing `MAKEROM ?= makerom` (line 97):
+**Tool variable**, beside the existing `MAKEROM ?= makerom`:
 
 ```make
 BANNERTOOL ?= bannertool
 ```
 
-**SMDH rule** (line 123). Add the icon as a prerequisite so editing it
-rebuilds:
+**SMDH rule.** The icon is now a prerequisite, so editing it rebuilds:
 
 ```make
 $(TARGET).smdh: $(APP_ICON) | $(BUILD)
 ```
 
-**New banner rule**, mirroring the icon block's structure and its rationale,
-which is that a missing asset must not break the build:
+**Banner rule**, mirroring the icon block's structure and its rationale, which
+is that a missing asset must not break the build. Note the guard covers both
+inputs together: guarding on only the image would turn a missing wav into a hard
+failure, because `bannertool` refuses to build a silent banner.
 
 ```make
 ifneq ($(and $(wildcard $(APP_BANNER_IMG)),$(wildcard $(APP_BANNER_WAV))),)
@@ -111,12 +118,9 @@ BANNER_FLAG :=
 endif
 ```
 
-**Wire it into both package targets** (lines 130-136). Add `$(BANNER_DEP)` to
-the prerequisites and `$(BANNER_FLAG)` to the `makerom` command, alongside the
-existing `$(SMDH_DEP)` and `$(ICON_FLAG)`.
-
-**`clean`** (line 177). Add `$(TARGET).bnr` to the existing wrapped list,
-which already removes `$(BUILD)/*.d` alongside the objects.
+**Both package targets** gained `$(BANNER_DEP)` as a prerequisite and
+`$(BANNER_FLAG)` on the `makerom` command, alongside `$(SMDH_DEP)` and
+`$(ICON_FLAG)`. **`clean`** gained `$(TARGET).bnr`.
 
 > The `3dsx` target gets no banner, because the format only carries an SMDH. It
 > is already known-broken here anyway (unaligned relocations, see the header
@@ -125,7 +129,7 @@ which already removes `$(BUILD)/*.d` alongside the objects.
 > Unrelated to `3ds/UI_SKIN_PLAN.md`, despite both being about art. That plan
 > puts PNGs under `3ds/graphics/skin/` and compiles them into the ELF via
 > `INCGFX`. These three are packaging assets: read at build time by `smdhtool`
-> and `bannertool`, never linked, and so they sit at the top of `3ds/`.
+> and `bannertool`, never linked. Hence a separate `3ds/meta/`.
 
 ---
 
