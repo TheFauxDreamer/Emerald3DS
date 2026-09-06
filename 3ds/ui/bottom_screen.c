@@ -169,6 +169,7 @@ static void EnsureTabVisible(void)
 #define NOTICE_IN_X   (NOTICE_X + 8)
 #define NOTICE_IN_W   (NOTICE_W - 16)
 #define NOTICE_IN_Y   (NOTICE_Y + 8)
+#define NOTICE_IN_H   (NOTICE_H - 16)
 
 // Three rows. The headline pairs the mon's icon with SHINY! at double size, the
 // species gets a line of its own also at double size, and the dismiss button
@@ -215,6 +216,23 @@ static void DrawNotice(u16 species, u32 personality)
 
     UiWindowFrame(NOTICE_TX, NOTICE_TY, NOTICE_TW, NOTICE_TH);
 
+    // The panel paints its own ground instead of sitting on the frame's.
+    //
+    // This is what makes a fixed gold safe. Everything else on this screen uses
+    // UiThemeText/UiThemeShadow precisely because the 20 frames run from
+    // near-white to near-black, and the sparkle gold is one colour that cannot
+    // follow them: on the light half of that range it would be a pale mark on a
+    // pale field, which is the "easy to miss" failure the modal panel exists to
+    // fix. A dark ground makes it read identically on all 20. The frame still
+    // draws the border, so the panel is still visibly the player's.
+    UiFillRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHADOW);
+
+    // Gold rule just inside the frame, two passes for a 2px line -- the same
+    // idiom the selected move row and the EXTRA toggles use for emphasis.
+    UiRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHINY);
+    UiRect(NOTICE_IN_X + 1, NOTICE_IN_Y + 1, NOTICE_IN_W - 2, NOTICE_IN_H - 2,
+           UI_COL_SHINY_EDGE);
+
     // Icon and headline as one centred block, so the pair stays balanced rather
     // than the icon hanging off a fixed left margin.
     //
@@ -230,23 +248,33 @@ static void DrawNotice(u16 species, u32 personality)
 
     UiMonIcon(x, NOTICE_HEAD_Y + (UI_GLYPH_BIG_H - NOTICE_ICON_W) / 2,
               species, personality);
+
+    // Gold body over an orange shadow, which is the sprite's own ramp rather
+    // than a generic drop shadow: the star art shades from gold into orange at
+    // its edges, so the headline picks up depth the same way it does.
     UiTextBig(x + NOTICE_ICON_W + NOTICE_ICON_GAP, NOTICE_HEAD_Y, label,
-              UI_COL_ACCENT, UiThemeShadow());
+              UI_COL_SHINY, UI_COL_SHINY_EDGE);
 
     // The species on its own line, also doubled: it is the half of the message
     // the player actually has to act on.
+    //
+    // The pale step of the ramp, not UiThemeText(): the theme colours track the
+    // frame, and on a light frame they are dark ink meant for a light field,
+    // which on this panel's own dark ground would be near-invisible. Cream also
+    // keeps the hierarchy right, sitting a step under the gold headline instead
+    // of competing with it.
     UiTextBig(NOTICE_IN_X + (NOTICE_IN_W - UiTextBigWidth(gSpeciesNames[species])) / 2,
               NOTICE_NAME_Y, gSpeciesNames[species],
-              UiThemeText(), UiThemeShadow());
+              UI_COL_SHINY_PALE, UI_COL_SHADOW);
 
     // A real control rather than "tap anywhere". Only this rect dismisses, so
     // a stray touch on a panel the player is still reading does not throw it
     // away; the rest of the panel absorbs touches without acting on them.
-    UiRect(NOTICE_BTN_X, NOTICE_BTN_Y, NOTICE_BTN_W, NOTICE_BTN_H, UI_COL_DIM);
+    UiRect(NOTICE_BTN_X, NOTICE_BTN_Y, NOTICE_BTN_W, NOTICE_BTN_H, UI_COL_SHINY);
     UiAscii(label, "DISMISS", sizeof(label));
     UiText(NOTICE_BTN_X + (NOTICE_BTN_W - UiTextWidth(label)) / 2,
            NOTICE_BTN_Y + (NOTICE_BTN_H - UI_GLYPH_H) / 2,
-           label, UI_COL_ACCENT, UiThemeShadow());
+           label, UI_COL_SHINY_PALE, UI_COL_SHADOW);
 }
 
 // ------------------------------------------------------------- lifecycle ---
