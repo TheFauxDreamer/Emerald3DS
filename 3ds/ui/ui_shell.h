@@ -46,6 +46,24 @@ enum UiTab
 #define UI_COL_HP_LOW     0xAA09   // RGB(172, 65, 74)
 #define UI_COL_HP_LOW_L   0xFAC7   // RGB(255, 90, 57)
 #define UI_COL_HP_BACK    0x1082
+// The shiny sparkle's gold, read out of
+// graphics/battle_anims/sprites/gold_stars.png -- ANIM_TAG_GOLD_STARS, the
+// sprite TryShinyAnimation (src/battle_anim_throw.c) spins around a shiny when
+// the encounter opens. Taking the notice's colours from that exact art is the
+// point: the panel is a second telling of a thing the game already said, so it
+// should be the same gold rather than a yellow chosen to look like it.
+//
+// The art is a ramp, not one colour -- white core, cream highlight, gold body,
+// orange edge -- and the notice uses three steps of it for the same reason the
+// sprite does: a single flat yellow reads as a warning, a ramp reads as metal.
+//
+// Hardcoded from the art for exactly the reason the HP bar colours above are.
+// The anim palette is only in VRAM while that battle animation is running, and
+// this panel is drawn whenever the bottom screen repaints.
+#define UI_COL_SHINY       0xFE24   // RGB(255,197, 32) gold body,  pal index 7
+#define UI_COL_SHINY_PALE  0xFEF3   // RGB(255,222,156) highlight,  pal index 5
+#define UI_COL_SHINY_EDGE  0xFB02   // RGB(255, 98, 16) orange edge, pal index 9
+
 // Poke Ball marker. Fixed rather than themed: the ball is recognisable by its
 // colours, and it carries its own dark outline on every window frame.
 #define UI_COL_BALL_TOP    0xE104   // red
