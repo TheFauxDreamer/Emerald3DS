@@ -15,9 +15,15 @@
 // game stop for it. So the setters mark dirty and the frame loop flushes,
 // exactly as save.c does, and a burst of taps costs one write.
 //
-// The write-to-temp-then-rename discipline is borrowed from save.c all the same:
-// an interrupted write leaves the previous settings intact rather than a
-// half-written file that would then be discarded as corrupt.
+// It does NOT borrow save.c's write-to-temp-then-rename discipline, and that is
+// the second thing measurement changed. That dance exists so an interrupted
+// write cannot leave a half-written file, which is worth six FS round trips for
+// a 128 KB image spanning hundreds of sectors. This payload is 24 bytes: it
+// lands in a single sector, so there is no torn state to protect against, and
+// the magic and version checks below turn anything unexpected into "use the
+// defaults" rather than into damage. On a console the remove-and-rename half
+// measured 51-56 ms on its own -- paid, per tap, to protect a display
+// preference from resetting. So the file is opened once and rewritten in place.
 
 #include <3ds.h>
 #include <stddef.h>
@@ -26,6 +32,7 @@
 #include <sys/stat.h>
 
 #include "../bridge.h"
+#include "trace.h"                    // CtrLog
 
 #define SETTINGS_DIR  "sdmc:/3ds/emerald3ds"
 #define SETTINGS_PATH SETTINGS_DIR "/settings.bin"
@@ -114,13 +121,30 @@ extern void Ctr3dsApplyBagSort(int mode);
 extern int  Ctr3dsGetFfAudio(void);
 extern void Ctr3dsApplyFfAudio(int mode);
 
-// How long after the last change to write. Matched to save.c's own quiet
-// period: both are "the player has stopped poking at it", and two different
-// answers to that question would be two things to reason about rather than one.
-#define CTR_SETTINGS_QUIET_MS 100
+// How long after the last change to write.
+//
+// Deliberately NOT save.c's 100 ms, though this was matched to it at first. The
+// two are debouncing different things: a save burst is 28 mechanical hook calls
+// milliseconds apart, so 100 ms coalesces all of them, while settings arrive
+// from a finger moving between buttons seconds apart, so 100 ms coalesces
+// nothing at all. One pass through the EXTRA tab measured nine separate writes.
+// A second of quiet is what actually turns "browsing the settings" into one.
+#define CTR_SETTINGS_QUIET_MS 1000
 
 static int      sDirty;
 static uint64_t sLastChangeMs;
+
+// The file, held open for the session.
+//
+// Reopening per write is what made this expensive: creating, closing, deleting
+// and renaming all mutate the directory, and each is its own round trip to the
+// FS process. Rewriting 24 bytes at offset 0 of an already-open file changes no
+// directory entry and touches one sector.
+//
+// Never closed, exactly as log.c never closes its own handle: fflush() is what
+// pushes the bytes, and process teardown is what closes it.
+static FILE *sFile;
+static int   sOpenTried;
 
 // The directory, made once per boot rather than before every write.
 //
@@ -145,6 +169,41 @@ static void ensure_dir(void)
     CtrLogSlow("settings.mkdir", t0);
 }
 
+// Open the file once, for both reading and writing.
+//
+// Called from CtrSettingsLoad() so the open lands during boot, where a pause is
+// invisible, rather than on the first setting the player touches.
+//
+// "r+b" first, and the order matters: it opens an existing file WITHOUT
+// truncating it, so no cluster is freed and reallocated. "w+b" is the first-run
+// path only. On a first run that never changes a setting this leaves a zero-byte
+// settings.bin behind, which the next boot reads as a magic mismatch and
+// ignores -- the same outcome as no file at all.
+//
+// One attempt per boot, whether or not it works, so a read-only card costs one
+// failed open rather than one per write.
+static FILE *settings_open(void)
+{
+    unsigned int t0;
+
+    if (sOpenTried)
+        return sFile;
+
+    sOpenTried = 1;
+
+    ensure_dir();
+
+    t0 = CtrTimeNowMs();
+
+    sFile = fopen(SETTINGS_PATH, "r+b");
+    if (sFile == NULL)
+        sFile = fopen(SETTINGS_PATH, "w+b");
+
+    CtrLogSlow("settings.open", t0);
+
+    return sFile;
+}
+
 // Queue a write. This is what every Ctr3dsSetFoo() calls; nothing touches the
 // card until CtrSettingsFlush() runs from the frame loop.
 void CtrSettingsMarkDirty(void)
@@ -157,18 +216,20 @@ void CtrSettingsLoad(void)
 {
     struct CtrSettings s;
 
-    ensure_dir();
-
-    FILE *f = fopen(SETTINGS_PATH, "rb");
+    FILE *f = settings_open();
     if (f == NULL)
-        return;                       // first run: defaults already in place
+        return;                       // read-only or full card: defaults stand
 
     // Zeroed first so a short v3 read leaves the v4 fields at their defaults
     // rather than at whatever was on the stack.
     memset(&s, 0, sizeof(s));
 
+    // The handle stays open for the session, so every access sets its own
+    // position rather than inheriting one.
+    if (fseek(f, 0, SEEK_SET) != 0)
+        return;
+
     size_t n = fread(&s, 1, sizeof(s), f);
-    fclose(f);
 
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
@@ -234,7 +295,7 @@ void CtrSettingsLoad(void)
 static void settings_write(void)
 {
     struct CtrSettings s;
-    unsigned int t0, t1;
+    unsigned int t0;
 
     // Zeroed first so the padding above is written as zero rather than as
     // whatever the stack held.
@@ -255,34 +316,27 @@ static void settings_write(void)
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
 
-    ensure_dir();
+    FILE *f = settings_open();
+    if (f == NULL)
+        return;                       // read-only card, full card: not fatal
 
     t0 = CtrTimeNowMs();
 
-    FILE *f = fopen(SETTINGS_PATH ".tmp", "wb");
-    if (f == NULL) {
-        CtrLogSlow("settings.write", t0);
-        return;                       // read-only card, full card: not fatal
-    }
+    // In place, over whatever is already there. The struct only ever grows
+    // across versions and the version field gates every read, so a shorter
+    // older file is simply extended and a longer newer one could only come from
+    // a downgrade, where the version check rejects it before the tail matters.
+    if (fseek(f, 0, SEEK_SET) == 0) {
+        size_t n = fwrite(&s, 1, sizeof(s), f);
 
-    size_t n = fwrite(&s, 1, sizeof(s), f);
-    int flushed = (fflush(f) == 0);
-    // Checked, not just called, for the reason save.c gives at its own fclose:
-    // on 3DS newlib it is the CLOSE that reaches the FS service, so a failure
-    // here means the bytes never landed however well fwrite and fflush went.
-    int closed = (fclose(f) == 0);
+        // fflush, not fclose: the handle outlives this call. This is the same
+        // thing log.c relies on to get a line onto the card before a crash.
+        if (n != sizeof(s) || fflush(f) != 0)
+            CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
+                   (unsigned)n, (unsigned)sizeof(s));
+    }
 
     CtrLogSlow("settings.write", t0);
-
-    if (n != sizeof(s) || !flushed || !closed) {
-        remove(SETTINGS_PATH ".tmp");
-        return;
-    }
-
-    t1 = CtrTimeNowMs();
-    remove(SETTINGS_PATH);
-    rename(SETTINGS_PATH ".tmp", SETTINGS_PATH);
-    CtrLogSlow("settings.swap", t1);
 }
 
 // Write the queued change out, if the player has stopped changing things.
