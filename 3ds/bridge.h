@@ -185,13 +185,21 @@ int  Ctr3dsGetTopScale(void);
 // port rather than to play the game, which is why they sit together behind one
 // value instead of scattered through the pages a player uses.
 //
-// SET THIS TO 0 TO SHIP. That is the whole interface: the page disappears, the
-// pager drops to two buttons, and nothing else moves.
+// SET THIS TO 0 TO SHIP. That is the whole interface, and it now covers three
+// things rather than one:
 //
-// Turning it off also neutralises the three settings themselves, not just their
-// controls (3ds/host/main.c). Two of them persist in settings.bin, so a build
-// with the menu compiled out could otherwise inherit "show every tab" or a
-// muted PSG channel from a debug session and offer the player no way back.
+//   The page disappears and the pager drops to two buttons. Nothing else on
+//   the EXTRA tab moves.
+//
+//   The three settings behind it are neutralised, not merely hidden
+//   (3ds/host/main.c). Two of them persist in settings.bin, so a build with the
+//   menu compiled out could otherwise inherit "show every tab" or a muted PSG
+//   channel from a debug session and offer the player no way back.
+//
+//   The log file is not created (3ds/host/log.c). A build you hand to someone
+//   else should not write to their SD card, and everything in that file is
+//   written for whoever is developing the port. svcOutputDebugString survives,
+//   so an emulator still shows the same lines.
 #define CTR_DEBUG_MENU 1
 
 // Show every bottom-screen tab, including the ones the save has not unlocked.
@@ -357,7 +365,8 @@ void Ctr3dsApplyAudioDbg(int which, int on);
 // invisible from the outside: the game stops, then carries on, and nothing
 // says which call did it. These time a stage and write a line ONLY when it
 // overran, so sdmc:/3ds/emerald3ds/log.txt names the call rather than the
-// symptom.
+// symptom -- in a debug build; a shipping one keeps the timing and drops the
+// file, along with the rest of the log.
 //
 // Declared here rather than in 3ds/host/trace.h because the bottom screen is
 // game-side and must never see <3ds.h>. Plain `const char *` and `unsigned

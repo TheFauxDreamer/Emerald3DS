@@ -26,6 +26,21 @@
 //
 // Nothing here may block startup. A read-only card, a full card and a missing
 // directory are all ordinary: they cost the file and keep the game.
+//
+// THE FILE HALF IS COMPILED OUT OF A SHIPPING BUILD, keyed on CTR_DEBUG_MENU
+// (3ds/bridge.h) so there stays exactly one switch to throw before sharing a
+// build. A build someone else runs should not create files on their card or
+// spend an SD write per line, and everything above is written for the person
+// developing the port rather than for the person playing it.
+//
+// svcOutputDebugString stays in every build. It costs nothing, it reaches an
+// emulator's log, and a console discards it -- so it is free to leave in.
+//
+// One message does lose its only destination on a console: the missing
+// sdmc:/3ds/dspfirm.cdc warning. That one is about the recipient's SD card
+// rather than about this port -- no build can carry a DSP dump -- so its home
+// is README.md's Limitations section, not a log they would have to be told to
+// go and read.
 
 #include <3ds.h>
 #include <stdarg.h>
@@ -34,6 +49,8 @@
 
 #include "../bridge.h"
 #include "trace.h"
+
+#if CTR_DEBUG_MENU
 
 #define LOG_DIR   "sdmc:/3ds/emerald3ds"
 #define LOG_PATH  LOG_DIR "/log.txt"
@@ -60,27 +77,8 @@ static void log_open(void)
     sFile = fopen(LOG_PATH, "w");
 }
 
-// Always compiled, unlike CtrTrace. For the handful of conditions a user needs
-// to know about even in a release build.
-void CtrLog(const char *fmt, ...)
+static void log_to_file(const char *buf, int n)
 {
-    char buf[256];
-    va_list ap;
-    int n;
-
-    va_start(ap, fmt);
-    n = vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-
-    if (n < 0)
-        return;
-    if (n > (int)sizeof(buf) - 1)
-        n = (int)sizeof(buf) - 1;
-
-    // Unconditional, and first: under an emulator this is the live view, and it
-    // must not depend on the SD card having been writable.
-    svcOutputDebugString(buf, n);
-
     log_open();
     if (sFile == NULL)
         return;
@@ -99,6 +97,38 @@ void CtrLog(const char *fmt, ...)
     // The line matters most when the next thing that happens is a data abort,
     // which never returns here to close the file.
     fflush(sFile);
+}
+
+#else   // !CTR_DEBUG_MENU: shipping build, nothing reaches the card
+
+static void log_to_file(const char *buf, int n) { (void)buf; (void)n; }
+
+#endif
+
+// Always compiled, unlike CtrTrace: the conditions this reports still reach an
+// emulator's log in every build. Whether they also reach the SD card is what
+// CTR_DEBUG_MENU decides -- see the note at the top of this file.
+void CtrLog(const char *fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (n < 0)
+        return;
+    if (n > (int)sizeof(buf) - 1)
+        n = (int)sizeof(buf) - 1;
+
+    // Unconditional, and first: under an emulator this is the live view, and it
+    // must not depend on the SD card having been writable -- or, now, on the SD
+    // card being written at all.
+    svcOutputDebugString(buf, n);
+
+    log_to_file(buf, n);
 }
 
 // ---- stall diagnostics ------------------------------------------------------

@@ -216,9 +216,10 @@ void CtrAudioInit(void)
         // is a warning -- but it must be a VISIBLE one, or it presents as
         // "the port has no sound".
         //
-        // This goes to sdmc:/3ds/emerald3ds/log.txt as well as to the
-        // emulator's debug output (3ds/host/log.c), because on a console the
-        // debug output goes nowhere and this message is the whole answer.
+        // Reaches sdmc:/3ds/emerald3ds/log.txt as well as the emulator's debug
+        // output in a debug build (3ds/host/log.c). A shipping build writes no
+        // file, so on a console this one is answered by README.md's Limitations
+        // section instead -- no build can carry a DSP dump anyway.
         CtrLog("emerald3ds: audio disabled - ndspInit failed (rc=0x%08lX). "
                "Missing sdmc:/3ds/dspfirm.cdc? Dump it with DSP1.\n",
                (unsigned long)rc);
