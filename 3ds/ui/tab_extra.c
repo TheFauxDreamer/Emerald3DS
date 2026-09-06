@@ -10,13 +10,15 @@
 // cap, a species randomiser, a bag sort order. The behaviour lives in
 // 3ds/tweaks.c; this file only draws the toggles and reads them back.
 //
-// Paging costs no vertical space at all. Page 1 already fills its 176px
-// interior exactly (four rows, y=8 to y=183), so the pager sits on the row-1
-// label line instead, whose right-hand side is empty on both pages.
+// Paging costs no vertical space. The pager takes the right-hand end of the top
+// line, y=8..25, on every page; page 2 puts its first row label to the left of
+// it, page 3 its DEBUG caption, and page 1 leaves that end clear and starts its
+// rows underneath.
 //
-// On both pages the first three button rows deliberately span the same 22..298,
-// so the block reads as one control panel rather than three unrelated widgets.
-// The fourth row is set apart: label beside its buttons, not above.
+// Pages 1 and 2 keep the same horizontal span, 22..298, so the block still
+// reads as one control panel across a page turn. They no longer share a
+// VERTICAL rhythm, because they no longer carry the same number of rows -- see
+// the two grids below.
 
 #include "global.h"
 
@@ -56,33 +58,55 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define BTN_H         26
 #define BTN_GAP       12
 
-// Four rows do not fit at the old 52px pitch: a labelled row is 15 + 2 + 26 =
-// 43px, and four of those plus gaps overruns the 176px interior. So the last
-// row carries its label beside its buttons instead of above them, which is what
-// buys the ~35px, and the MOD note moves up onto the BUTTON HOLD label's line
-// where it belongs anyway.
-#define ROW1_LABEL_Y  8
+// A label sits 17px above its buttons, so a labelled row is 15 (glyph) + 2 + 26
+// (button) = 43px tall. The interior is y=8..183, which is 176px.
+#define LABEL_TO_BTN    17
+#define LABELLED_ROW_H  (LABEL_TO_BTN + BTN_H)
+
+// The top line, y=8..25. The pager owns its right-hand end on every page; what
+// sits to its left differs -- page 2's first row label, page 3's DEBUG caption,
+// and on page 1 nothing at all.
+#define TOP_LINE_Y    8
+
+// PAGE 2's grid: four rows, and they only fit because the fourth carries its
+// label beside its buttons rather than above them. Four labelled rows would be
+// 172px of row plus gaps, which overruns the 176px interior; that swap buys the
+// ~35px, and the MOD note moves onto the BUTTON HOLD label's line on page 1 for
+// the same reason. There is no slack left here: 8 to 183, gaps of 7 and 6.
+#define ROW1_LABEL_Y  TOP_LINE_Y
 #define ROW2_LABEL_Y  58
 #define ROW3_LABEL_Y  108
-#define LABEL_TO_BTN  17
 
-// Named for the row rather than for whatever page 1 happens to put there, so
-// page 2 can share the grid without its code reading as if it were drawing
-// game speeds and screen scales.
 #define ROW1_BTN_Y    (ROW1_LABEL_Y + LABEL_TO_BTN)
 #define ROW2_BTN_Y    (ROW2_LABEL_Y + LABEL_TO_BTN)
 #define ROW3_BTN_Y    (ROW3_LABEL_Y + LABEL_TO_BTN)
 
+// PAGE 1's grid, which used to be the same one.
+//
+// It stopped fitting when the tab-unlock override moved to the debug page and
+// left page 1 with three rows on a layout measured for four: the first label
+// jammed against the top frame at y=8, and 32px of dead space below the last
+// button. Sharing was right while the row counts matched and wrong afterwards.
+//
+// So page 1 starts BELOW the pager line rather than beside it, the way the
+// debug page does, and spends the freed height on the gaps between rows -- 12px
+// against page 2's 7. Three rows at a 55px pitch from y=30 put the last button
+// at 157..183, landing on the interior floor at exactly the same place page 2's
+// fourth row does.
+#define P1_ROW_GAP    12
+#define P1_ROW_Y(i)   (30 + (i) * (LABELLED_ROW_H + P1_ROW_GAP))
+#define P1_BTN_Y(i)   (P1_ROW_Y(i) + LABEL_TO_BTN)
+
 #define SPD_W         60
-#define SPD_Y         ROW1_BTN_Y
+#define SPD_Y         P1_BTN_Y(0)
 #define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
 
 #define SCL_W         84
-#define SCL_Y         ROW2_BTN_Y
+#define SCL_Y         P1_BTN_Y(1)
 #define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
 
 #define TRB_W         60
-#define TRB_Y         ROW3_BTN_Y
+#define TRB_Y         P1_BTN_Y(2)
 #define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
 
 // The MOD note shares the BUTTON HOLD label's line. That label is 63px wide, so
@@ -90,22 +114,20 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define TRB_NOTE_X    96
 
 // What fast-forward does to the music, sharing the GAME SPEED label line the
-// same way the MOD note shares BUTTON HOLD's -- page 1's four button rows
-// already fill the 176px interior exactly, so a fifth row does not fit and the
-// spare half of a label line is the only room there is.
+// same way the MOD note shares BUTTON HOLD's. It belongs on that line because
+// GAME SPEED is the only control it modifies, and a row of its own would cost
+// 43px to say one word.
 //
-// "GAME SPEED" ends near x=76. A third page moved the pager one button further
-// left, taking its PAGE caption from x=226 to x=198, so this shrank from 100 to
-// 88 to keep clear of it: 104..192 against a caption starting at 198. The
-// widest label it draws, "MUSIC FAST", is 54px, so 88 is still generous.
+// "GAME SPEED" ends near x=76, so 104 clears it. The width was 88 rather than
+// 100 to stay clear of the pager's PAGE caption at x=198; page 1's rows have
+// since moved off the pager's line, so nothing constrains it now, and it stays
+// at 88 only because the widest label it draws, "MUSIC FAST", is 54px.
 //
-// 17px tall at y=8 ends at y=24, abutting the row-1 buttons at y=25 without
-// overlapping, exactly as the pager does.
-//
-// It belongs on this row because GAME SPEED is the only control it modifies.
+// 17px tall at y=30 ends at y=47, abutting the row-1 buttons at y=47 without
+// overlapping, the way it used to abut them at y=25.
 #define FFA_X         104
 #define FFA_W         88
-#define FFA_Y         ROW1_LABEL_Y
+#define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
 
 // The fourth row, the one that carries its label beside its buttons rather than
@@ -114,12 +136,17 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define ROW4_Y        157
 #define ROW4_LABEL_X  16
 
-// The pager, right-aligned to the interior edge at x=311 and sharing the row-1
-// label line. 17px tall at y=8 ends at y=24, exactly abutting the row-1 buttons
-// at y=25 without overlapping them, which is what makes it free.
+// The pager, right-aligned to the interior edge at x=311 and occupying the top
+// line on every page. 17px tall at y=8 ends at y=24, so on page 2 it abuts that
+// page's row-1 buttons at y=25 without overlapping them, which is what makes it
+// free there; pages 1 and 3 start their rows below it instead.
+//
+// Fixed to TOP_LINE_Y rather than to any page's first row, or a page that moved
+// its rows would drag the pager with it and the buttons would jump under the
+// finger on a page turn.
 #define PGR_W         26
 #define PGR_H         17
-#define PGR_Y         ROW1_LABEL_Y
+#define PGR_Y         TOP_LINE_Y
 // Two pages of settings, plus the debug page when it is compiled in. Every
 // other constant below is derived, so this is the only thing the flag moves.
 #if CTR_DEBUG_MENU
@@ -135,9 +162,11 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
-// Page 2 rows 1 to 3 reuse the SCREEN SIZE geometry above unchanged. Row 4
-// carries its label beside its buttons, as page 1's does, and three 75px
-// buttons is what fits between the label and the edge.
+// Page 2 rows 1 to 3 reuse the SCREEN SIZE row's COLUMNS -- SCL_X and SCL_W,
+// not SCL_Y, which belongs to page 1's own grid now. That is what keeps the two
+// pages aligned horizontally while their rows sit at different heights. Row 4
+// carries its label beside its buttons, and three 75px buttons is what fits
+// between the label and the edge.
 #define P2_HINT_X     96
 #define WIDE_W        SCL_W
 #define WIDE_X(i)     SCL_X(i)
@@ -173,7 +202,7 @@ static void DrawPage1(void)
 {
     u8 label[40];
 
-    UiText(16, ROW1_LABEL_Y, UiAscii(label, "GAME SPEED", sizeof(label)),
+    UiText(16, P1_ROW_Y(0), UiAscii(label, "GAME SPEED", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SPEED_COUNT; i++)
@@ -202,7 +231,7 @@ static void DrawPage1(void)
                     fast);
     }
 
-    UiText(16, ROW2_LABEL_Y, UiAscii(label, "SCREEN SIZE", sizeof(label)),
+    UiText(16, P1_ROW_Y(1), UiAscii(label, "SCREEN SIZE", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     for (u32 i = 0; i < SCALE_COUNT; i++)
@@ -210,13 +239,13 @@ static void DrawPage1(void)
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
 
-    UiText(16, ROW3_LABEL_Y, UiAscii(label, "BUTTON HOLD", sizeof(label)),
+    UiText(16, P1_ROW_Y(2), UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     // MOD needs saying: it is not obvious that one of these buttons is what
     // makes the Pokedex arrows jump. ZL and ZR do not exist on an Old 3DS, so
     // a binding there would otherwise look broken rather than unsupported.
-    UiText(TRB_NOTE_X, ROW3_LABEL_Y,
+    UiText(TRB_NOTE_X, P1_ROW_Y(2),
            UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
@@ -414,9 +443,9 @@ static void DrawPage3(void)
     // The page says what it is, in the space left of the pager. Worth the line:
     // this is the one page whose contents are not meant to reach a player, and
     // a build that still has it needs to be obvious at a glance.
-    UiText(DBG_LABEL_X, ROW1_LABEL_Y, UiAscii(label, "DEBUG", sizeof(label)),
+    UiText(DBG_LABEL_X, TOP_LINE_Y, UiAscii(label, "DEBUG", sizeof(label)),
            UiThemeText(), UiThemeShadow());
-    UiText(DBG_LABEL_X + 56, ROW1_LABEL_Y,
+    UiText(DBG_LABEL_X + 56, TOP_LINE_Y,
            UiAscii(label, "not in shipping builds", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 

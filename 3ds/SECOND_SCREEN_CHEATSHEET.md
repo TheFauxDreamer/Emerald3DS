@@ -87,7 +87,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_bag.c](ui/tab_bag.c) | 654 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 675 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
+| [ui/tab_extra.c](ui/tab_extra.c) | 704 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 210 / 43 | Reads about the opposing mon: type effectiveness for the party badges, and `UiShinyOpponent` behind the notice |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
@@ -217,7 +217,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:650](ui/tab_extra.c#L650), which tests the
+(see `UiExtraTouch` at [tab_extra.c:679](ui/tab_extra.c#L679), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -617,7 +617,7 @@ value without writing the file back out during the load that produced it.
    with explicit `pad`, or `settings_write()` writes uninitialised stack to the
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:515](ui/tab_extra.c#L515)) in a bit range nothing else
+   `UiExtraStateKey()` ([:544](ui/tab_extra.c#L544)) in a bit range nothing else
    claims.
 
 The file is `sdmc:/3ds/emerald3ds/settings.bin`. It is opened once at boot and
@@ -672,7 +672,15 @@ UI_W / UI_H        320 / 240  // ui_draw.h
 Per-view constants are `#define`d at the top of each tab file, derived from each
 other rather than tabulated twice (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`).
 When you move a control, move the constant, and check that the touch handler
-uses the same expression the draw code does. `tab_party.c` gets this right by
+uses the same expression the draw code does.
+
+**A grid is only shareable while the pages sharing it have the same number of
+rows.** `tab_extra.c` kept page 1 and page 2 on one set of `ROW*_Y` constants
+after the tab-unlock override moved off page 1, which left page 1's first label
+against the top frame and 32px dead under its last button while page 2 stayed
+full. It now has two grids: `ROW*_LABEL_Y` for page 2's four rows, `P1_ROW_Y(i)`
+for page 1's three. They still share the COLUMNS, which is what keeps the pages
+looking like one panel, and both still end on the interior floor at y=183. `tab_party.c` gets this right by
 computing both from `CellH()`/`CellTop()`, which change when the cheat tag strip
 appears.
 
