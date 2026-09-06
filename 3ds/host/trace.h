@@ -3,13 +3,19 @@
 // Both screens belong to the game (top) and the touch UI (bottom), so there is
 // nowhere to consoleInit() to. Everything here goes through CtrLog()
 // (3ds/host/log.c), which writes to svcOutputDebugString -- the emulator's log,
-// discarded on a console -- AND to sdmc:/3ds/emerald3ds/log.txt, which is the
-// only one of the two a real 3DS can show you afterwards.
+// discarded on a console -- and, in a debug build only, to
+// sdmc:/3ds/emerald3ds/log.txt, which is the only one of the two a real 3DS can
+// show you afterwards.
 // SystemCallAccess in 3ds/emerald3ds.rsf already grants OutputDebugString (61).
 //
-// Set CTR_BOOT_DIAG=0 in 3ds/Makefile to compile the per-step tracing away.
-// CtrLog is always compiled: the conditions it reports (no DSP firmware, a
-// failed allocation) are ones a player needs even from a release build.
+// Two switches, and they are not the same one:
+//
+//   CTR_BOOT_DIAG (3ds/Makefile) compiles the per-step tracing away. CtrLog
+//   itself stays, so the handful of real failures still report.
+//
+//   CTR_DEBUG_MENU (3ds/bridge.h) decides whether ANY of it reaches the SD
+//   card. At 0 the log file is not created at all, because a build you hand to
+//   someone else should not write to their card.
 
 #ifndef CTR_TRACE_H
 #define CTR_TRACE_H

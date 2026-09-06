@@ -405,17 +405,19 @@ and `.map` published by CI turn it back into a function name.
 
 - **Audio needs a DSP firmware dump.** libctru loads the DSP component from
   `sdmc:/3ds/dspfirm.cdc` and `ndspInit()` fails outright without it, so the
-  game runs silent and says so in the log. Dump it from your own console with
+  game runs silent. Dump it from your own console with
   [DSP1](https://github.com/zoogie/DSP1); it is a standard one-time CFW step
-  every NDSP homebrew needs.
-- **Audio has never been heard on hardware.** DPCM and reverse instruments,
-  stereo, the sample rate and the NDSP thread ordering are all fixed and correct
-  in an emulator, but the port ships two interchangeable mixers (the C
-  reimplementation of `m4a_1.s`, and the original assembly, which the ARM11 can
-  run) and which of them sounds right can only be settled by ear on a console.
-  See [Audio](#audio).
-- **Never run on hardware.** No fill-rate, battery or timing data exists, and
-  ZL/ZR bindings are untestable on an Old 3DS by definition.
+  every NDSP homebrew needs. **This is the failure to check first if a build
+  someone shared with you has no sound**, and it is the one the port cannot
+  report: a shipping build writes no log file (see `CTR_DEBUG_MENU` in
+  `3ds/bridge.h`), and no build can ship a DSP dump.
+- **Audio has had a hardware session, not a soak.** The original `m4a_1.s`
+  mixer plays correctly on a console and is now the only one built, and the
+  600-frame health report comes back clean. It has not been listened to across a
+  long session or checked against every instrument. See [Audio](#audio).
+- **Thin hardware data.** The port boots and plays on a console, but no
+  fill-rate, battery or sustained-timing measurements exist, and ZL/ZR bindings
+  are untestable on an Old 3DS by definition.
 - **No trading or link battles yet.** The Cable Club over 3DS local wireless is
   written but unbuilt on the `local-wireless` branch. The Union Room and Mystery
   Gift use a separate wireless stack that is still stubbed.

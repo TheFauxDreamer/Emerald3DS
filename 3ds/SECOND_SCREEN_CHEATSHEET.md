@@ -694,7 +694,7 @@ appears.
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
-| The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms and is always compiled. |
+| The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
 | A symptom with no cause anywhere in the source | A stale host object. `make -C 3ds clean` and rebuild before reading any more code. |
 
 ---
