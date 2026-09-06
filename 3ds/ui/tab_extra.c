@@ -108,14 +108,11 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define FFA_Y         ROW1_LABEL_Y
 #define FFA_H         PGR_H
 
-// Tab visibility. Label on the left, then the two states, then a reminder that
-// this exists for testing rather than as a way to skip the game.
+// The fourth row, the one that carries its label beside its buttons rather than
+// above them. Page 1 no longer uses it -- the tab-unlock override that lived
+// here moved to the debug page -- so page 2's BAG SORT is its only tenant.
 #define ROW4_Y        157
-#define TAB_Y         ROW4_Y
-#define TAB_W         84
-#define TAB_LABEL_X   16
-#define TAB_X(i)      (60 + (i) * (TAB_W + 8))
-#define TAB_HINT_X    (TAB_X(1) + TAB_W + 12)
+#define ROW4_LABEL_X  16
 
 // The pager, right-aligned to the interior edge at x=311 and sharing the row-1
 // label line. 17px tall at y=8 ends at y=24, exactly abutting the row-1 buttons
@@ -123,7 +120,13 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_W         26
 #define PGR_H         17
 #define PGR_Y         ROW1_LABEL_Y
+// Two pages of settings, plus the debug page when it is compiled in. Every
+// other constant below is derived, so this is the only thing the flag moves.
+#if CTR_DEBUG_MENU
 #define PAGE_COUNT    3
+#else
+#define PAGE_COUNT    2
+#endif
 
 // Right-aligned to the interior edge, growing leftwards as pages are added, so
 // the last button always lands in the same place however many there are. At
@@ -250,18 +253,6 @@ static void DrawPage1(void)
                    UiAscii(label, text, sizeof(label)), bind != CTR_BIND_OFF);
     }
 
-    // Tab visibility. GAME is the real behaviour; ALL is the testing override.
-    UiText(TAB_LABEL_X, TAB_Y + (BTN_H - UI_GLYPH_H) / 2,
-           UiAscii(label, "TABS", sizeof(label)), UiThemeText(), UiThemeShadow());
-
-    DrawButton(TAB_X(0), TAB_Y, TAB_W, UiAscii(label, "GAME", sizeof(label)),
-               !Ctr3dsGetShowAllTabs());
-    DrawButton(TAB_X(1), TAB_Y, TAB_W, UiAscii(label, "ALL", sizeof(label)),
-               Ctr3dsGetShowAllTabs());
-
-    UiText(TAB_HINT_X, TAB_Y + (BTN_H - UI_GLYPH_H) / 2,
-           UiAscii(label, "for testing", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
 }
 
 static void DrawPage2(void)
@@ -316,7 +307,7 @@ static void DrawPage2(void)
     DrawButton(WIDE_X(1), ROW3_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
                Ctr3dsGetRandomizer());
 
-    UiText(TAB_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
+    UiText(ROW4_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
            UiAscii(label, "BAG SORT", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
@@ -330,60 +321,142 @@ static void DrawPage2(void)
                mode == CTR_BAGSORT_NAME);
 }
 
-// PAGE 3: the audio A/B switches.
+// PAGE 3: the debug menu.
 //
-// A diagnostic page, and a third page rather than a squeeze onto page 2,
-// because these are not settings anybody is meant to have a preference about.
-// All four default ON, which is the real mixer; turning one off is how you find
-// out which half of it a fault lives in, since neither half can be judged by
-// ear while the other is playing.
+// Everything that exists to test the PORT rather than to play the game, in one
+// place behind one compile-time value. Before this they were scattered: the tab
+// override sat on page 1 among the display settings, the shiny switch on page 2
+// among the cheats, and the audio A/B had a page of its own. Three different
+// answers to "is this for players?", none of them easy to turn off together.
 //
-// PSG and DIRECT together cover everything the mixer emits, so with both off
-// the output is silence by construction. Anything still audible then is not the
-// mixer at all -- it is the ring, NDSP, or the console.
+// CTR_DEBUG_MENU in 3ds/bridge.h is the switch. At 0 this page and its pager
+// button vanish, and the three settings behind it are held at their neutral
+// values host-side as well, so nothing here can leak into a shipping build
+// through settings.bin.
 //
-// Columns reuse page 2's two-button geometry unchanged.
-static const struct { const char *label; u8 which; const char *note; } sAudioRows[] = {
-    { "PSG",    CTR_AUDIO_DBG_PSG,    "the 4 GB voices"    },
-    { "DIRECT", CTR_AUDIO_DBG_DS,     "the sampled half"   },
-    { "REVERB", CTR_AUDIO_DBG_REVERB, "479 of 529 songs"   },
-    { "STEREO", CTR_AUDIO_DBG_STEREO, "off = downmix"      },
+// One uniform row shape, unlike the pages either side: label, two buttons, and
+// a note saying what the switch actually does. The notes are not decoration --
+// "PSG" and "DIRECT" mean nothing to someone who has not read the mixer, and
+// this page exists to be usable by exactly that person.
+#if CTR_DEBUG_MENU
+
+enum {
+    DBG_SHINY,
+    DBG_TABS,
+    DBG_PSG,
+    DBG_DIRECT,
+    DBG_REVERB,
+    DBG_STEREO,
+    DBG_ROW_COUNT
 };
 
-// Four rows at a 42px pitch: labels at 8/50/92/134, buttons 17px below each, so
-// the last one ends at 177 inside the 184px floor. Tighter than page 1 and 2's
-// 50px because this page carries four rows rather than three plus a footer, and
-// the per-row notes beside each label are the footer.
-#define AUD_LABEL_Y(i)  (ROW1_LABEL_Y + (int)(i) * 42)
-#define AUD_BTN_Y(i)    (AUD_LABEL_Y(i) + LABEL_TO_BTN)
+static const struct { const char *label, *off, *on, *note; } sDebugRows[DBG_ROW_COUNT] =
+{
+    [DBG_SHINY]  = { "SHINY",  "OFF",  "NEXT", "next wild encounter" },
+    [DBG_TABS]   = { "TABS",   "GAME", "ALL",  "ignore save unlocks" },
+    [DBG_PSG]    = { "PSG",    "OFF",  "ON",   "the 4 GB voices"     },
+    [DBG_DIRECT] = { "DIRECT", "OFF",  "ON",   "the sampled half"    },
+    [DBG_REVERB] = { "REVERB", "OFF",  "ON",   "479 of 529 songs"    },
+    [DBG_STEREO] = { "STEREO", "OFF",  "ON",   "off = downmix"       },
+};
+
+// The four audio rows in the order they appear above. Indexed, never derived
+// from the row number by arithmetic: CTR_AUDIO_DBG_* is an enum, and DIRECT is
+// CTR_AUDIO_DBG_DS rather than the third value in sequence.
+static const u8 sDebugAudio[] = {
+    CTR_AUDIO_DBG_PSG, CTR_AUDIO_DBG_DS,
+    CTR_AUDIO_DBG_REVERB, CTR_AUDIO_DBG_STEREO,
+};
+
+// Rows start below the pager rather than beside it: the pager occupies y=8..25
+// across the full width of the row-1 label line on every page, and this page
+// wants that width for six rows rather than three. 22px buttons at a 26px pitch
+// put row 0 at y=30 and row 5 ending at 182, inside the 184px floor.
+//
+// Columns: label at 16 (widest is 36px, "DIRECT"), buttons at 62 and 128 ending
+// at 188, notes from 198 to the 311px interior edge. The widest note is 103px,
+// so the note column has 10px to spare and the buttons never reach it.
+#define DBG_BTN_H     22
+#define DBG_PITCH     26
+#define DBG_Y(i)      (30 + (int)(i) * DBG_PITCH)
+#define DBG_LABEL_X   16
+#define DBG_BTN_W     60
+#define DBG_BTN_X(c)  (62 + (c) * (DBG_BTN_W + 6))
+#define DBG_NOTE_X    198
+
+// Reading a row and writing a row, in one place each, so the draw and the touch
+// handler cannot disagree about which switch a row means.
+static int DebugRowOn(u32 row)
+{
+    switch (row)
+    {
+    case DBG_SHINY: return Ctr3dsGetShinyTest() != 0;
+    case DBG_TABS:  return Ctr3dsGetShowAllTabs() != 0;
+    default:        return Ctr3dsGetAudioDbg(sDebugAudio[row - DBG_PSG]) != 0;
+    }
+}
+
+static void DebugRowSet(u32 row, int on)
+{
+    switch (row)
+    {
+    case DBG_SHINY: Ctr3dsSetShinyTest(on);   break;
+    case DBG_TABS:  Ctr3dsSetShowAllTabs(on); break;
+    default:        Ctr3dsSetAudioDbg(sDebugAudio[row - DBG_PSG], on); break;
+    }
+}
 
 static void DrawPage3(void)
 {
     u8 label[40];
     u32 i;
 
-    for (i = 0; i < ARRAY_COUNT(sAudioRows); i++)
-    {
-        int on = Ctr3dsGetAudioDbg(sAudioRows[i].which);
+    // The page says what it is, in the space left of the pager. Worth the line:
+    // this is the one page whose contents are not meant to reach a player, and
+    // a build that still has it needs to be obvious at a glance.
+    UiText(DBG_LABEL_X, ROW1_LABEL_Y, UiAscii(label, "DEBUG", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+    UiText(DBG_LABEL_X + 56, ROW1_LABEL_Y,
+           UiAscii(label, "not in shipping builds", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
 
-        UiText(16, AUD_LABEL_Y((int)i),
-               UiAscii(label, sAudioRows[i].label, sizeof(label)),
+    for (i = 0; i < DBG_ROW_COUNT; i++)
+    {
+        int y = DBG_Y(i);
+        int on = DebugRowOn(i);
+
+        UiText(DBG_LABEL_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+               UiAscii(label, sDebugRows[i].label, sizeof(label)),
                UiThemeText(), UiThemeShadow());
 
-        // What the switch actually silences, because "PSG" means nothing
-        // without it and this page exists to be used by someone who does not
-        // already know the mixer.
-        UiText(P2_HINT_X, AUD_LABEL_Y((int)i),
-               UiAscii(label, sAudioRows[i].note, sizeof(label)),
+        DrawButtonH(DBG_BTN_X(0), y, DBG_BTN_W, DBG_BTN_H,
+                    UiAscii(label, sDebugRows[i].off, sizeof(label)), !on);
+        DrawButtonH(DBG_BTN_X(1), y, DBG_BTN_W, DBG_BTN_H,
+                    UiAscii(label, sDebugRows[i].on, sizeof(label)), on);
+
+        UiText(DBG_NOTE_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+               UiAscii(label, sDebugRows[i].note, sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
-
-        DrawButton(WIDE_X(0), AUD_BTN_Y((int)i), WIDE_W,
-                   UiAscii(label, "OFF", sizeof(label)), !on);
-        DrawButton(WIDE_X(1), AUD_BTN_Y((int)i), WIDE_W,
-                   UiAscii(label, "ON", sizeof(label)), on);
     }
-
 }
+
+static void TouchPage3(const CtrTouchState *t)
+{
+    for (u32 i = 0; i < DBG_ROW_COUNT; i++)
+    {
+        for (u32 c = 0; c < 2; c++)
+        {
+            if (UiHit(t, DBG_BTN_X((int)c), DBG_Y(i), DBG_BTN_W, DBG_BTN_H))
+            {
+                DebugRowSet(i, (int)c);
+                UiMarkDirty();
+                return;
+            }
+        }
+    }
+}
+
+#endif // CTR_DEBUG_MENU
 
 static void DrawPager(void)
 {
@@ -414,8 +487,10 @@ void UiExtraDraw(void)
         DrawPage1();
     else if (sPage == 1)
         DrawPage2();
+#if CTR_DEBUG_MENU
     else
         DrawPage3();
+#endif
 
     DrawPager();
 }
@@ -452,6 +527,11 @@ u32 UiExtraStateKey(void)
 
     return (u32)sPage
          | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 2)
+         // Bit 3, the last one free below the tweaks. Unlike every other
+         // switch on these pages this one can change with no touch at all:
+         // 3ds/tweaks.c clears it the moment the armed encounter is created,
+         // which can happen with this tab on screen.
+         | ((u32)(Ctr3dsGetShinyTest() != 0) << 3)
          | (UiTweakStateKey() << 4)
          | (audio << 24);
 }
@@ -481,16 +561,6 @@ static void TouchPage1(const CtrTouchState *t)
         if (UiHit(t, SCL_X((int)i), SCL_Y, SCL_W, BTN_H))
         {
             Ctr3dsSetTopScale(sScales[i]);
-            UiMarkDirty();
-            return;
-        }
-    }
-
-    for (u32 i = 0; i < 2; i++)
-    {
-        if (UiHit(t, TAB_X((int)i), TAB_Y, TAB_W, BTN_H))
-        {
-            Ctr3dsSetShowAllTabs((int)i);
             UiMarkDirty();
             return;
         }
@@ -577,27 +647,6 @@ static void TouchPage2(const CtrTouchState *t)
     }
 }
 
-static void TouchPage3(const CtrTouchState *t)
-{
-    u32 i;
-
-    for (i = 0; i < ARRAY_COUNT(sAudioRows); i++)
-    {
-        if (UiHit(t, WIDE_X(0), AUD_BTN_Y((int)i), WIDE_W, BTN_H))
-        {
-            Ctr3dsSetAudioDbg(sAudioRows[i].which, 0);
-            UiMarkDirty();
-            return;
-        }
-        if (UiHit(t, WIDE_X(1), AUD_BTN_Y((int)i), WIDE_W, BTN_H))
-        {
-            Ctr3dsSetAudioDbg(sAudioRows[i].which, 1);
-            UiMarkDirty();
-            return;
-        }
-    }
-}
-
 void UiExtraTouch(const CtrTouchState *t)
 {
     if (!t->justReleased)
@@ -619,6 +668,8 @@ void UiExtraTouch(const CtrTouchState *t)
         TouchPage1(t);
     else if (sPage == 1)
         TouchPage2(t);
+#if CTR_DEBUG_MENU
     else
         TouchPage3(t);
+#endif
 }

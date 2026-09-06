@@ -80,13 +80,9 @@ are standing on when there is one.
 **EXTRA.** Two pages. **Page 1** is things the original game has no concept of
 but which leave it playing exactly as it shipped. Fast-forward at 1x, 2x,
 4x or 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or
-FILL (fills the panel, stretching 11%); the four buttons the GBA has no use
+FILL (fills the panel, stretching 11%); and the four buttons the GBA has no use
 for (X, Y, ZL and ZR) bindable to a hold-for-speed or to the touch UI's
-modifier key; and **TABS: GAME / ALL**, which shows every tab regardless of what
-the save has unlocked. That last one is for testing the tabs themselves without
-first earning the Pokedex or the PokeNav in game; everything it reveals is
-read-only, so the worst it can do is show you a Pokedex you have not been given.
-Screen size, bindings and the tab override persist; fast-forward deliberately
+modifier key. Screen size and bindings persist; fast-forward deliberately
 resets each launch.
 
 **Page 2** is different in kind, which is why it is behind a page turn. Every
@@ -111,6 +107,17 @@ option on it is a cheat, and all four are off by default:
 - **BAG SORT: OFF / TYPE / NAME.** TYPE is category order, NAME is alphabetical.
   It reorders the real bag, so the in-game bag and the BAG tab agree, and the
   order sticks in your save.
+
+**A third page exists in debug builds only.** It gathers the three switches
+that test the port rather than play the game: **SHINY**, which makes the next
+wild encounter shiny so the alert below can be exercised without waiting out
+odds of one in 8192; **TABS**, which shows every tab regardless of what the save
+has unlocked; and the four **audio A/B** switches that silence one half of the
+mixer at a time, which is the only way to tell "the PSG channels are dead" from
+"everything is dead". One value in `3ds/bridge.h` turns the page off, and
+turning it off also pins those three settings to their harmless values, so a
+`settings.bin` written by a debug build cannot leave a player with a muted
+channel and no control to unmute it.
 
 **Shiny alerts, over every tab.** Not a sixth tab and not a setting. When a wild
 Pokémon is shiny, a band across the top of whichever tab you happen to be on
@@ -138,7 +145,7 @@ means an emulator only.
 | Bottom: party, bag, Pokédex, extras | ✅ |
 | Bottom: map | ✅ Region map, player marker, tap for names |
 | Bottom: tweaks | ✅ EXP All, badge level cap, randomiser, bag sort |
-| Shiny alert, IV/EV viewer | 🚧 Written, not yet compiled or run |
+| Shiny alert, IV/EV viewer, debug page | 🚧 Written, not yet compiled or run |
 | Battle items from the touch screen | ✅ |
 | Audio | ✅ Stereo PCM16, music, cries and PSG; needs a DSP firmware dump |
 | Link cable / wireless | 🚧 On the `local-wireless` branch, unbuilt and untested |
@@ -333,8 +340,8 @@ one-line verdict. When the mix is genuinely all zero the verdict walks the
 engine chain and names the first link that was never made, rather than just
 reporting silence.
 
-Page 3 of the bottom screen's EXTRA tab silences one half of the mixer at a
-time (PSG, reverb, DirectSound) and toggles the stereo downmix. Neither half can
+The debug page of the bottom screen's EXTRA tab silences one half of the mixer
+at a time (PSG, reverb, DirectSound) and toggles the stereo downmix. Neither half can
 be judged by ear while the other is playing, so this is the only instrument
 there is for a fault about quality rather than plumbing. The stereo switch
 downmixes into both sides rather than reconfiguring the NDSP channel: a switch

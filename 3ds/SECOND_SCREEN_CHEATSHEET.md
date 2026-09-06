@@ -47,7 +47,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:636](host/main.c#L636),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:664](host/main.c#L664),
   after audio init and before `AgbMain()`.
 
 ---
@@ -80,7 +80,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_bag.c](ui/tab_bag.c) | 654 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 624 | Three pages of port settings, gameplay tweaks, audio A/B |
+| [ui/tab_extra.c](ui/tab_extra.c) | 675 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 210 / 43 | Reads about the opposing mon: type effectiveness for the party badges, and `UiShinyOpponent` behind the notice |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
@@ -188,7 +188,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:601](ui/tab_extra.c#L601), which tests the
+(see `UiExtraTouch` at [tab_extra.c:650](ui/tab_extra.c#L650), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -564,11 +564,29 @@ value without writing the file back out during the load that produced it.
    with explicit `pad`, or `CtrSettingsSave` writes uninitialised stack to the
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:440](ui/tab_extra.c#L440)) in a bit range nothing else
+   `UiExtraStateKey()` ([:515](ui/tab_extra.c#L515)) in a bit range nothing else
    claims.
 
 The file is `sdmc:/3ds/emerald3ds/settings.bin`, written atomically through a
 `.tmp` and a rename.
+
+**Two settings deliberately break the pattern**, and both are worth knowing
+before you copy it:
+
+- **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
+  `Apply` and never calls `CtrSettingsSave` ([host/main.c:321](host/main.c#L321)),
+  because it disarms itself when the encounter fires. A saved "armed" would go
+  off in some later session the player had forgotten arming it in. Skip step 3
+  entirely for anything like that; fast-forward is the older precedent.
+- **A setting behind `CTR_DEBUG_MENU` must be neutralised, not just hidden**
+  ([bridge.h:195](bridge.h#L195)). Hiding the control leaves the value, and two
+  of the debug settings persist, so a shipping build could inherit "show every
+  tab" or a muted PSG channel from a debug session with no control to undo it.
+  Guard in **`Apply`**, not in `Get`: `CtrSettingsLoad()` calls `Apply`
+  directly and never asks the getter, and forcing the stored byte also covers
+  readers that touch the static array themselves, as `CtrAudioFrame` does for
+  the stereo downmix. Choose the neutral value carefully; for the audio A/B
+  switches it is ON, because ON is the real mixer.
 
 ---
 
@@ -607,6 +625,7 @@ appears.
 | Every tap lands at (0,0) | Reading touch coordinates without the latch, or dropping the `justReleased` guard. |
 | Detail view reopens after a tab switch | Modal file statics survive the switch. Known bug. |
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
+| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 
