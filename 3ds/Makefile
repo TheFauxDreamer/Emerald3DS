@@ -32,8 +32,8 @@ BUILD    := build
 GAME_LIB := $(BUILD)/libpokeemerald.a
 
 APP_TITLE       := Pokemon Emerald 3DS
-APP_DESCRIPTION := Dual-screen native port
-APP_AUTHOR      := pokeemerald-3ds
+APP_DESCRIPTION := Experience Pokemon Emerald with second-screen features!
+APP_AUTHOR      := TheFauxDreamer
 APP_ICON        := $(CTRULIB)/default_icon.png
 
 # rp2350/ppu.c is host-side: it includes only <stdint.h> and its own header, and
