@@ -691,7 +691,6 @@ appears.
 
 ## 16. Verification checklist
 
-- Both mixer configurations still link: default, and `CTR_M4A_ASM=1 3ds/build_objs.sh`.
 - Existing tabs unchanged, all controls still reachable, settings persist across
   a relaunch.
 - New views checked against the game's **own** screens, not against your reading
