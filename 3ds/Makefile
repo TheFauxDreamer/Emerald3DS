@@ -64,8 +64,16 @@ CTR_BOOT_DIAG ?= 0
 CTR_M4A_ASM := $(shell cat $(BUILD)/m4a_asm.flag 2>/dev/null || echo 0)
 BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --always --dirty 2>/dev/null || echo nogit)
 
+# -MMD -MP is load bearing, not hygiene. Without it these objects depend only on
+# their own .c file, so an edit to ../bridge.h -- the whole seam between the two
+# halves of the port -- relinks STALE settings.o, video.o, audio.o, save.o,
+# log.o and ppu.o, and only main.o rebuilds (it has the FORCE prerequisite
+# below, for the build stamp). A macro or enum whose value changed in bridge.h
+# would then be compiled two different ways into one binary, with no error at
+# any stage. -MP adds phony targets for the headers, so deleting or renaming one
+# does not wedge the build with "no rule to make target".
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
-            -ffunction-sections -fdata-sections \
+            -ffunction-sections -fdata-sections -MMD -MP \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) -DCTR_M4A_ASM=$(CTR_M4A_ASM) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
@@ -166,6 +174,10 @@ $(BUILD)/ppu.o: ../rp2350/ppu.c | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
+# The dependency files -MMD wrote on the last build. Missing on the first one,
+# which is why this is -include rather than include.
+-include $(OBJS:.o=.d)
+
 clean:
-	@rm -rf $(BUILD)/*.o $(TARGET).elf $(TARGET).3dsx $(TARGET).3ds $(TARGET).cia \
-	        $(TARGET).smdh $(BUILD)/$(TARGET).map
+	@rm -rf $(BUILD)/*.o $(BUILD)/*.d $(TARGET).elf $(TARGET).3dsx $(TARGET).3ds \
+	        $(TARGET).cia $(TARGET).smdh $(BUILD)/$(TARGET).map

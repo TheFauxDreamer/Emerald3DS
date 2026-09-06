@@ -28,7 +28,7 @@
 #include "trace.h"
 #include "../../rp2350/ppu.h"
 
-void CtrSettingsSave(void);   // 3ds/host/settings.c
+void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
 
 #define TOP_TEX_W  256
 #define TOP_TEX_H  256
@@ -78,10 +78,10 @@ void Ctr3dsSetTopScale(int mode)
 
     Ctr3dsApplyTopScale(mode);
 
-    // Only touch the card when something actually changed: re-tapping the
-    // active button should not cost a write.
+    // Only queue a write when something actually changed: re-tapping the
+    // active button should not cost one.
     if (sTopScale != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 // Linear in, tiled out, no scaling, no vertical flip.
@@ -268,11 +268,21 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
 
 void CtrVideoPresent(void)
 {
+    // Timed in pieces, because "presenting is slow" is not a finding. The top
+    // upload runs on every displayed frame and the bottom one only after the UI
+    // has repainted, so the top is the control: if both overrun, the transfer
+    // path is at fault; if only the bottom does, it is something about the
+    // 512-wide stride or about this being the once-in-a-while cold path.
+    unsigned int tPresent = CtrTimeNowMs();
+    unsigned int t0;
+
     if (!sReady)
         return;
 
     // Rasterise the frame the game just finished writing.
+    t0 = CtrTimeNowMs();
     ppu_render_rgb565(sGbaFrame, sGbaLayer);
+    CtrLogSlow("ppu", t0);
 
 #if CTR_BOOT_DIAG
     // Two facts decide where a black screen comes from:
@@ -294,13 +304,17 @@ void CtrVideoPresent(void)
         }
     }
 #endif
+    t0 = CtrTimeNowMs();
     upload(sTopStage, TOP_TEX_W, sGbaFrame, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, &sTopTex);
+    CtrLogSlow("upload.top", t0);
 
     // The bottom screen is mostly static, so only re-tile it when the UI says
     // something actually changed.
     if (CtrBottomIsDirty()) {
+        t0 = CtrTimeNowMs();
         upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
                CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex);
+        CtrLogSlow("upload.bot", t0);
         CtrBottomClearDirty();
     }
 
@@ -339,5 +353,13 @@ void CtrVideoPresent(void)
     C2D_SceneBegin(sBotTarget);
     C2D_DrawImageAt(sBotImage, 0.0f, 0.0f, 0.0f, NULL, 1.0f, 1.0f);
 
+    t0 = CtrTimeNowMs();
     C3D_FrameEnd(0);
+    // C3D_FrameEnd is the VBlank wait, so at 60 Hz this is ~16 ms by design and
+    // is expected to stay under the threshold. It is measured anyway: a frame
+    // that waited far longer than one VBlank is the signature of the GPU or the
+    // GSP event thread being behind rather than of anything above.
+    CtrLogSlow("frameend", t0);
+
+    CtrLogSlow("present", tPresent);
 }

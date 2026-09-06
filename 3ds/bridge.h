@@ -351,4 +351,21 @@ int  Ctr3dsGetAudioDbg(int which);
 void Ctr3dsSetAudioDbg(int which, int on);
 void Ctr3dsApplyAudioDbg(int which, int on);
 
+// ---- stall diagnostics ----------------------------------------------------
+//
+// A stage that costs a millisecond in an emulator and a second on a console is
+// invisible from the outside: the game stops, then carries on, and nothing
+// says which call did it. These time a stage and write a line ONLY when it
+// overran, so sdmc:/3ds/emerald3ds/log.txt names the call rather than the
+// symptom.
+//
+// Declared here rather than in 3ds/host/trace.h because the bottom screen is
+// game-side and must never see <3ds.h>. Plain `const char *` and `unsigned
+// int` cross the seam safely, the same rule CtrTraceHex follows.
+//
+// Always compiled, like CtrLog and for the same reason: the build that
+// actually stalls is the one the measurement has to come from.
+unsigned int CtrTimeNowMs(void);
+void CtrLogSlow(const char *stage, unsigned int startMs);
+
 #endif // CTR_BRIDGE_H

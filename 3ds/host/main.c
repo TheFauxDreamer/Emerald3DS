@@ -38,6 +38,7 @@ void CtrAudioFrame(void);
 void CtrSaveLoad(void);
 void CtrSaveFlush(int force);
 void CtrSettingsLoad(void);
+void CtrSettingsFlush(int force);
 #if CTR_BOOT_DIAG
 void CtrDiagSplash(void);
 #endif
@@ -202,7 +203,7 @@ static const uint32_t kTurboKeys[CTR_TURBO_COUNT] = {
     KEY_X, KEY_Y, KEY_ZL, KEY_ZR
 };
 
-void CtrSettingsSave(void);   // 3ds/host/settings.c
+void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
 
 // Lowering the speed must restart the group, or a counter left above the new
 // limit stalls presentation for a frame. Shared by every path that changes it.
@@ -255,7 +256,7 @@ void Ctr3dsSetTurboBind(int button, int value)
     Ctr3dsApplyTurboBind(button, value);
 
     if (Ctr3dsGetTurboBind(button) != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetTurboBind(int button)
@@ -290,7 +291,7 @@ void Ctr3dsSetShowAllTabs(int on)
     Ctr3dsApplyShowAllTabs(on);
 
     if (sShowAllTabs != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetShowAllTabs(void)
@@ -312,8 +313,8 @@ static uint8_t sLevelCap;    // CTR_CAP_*
 static uint8_t sRandomizer;
 static uint8_t sBagSort;     // CTR_BAGSORT_*
 
-// The shiny test switch. No Apply/Set split and no CtrSettingsSave() call,
-// because it is the one tweak that is not persisted -- see the note in
+// The shiny test switch. No Apply/Set split and no CtrSettingsMarkDirty()
+// call, because it is the one tweak that is not persisted -- see the note in
 // bridge.h. Game-side code clears it through Ctr3dsSetShinyTest(0) when the
 // armed encounter fires, so the setter has to stay callable from both worlds.
 static uint8_t sShinyTest;
@@ -340,7 +341,7 @@ void Ctr3dsSetExpAll(int on)
     Ctr3dsApplyExpAll(on);
 
     if (sExpAll != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetExpAll(void)
@@ -363,7 +364,7 @@ void Ctr3dsSetLevelCap(int mode)
     Ctr3dsApplyLevelCap(mode);
 
     if (sLevelCap != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetLevelCap(void)
@@ -383,7 +384,7 @@ void Ctr3dsSetRandomizer(int on)
     Ctr3dsApplyRandomizer(on);
 
     if (sRandomizer != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetRandomizer(void)
@@ -406,7 +407,7 @@ void Ctr3dsSetBagSort(int mode)
     Ctr3dsApplyBagSort(mode);
 
     if (sBagSort != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetBagSort(void)
@@ -448,7 +449,7 @@ void Ctr3dsSetFfAudio(int mode)
     Ctr3dsApplyFfAudio(mode);
 
     if (sFfAudio != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetFfAudio(void)
@@ -519,7 +520,7 @@ void Ctr3dsSetAudioDbg(int which, int on)
     Ctr3dsApplyAudioDbg(which, on);
 
     if (sAudioDbg[which] != before)
-        CtrSettingsSave();
+        CtrSettingsMarkDirty();
 }
 
 int Ctr3dsGetAudioDbg(int which)
@@ -567,7 +568,12 @@ void Rp2350PresentFrame(void)
         // app is certainly still alive, and the flush costs nothing when the
         // image is clean. main() flushes again after the jump; the second call
         // returns immediately because this one cleared the dirty flag.
+        //
+        // Forced for the settings too: a preference changed in the last tenth
+        // of a second before closing is still inside the debounce, and losing
+        // it would look exactly like the setting not persisting at all.
         CtrSaveFlush(1);
+        CtrSettingsFlush(1);
         longjmp(sQuitJmp, 1);
     }
 
@@ -611,8 +617,13 @@ void Rp2350PresentFrame(void)
         // together, so the intermediate frames cost only game logic.
         CtrVideoPresent();
 
-        // Writes the save image out once the burst of sector writes has stopped.
+        // Writes the save image out once the burst of sector writes has stopped,
+        // and the settings once the player has stopped changing them. Both here
+        // rather than at the point of change: this is after CtrVideoPresent()
+        // has already blocked on VBlank, so the frame's remaining budget is the
+        // cheapest place in it to sit in a blocking FS call.
         CtrSaveFlush(0);
+        CtrSettingsFlush(0);
     }
 }
 
@@ -682,6 +693,7 @@ int main(int argc, char **argv)
     // src/save.c) and the close path above flushes too. It stays as the last
     // line of defence for writes that arrived outside a save.
     CtrSaveFlush(1);
+    CtrSettingsFlush(1);
     CtrAudioExit();
     CtrVideoExit();
     return 0;

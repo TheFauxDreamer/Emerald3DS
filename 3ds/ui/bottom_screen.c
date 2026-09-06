@@ -377,6 +377,12 @@ static void Redraw(void)
     u32 n;
     u16 noticeSpecies = SPECIES_NONE;
     u32 noticePersonality = 0;
+    // A repaint is 76,800 pixels of software fill plus the active tab's own
+    // drawing, and it is what every touch handler asks for through
+    // UiMarkDirty(). That makes it the first thing to rule in or out when a tap
+    // costs the player a visible pause. CtrLogSlow reports nothing on a healthy
+    // frame, so this costs one clock read per repaint. See 3ds/bridge.h.
+    unsigned int t0 = CtrTimeNowMs();
 
     // Before the game proper is running there is nothing meaningful to show,
     // and a menu floating under the title screen looks broken.
@@ -385,6 +391,7 @@ static void Redraw(void)
         UiClear(0);
         sNeedsRepaint = 0;
         sDirty = 1;
+        CtrLogSlow("redraw", t0);
         return;
     }
 
@@ -411,6 +418,8 @@ static void Redraw(void)
 
     sNeedsRepaint = 0;
     sDirty = 1;          // tell the host to re-upload
+
+    CtrLogSlow("redraw", t0);
 }
 
 void CtrBottomInit(void)
@@ -428,6 +437,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
 {
     u32 hash;
     u32 noticeIdentity = 0;
+    // The whole of the touch response, so the log can separate it from the
+    // repaint it usually ends in: `update` slow with `redraw` fast means the
+    // cost is in a touch handler or in UiStateHash, not in the painting.
+    unsigned int t0 = CtrTimeNowMs();
 
     UpdateInGameLatch();
 
@@ -500,6 +513,8 @@ void CtrBottomUpdate(const CtrTouchState *touch)
 
     if (sNeedsRepaint)
         Redraw();
+
+    CtrLogSlow("bottom.update", t0);
 }
 
 int CtrBottomIsDirty(void)            { return sDirty; }
