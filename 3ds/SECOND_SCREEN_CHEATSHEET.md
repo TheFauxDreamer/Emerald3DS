@@ -84,7 +84,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 654 / 146 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
 | [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 667 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 704 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
