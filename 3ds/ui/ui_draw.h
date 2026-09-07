@@ -103,6 +103,21 @@ void UiArrow(int x, int y, bool8 up, u16 fill);
 
 void UiChevron(int x, int y);
 
+// A gold sparkle, at the three sizes the game's own shiny animation has.
+//
+// gold_stars.png is six 8x8 tiles: tiles 0-3 are one 16x16 star, tile 4 an 8x8
+// one and tile 5 a small twinkle (gWishStarSpriteTemplate and
+// gMiniTwinklingStarSpriteTemplate, src/battle_anim_effects_3.c). So `size` 0
+// to 2 selects a FRAME OF THE ART, not a scale factor -- there is no scaler
+// here because the sheet already drew all three.
+//
+// Centred on (cx, cy), and centred on the star's own bright horizontal axis
+// rather than on its bounding box, because the three frames are not the same
+// shape: box-centring makes a twinkle appear to slide up the screen as it grows.
+#define UI_SPARKLE_SIZES 3
+
+void UiSparkle(int cx, int cy, u8 size);
+
 // A two-tone HP bar, 8px tall, coloured by the game's own GetHPBarLevel so it
 // changes colour at exactly the same points the battle bar does. `hp` is passed
 // in rather than read from the mon: the party tab animates it, the BAG tab's

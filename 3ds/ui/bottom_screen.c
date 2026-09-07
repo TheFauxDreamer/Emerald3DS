@@ -209,6 +209,157 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
     return !(sNoticeDismissedSet && id == sNoticeDismissed);
 }
 
+// ------------------------------------------------------- notice animation --
+//
+// The only thing on this screen that moves on its own, and the only reason it
+// is affordable: NoticeTick returns FALSE whenever the panel is down, so not a
+// single extra repaint is asked for on any frame without a shiny on screen.
+// This screen is static by design -- a repaint is 76,800 pixels of software
+// fill plus a blocking texture upload on the host -- and an ambient animation
+// would pay that on every frame of the game rather than on the handful of
+// seconds a shiny is being announced.
+//
+// It follows UiPartyTick's shape (tab_party.c): file statics, one step per
+// call, TRUE while it still wants frames. The counter counts CALLS, not
+// milliseconds, which is the same idiom UiHold uses -- CtrBottomUpdate runs
+// once per DISPLAYED frame, so a call is a 60th of a second even under
+// fast-forward, and the twinkle does not speed up with the game.
+
+// A power of two on purpose. sNoticeAnim is a u16 and wraps after eighteen
+// minutes of an undismissed panel; 65536 divides by 64 exactly, so the wrap
+// lands on a cycle boundary instead of jumping the twinkle mid-step.
+#define NOTICE_CYCLE      64
+#define NOTICE_CORNERS    4
+#define NOTICE_SWEEP_END  24   // frames the opening glint lasts
+
+// How far in from the interior edge a corner sparkle is CENTRED. The big frame
+// reaches 8px left and right of its axis, so 12 clears the 2px gold rule.
+#define NOTICE_SPK_IN_X   12
+#define NOTICE_SPK_IN_T   10
+#define NOTICE_SPK_IN_B   12
+
+#define SWEEP_W           4
+#define SWEEP_SLANT       24
+
+static u16   sNoticeAnim;     // frames this panel has been up
+static u32   sNoticeAnimId;   // the encounter those frames belong to
+static bool8 sNoticeAnimSet;
+
+static bool8 NoticeTick(void)
+{
+    u32 id;
+
+    if (!NoticeActive(NULL, &id))
+    {
+        sNoticeAnimSet = FALSE;
+        return FALSE;
+    }
+
+    // A different encounter is a different panel. Restarting on the same
+    // identity the dismiss logic keys on means the second shiny of a session
+    // gets its own opening sweep instead of inheriting the first one's phase.
+    if (!sNoticeAnimSet || id != sNoticeAnimId)
+    {
+        sNoticeAnimId = id;
+        sNoticeAnimSet = TRUE;
+        sNoticeAnim = 0;
+    }
+    else
+    {
+        sNoticeAnim++;
+    }
+
+    return TRUE;
+}
+
+// Which frame of the art a corner shows at `phase`, or -1 for nothing.
+//
+// Thresholds rather than arithmetic because the three frames are 3, 6 and 16px
+// wide: an even hold on each reads as a jump into the big one, so the holds are
+// tuned against that. Dark for most of the cycle, which is what makes this a
+// twinkle rather than a pulse.
+static int TwinkleSize(u16 phase)
+{
+    if (phase < 4)  return 0;
+    if (phase < 8)  return 1;
+    if (phase < 14) return 2;
+    if (phase < 18) return 1;
+    if (phase < 22) return 0;
+
+    return -1;
+}
+
+// The glint that crosses the panel as it opens, once. Drawn on the bare ground
+// before the rule and the text, so it passes BEHIND the headline the way light
+// crosses glass rather than washing over the words.
+//
+// There is no alpha anywhere in this drawing layer -- UiFillRect writes solid
+// colour -- so a soft glow is not on offer. A narrow hard band moving quickly
+// is, and carrying the orange edge either side of the gold core is the same
+// trick the headline uses to keep a flat fill from reading as a flat bar.
+static void DrawSweep(u16 phase)
+{
+    // The leading edge travels the interior plus the slant plus its own width,
+    // so the band starts fully off the left and finishes fully off the right
+    // rather than appearing and vanishing inside the panel.
+    int travel = NOTICE_IN_W + SWEEP_SLANT + SWEEP_W;
+    int lead = -(SWEEP_SLANT + SWEEP_W) + (int)phase * travel / NOTICE_SWEEP_END;
+
+    for (int r = 0; r < NOTICE_IN_H; r++)
+    {
+        // Lower rows lag, which is the whole of the tilt.
+        int x = NOTICE_IN_X + lead
+              + (NOTICE_IN_H - 1 - r) * SWEEP_SLANT / NOTICE_IN_H;
+        int w = SWEEP_W;
+
+        // UiFillRect clamps to the SCREEN, and this layer has no clip
+        // rectangle at all, so the band has to be cut to the interior by hand
+        // or it paints straight out over the window frame.
+        if (x < NOTICE_IN_X)
+        {
+            w += x - NOTICE_IN_X;
+            x = NOTICE_IN_X;
+        }
+        if (x + w > NOTICE_IN_X + NOTICE_IN_W)
+            w = NOTICE_IN_X + NOTICE_IN_W - x;
+        if (w <= 0)
+            continue;
+
+        UiFillRect(x, NOTICE_IN_Y + r, w, 1, UI_COL_SHINY_EDGE);
+        if (w > 2)
+            UiFillRect(x + 1, NOTICE_IN_Y + r, w - 2, 1, UI_COL_SHINY);
+    }
+}
+
+// One sparkle per interior corner, each a quarter cycle behind the last and
+// ordered around the panel rather than in reading order, so the twinkle travels
+// round it instead of hopping across it.
+//
+// All four corners are bare ground to draw on: the headline block, the species
+// line and the 100px DISMISS button are every one of them centred, which leaves
+// the ends of the top and bottom rows empty.
+static void DrawCornerSparkles(void)
+{
+    static const struct { s16 dx, dy; } sCorners[NOTICE_CORNERS] =
+    {
+        { NOTICE_SPK_IN_X,               NOTICE_SPK_IN_T },
+        { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_SPK_IN_T },
+        { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_IN_H - NOTICE_SPK_IN_B },
+        { NOTICE_SPK_IN_X,               NOTICE_IN_H - NOTICE_SPK_IN_B },
+    };
+
+    for (u32 i = 0; i < NOTICE_CORNERS; i++)
+    {
+        u16 phase = (u16)((sNoticeAnim + i * (NOTICE_CYCLE / NOTICE_CORNERS))
+                          % NOTICE_CYCLE);
+        int size = TwinkleSize(phase);
+
+        if (size >= 0)
+            UiSparkle(NOTICE_IN_X + sCorners[i].dx,
+                      NOTICE_IN_Y + sCorners[i].dy, (u8)size);
+    }
+}
+
 static void DrawNotice(u16 species, u32 personality)
 {
     u8  label[16];
@@ -226,6 +377,13 @@ static void DrawNotice(u16 species, u32 personality)
     // fix. A dark ground makes it read identically on all 20. The frame still
     // draws the border, so the panel is still visibly the player's.
     UiFillRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHADOW);
+
+    // On the bare ground and under everything else, so the opening glint passes
+    // behind the headline rather than over it. Once per encounter: NoticeTick
+    // restarts the counter for each new shiny, and this is the only thing that
+    // reads the low end of it.
+    if (sNoticeAnim < NOTICE_SWEEP_END)
+        DrawSweep(sNoticeAnim);
 
     // Gold rule just inside the frame, two passes for a 2px line -- the same
     // idiom the selected move row and the EXTRA toggles use for emphasis.
@@ -275,6 +433,11 @@ static void DrawNotice(u16 species, u32 personality)
     UiText(NOTICE_BTN_X + (NOTICE_BTN_W - UiTextWidth(label)) / 2,
            NOTICE_BTN_Y + (NOTICE_BTN_H - UI_GLYPH_H) / 2,
            label, UI_COL_SHINY_PALE, UI_COL_SHADOW);
+
+    // Last, so a sparkle is never half-hidden behind the text it is decorating.
+    // The corners are clear of every element above, but "clear" is a property
+    // of the current layout and drawing order is a property of this function.
+    DrawCornerSparkles();
 }
 
 // ------------------------------------------------------------- lifecycle ---
@@ -527,6 +690,13 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // A moving HP bar needs a repaint every frame until it settles, and then
     // must stop: this screen is otherwise static and full repaints are not free.
     if (sInGame && UiPartyTick())
+        sNeedsRepaint = 1;
+
+    // The shiny panel's sparkles, on the same terms. Both ticks live here
+    // rather than inside Redraw because a tick that only ran when the screen
+    // happened to repaint would stall exactly when it is the thing that ought
+    // to be causing the repaint.
+    if (sInGame && NoticeTick())
         sNeedsRepaint = 1;
 
     // This state can change without any touch at all -- taking damage, an
