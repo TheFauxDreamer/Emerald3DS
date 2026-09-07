@@ -297,7 +297,25 @@ void StartTimer1(void)
 
 void SeedRngAndSetTrainerId(void)
 {
+#if PLATFORM_3DS
+    // Timer 1 is the GBA's entropy source here, and this port has no timers.
+    // I/O is a plain buffer zeroed at boot (gGbaMem, 3ds/gba_mem.c) that
+    // nothing ever writes REG_TM1CNT_L in, so the vanilla read below is always
+    // 0. That gave every save the same trainer ID, and with it the same
+    // randomiser mapping, since RandomizerSeed() (3ds/tweaks.c) is derived
+    // from the ID -- a randomiser that rolls the same world on every file.
+    //
+    // The host clock is the same KIND of source rather than a substitute for
+    // one: this runs when the player confirms their name (MainState_Exit,
+    // src/naming_screen.c), so like the timer it measures how long they took.
+    // Declared extern here rather than through bridge.h, the way CtrTraceMsg
+    // is above: this file has never included it.
+    extern unsigned int CtrTimeNowMs(void);
+
+    u16 val = (u16)CtrTimeNowMs();
+#else
     u16 val = REG_TM1CNT_L;
+#endif
     SeedRng(val);
     REG_TM1CNT_H = 0;
     sTrainerId = val;
