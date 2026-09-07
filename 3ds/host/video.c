@@ -391,7 +391,11 @@ void CtrVideoPresent(void)
 
     // Rasterise the frame the game just finished writing.
     t0 = CtrTimeNowMs();
-    ppu_render_rgb565(sGbaFrame, sGbaLayer);
+    {
+        unsigned long long tp = CtrTicksNow();
+        ppu_render_rgb565(sGbaFrame, sGbaLayer);
+        CtrProfile("ppu", tp);
+    }
     CtrLogSlow("ppu", t0);
 
 #if CTR_BOOT_DIAG
@@ -438,7 +442,20 @@ void CtrVideoPresent(void)
         CtrLogSlow("upload.bot", t0);
     }
 
-    C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+    // THE frame's sync point, and the one number that says whether this port has
+    // any budget left. C3D_FRAME_SYNCDRAW waits here, at Begin, for the previous
+    // frame's rendering -- not at C3D_FrameEnd, whatever the comment below that
+    // call used to claim. Measured `frameend` came back at 311 us, which is what
+    // proved it: a real VBlank wait on a frame with slack is milliseconds.
+    //
+    // So read this as the slack. Milliseconds means the frame has room and
+    // something is briefly overrunning it; near zero means the port is already
+    // saturated and any added work at all costs a frame.
+    {
+        unsigned long long tb = CtrTicksNow();
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        CtrProfile("framebegin", tb);
+    }
 
 #if CTR_BOOT_DIAG
     // Liveness, visible without the log: cycling bars mean the frame loop is
@@ -477,15 +494,13 @@ void CtrVideoPresent(void)
     {
         unsigned long long tf = CtrTicksNow();
         C3D_FrameEnd(0);
-        // The VBlank wait, so this is the SLACK: about 16 ms on a frame that
-        // had time to spare and near zero on one that overran. It is the direct
-        // read on whether a repaint fits inside the budget.
+        // NOT the VBlank wait, despite what this comment said for a long time.
+        // Measured at 311 us mean, which is far too short to be one: with
+        // C3D_FRAME_SYNCDRAW the wait is at C3D_FrameBegin above. This is just
+        // the submit, and it is kept measured because a submit that starts
+        // taking milliseconds means the GPU or the GSP event thread is behind.
         CtrProfile("frameend", tf);
     }
-    // C3D_FrameEnd is the VBlank wait, so at 60 Hz this is ~16 ms by design and
-    // is expected to stay under the threshold. It is measured anyway: a frame
-    // that waited far longer than one VBlank is the signature of the GPU or the
-    // GSP event thread being behind rather than of anything above.
     CtrLogSlow("frameend", t0);
 
     CtrLogSlow("present", tPresent);
