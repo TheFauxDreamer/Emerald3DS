@@ -81,11 +81,20 @@ void UiSetSelectedMon(u8 index);
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);
 
-// Advances the HP bar animation by one frame. Returns TRUE while any bar is
-// still moving, which the shell turns into a repaint request. Must be called
-// once per frame, not once per redraw, or the animation stalls whenever the
-// screen happens not to be repainting.
-bool8 UiPartyTick(void);
+// Advances this tab's animations by one frame: the sliding HP bars and the mon
+// icons' two-frame cycle. Returns TRUE on the frames the picture actually
+// changed, which the shell turns into a repaint request -- the icons change
+// once every six frames, so an idle party grid asks for ten repaints a second
+// rather than sixty.
+//
+// Must be called once per frame, not once per redraw, or the animation stalls
+// whenever the screen happens not to be repainting.
+//
+// `visible` is whether the PARTY tab is the one on screen. FALSE returns
+// immediately without asking for anything, so no other tab pays for this; the
+// bars adopt the party's real values on the frame the tab comes back rather
+// than sliding for damage taken while it was hidden.
+bool8 UiPartyTick(bool8 visible);
 
 // Cheap identity of what the PARTY tab is showing: the live level cap behind
 // the cheat tags, plus the selected mon's EV total while the IV/EV panel is up.

@@ -156,13 +156,77 @@ static s8 sMoveSel = -1;
 // sprites, so it cannot be called; this matches the feel instead.
 #define HP_ANIM_FRAMES 48
 
-static u32 sShownHp[PARTY_SIZE];
-static u32 sShownMax[PARTY_SIZE];
-static u32 sShownSpecies[PARTY_SIZE];
+// ------------------------------------------------------- icon animation ----
+//
+// A mon icon in this ROM is two frames, not one, and until now this screen only
+// ever drew the first of them: every graphics/pokemon/*/icon.png is 32x64 and
+// UiMonIcon blitted the top half. So the grid was showing a still of an
+// animation the ROM already had in memory.
+//
+// Six frames apiece is the game's own pace -- sAnim_0 in src/pokemon_icon.c,
+// the anim CreateMonIcon starts by default -- so the icons here move at exactly
+// the rate they do in Emerald's party menu rather than at a rate invented here.
+//
+// Six is also what makes this affordable. The picture changes ten times a
+// second, not sixty, and the tick below asks for a repaint only on the frames
+// it actually changes on, so an always-visible animation costs ten full
+// repaints a second rather than a repaint every frame.
+#define ICON_ANIM_FRAMES 6
 
-bool8 UiPartyTick(void)
+static u32   sShownHp[PARTY_SIZE];
+static u32   sShownMax[PARTY_SIZE];
+static u32   sShownSpecies[PARTY_SIZE];
+static u8    sIconTimer;
+static u8    sIconFrame;
+static bool8 sTabVisible;
+
+// Adopt what the party actually holds, with no animation. Used on arrival at
+// the tab: a bar that slides on the frame the player switches to PARTY is
+// animating damage taken while they were somewhere else, which reports the
+// wrong moment. Only the arrival pays for this, not every hidden frame --
+// GetMonData decrypts in place, so a per-frame resync across the other four
+// tabs would cost more than the repaints the gate is saving.
+static void SnapBars(void)
+{
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gPlayerParty[i];
+
+        sShownSpecies[i] = GetMonData(mon, MON_DATA_SPECIES);
+        sShownMax[i]     = GetMonData(mon, MON_DATA_MAX_HP);
+        sShownHp[i]      = GetMonData(mon, MON_DATA_HP);
+    }
+}
+
+bool8 UiPartyTick(bool8 visible)
 {
     bool8 moving = FALSE;
+
+    // Nothing on another tab is watching either of these, and a tick that
+    // returns TRUE off screen is a full 76,800-pixel repaint of a view nobody
+    // can see. This gate is the reason an always-on animation is affordable at
+    // all; it also stops a sliding HP bar repainting the MAP tab, which it did
+    // before the icons gave anyone a reason to fix it.
+    if (!visible)
+    {
+        sTabVisible = FALSE;
+        return FALSE;
+    }
+
+    if (!sTabVisible)
+    {
+        sTabVisible = TRUE;
+        SnapBars();
+        // No repaint asked for: whatever made this tab visible already did.
+        return FALSE;
+    }
+
+    if (++sIconTimer >= ICON_ANIM_FRAMES)
+    {
+        sIconTimer = 0;
+        sIconFrame ^= 1;
+        moving = TRUE;
+    }
 
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
@@ -348,8 +412,8 @@ static void DrawCell(int index)
     if (species == SPECIES_NONE)
         return;
 
-    UiMonIcon(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
-              GetMonData(mon, MON_DATA_PERSONALITY));
+    UiMonIconFrame(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
+                   GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
@@ -650,7 +714,8 @@ static void DrawDetail(void)
         return;
     }
 
-    UiMonIcon(12, 12, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
+    UiMonIconFrame(12, 12, (u16)species,
+                   GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(52, 12, name, UiThemeText(), UiThemeShadow());
