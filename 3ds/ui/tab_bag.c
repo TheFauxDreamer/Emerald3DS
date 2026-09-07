@@ -69,6 +69,10 @@
 #define PAGE_Y        (LIST_Y + VISIBLE_ROWS * ROW_H + 2)
 #define PAGE_W        56
 #define PAGE_H        20
+// Named the way tab_dex.c names its pair, because they are now the same
+// control drawn the same way and the two files are read side by side.
+#define PAGE_UP_X     LEFT_X
+#define PAGE_DN_X     (LEFT_X + PAGE_W + 8)
 
 #define RIGHT_X       (RIGHT_TX * 8 + 10)
 #define RIGHT_W       (RIGHT_TW * 8 - 20)
@@ -365,19 +369,24 @@ static void DrawList(void)
     }
 
     // Paging lives below the list rather than beside it: the column is too
-    // narrow to give up width to arrows.
+    // narrow to give up width to a pager standing alongside the rows.
+    //
+    // The same UiArrow the DEX list pages with, centred in the same way, rather
+    // than the words UP and DN. Two lists on the same screen that scroll
+    // identically should not need to be learned twice, and an arrow says which
+    // way it goes in any language.
     if (sScroll > 0)
     {
-        UiRect(LEFT_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
-        UiText(LEFT_X + 18, PAGE_Y + 3, UiAscii(label, "UP", sizeof(label)),
-               UI_COL_ACCENT, UiThemeShadow());
+        UiRect(PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
+        UiArrow(PAGE_UP_X + (PAGE_W - UI_ARROW_W) / 2,
+                PAGE_Y + (PAGE_H - UI_ARROW_H) / 2, TRUE, UI_COL_ACCENT);
     }
 
     if (sScroll + VISIBLE_ROWS < count)
     {
-        UiRect(LEFT_X + PAGE_W + 8, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
-        UiText(LEFT_X + PAGE_W + 26, PAGE_Y + 3, UiAscii(label, "DN", sizeof(label)),
-               UI_COL_ACCENT, UiThemeShadow());
+        UiRect(PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
+        UiArrow(PAGE_DN_X + (PAGE_W - UI_ARROW_W) / 2,
+                PAGE_Y + (PAGE_H - UI_ARROW_H) / 2, FALSE, UI_COL_ACCENT);
     }
 }
 
@@ -599,7 +608,7 @@ void UiBagTouch(const CtrTouchState *t)
     // tap still fires exactly once, on its release, so tapping is unchanged.
     // They sit below the list and the pocket bar is above it, so nothing else
     // wants these rects and testing them first costs the other controls nothing.
-    if (UiHoldRepeat(&sHoldUp, t, LEFT_X, PAGE_Y, PAGE_W, PAGE_H))
+    if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         if (sScroll > 0)
         {
@@ -609,7 +618,7 @@ void UiBagTouch(const CtrTouchState *t)
         return;
     }
 
-    if (UiHoldRepeat(&sHoldDn, t, LEFT_X + PAGE_W + 8, PAGE_Y, PAGE_W, PAGE_H))
+    if (UiHoldRepeat(&sHoldDn, t, PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         if (sScroll + VISIBLE_ROWS < PocketCount(sPocket))
         {
