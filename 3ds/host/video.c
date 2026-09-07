@@ -272,6 +272,11 @@ static const char *const kProfBot[3] = {
 
 // Copy a linear w x h RGB565 image into a wider staging buffer, then let the
 // transfer engine tile it into the texture.
+//
+// The TOP screen's path, and now only that. It stays whole-image because it has
+// to be: the game's frame is new every frame and there is nowhere to spread the
+// cost to. At 256x160 it moves 81,920 bytes, which fits. The bottom screen is
+// three times that and got its own sliced path below.
 static void upload(uint16_t *stage, int stageW, const uint16_t *src,
                    int w, int h, C3D_Tex *tex, const char *const *prof)
 {
@@ -296,6 +301,79 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
                             TEX_TRANSFER_FLAGS);
 
     CtrProfile(prof[2], t);
+}
+
+// The bottom screen's upload, pushed a slice at a time.
+//
+// The asymmetry here is the whole design: the TOP screen has to hold 60fps, and
+// the bottom is allowed to arrive late. Before this, it was not allowed to --
+// a full bottom upload happened inside one frame, and it cost the game a whole
+// VBlank every time the UI repainted. Measured through the animations that
+// caused it: repainting 60 times a second ran the game at 30fps, 10 times a
+// second at 53, which is fps = 3600 / (60 + repaints per second).
+//
+// A full bottom upload moves 245,760 bytes -- THREE TIMES the top screen's,
+// because the stage is 512 wide for a 320-wide image -- through a blocking
+// transfer. So the frame budget picks the slice, not the picture: 48 rows is
+// 49,152 bytes, under two thirds of what the top screen already uploads every
+// frame without trouble. A repaint takes five frames to reach the panel instead
+// of one, and on a screen whose animations step five times a second that is
+// invisible.
+//
+// 48 because it is a multiple of 8. A tiled texture stores eight rows to a
+// strip and strips run in order, so any 8-row-aligned band is a contiguous run
+// in BOTH buffers: the source at row * BOT_TEX_W, the destination at
+// (row / 8) * BOT_TEX_W * 8. TEX_TRANSFER_FLAGS has no flip and no scaling, so
+// a band lands where it was taken from.
+//
+// That destination arithmetic is the one thing in here that hardware has to
+// confirm. If it is wrong the bottom screen shows its 48-row bands stacked in
+// the wrong order -- unmistakable, and harmless to everything else.
+#define BOT_CHUNK_ROWS 48
+
+static int sBotRow = CTR_BOTTOM_HEIGHT;   // next row to push; height means idle
+
+// Copied whole, and only the transfer is sliced. The UI can repaint again while
+// a slice run is in flight, and a source copied in pieces across those frames
+// would tear between them. 153,600 bytes in one pass is cheap; it was never the
+// expensive half.
+static void snapshot_bottom(void)
+{
+    const uint16_t *fb = CtrBottomFramebuffer();
+    unsigned long long t = CtrTicksNow();
+
+    for (int y = 0; y < CTR_BOTTOM_HEIGHT; y++)
+        memcpy(sBotStage + (size_t)y * BOT_TEX_W,
+               fb + (size_t)y * CTR_BOTTOM_WIDTH,
+               CTR_BOTTOM_WIDTH * sizeof(uint16_t));
+
+    CtrProfile(kProfBot[0], t);
+}
+
+static void upload_bottom_slice(void)
+{
+    const int left = CTR_BOTTOM_HEIGHT - sBotRow;
+    const int rows = (left < BOT_CHUNK_ROWS) ? left : BOT_CHUNK_ROWS;
+
+    uint16_t *src = sBotStage + (size_t)sBotRow * BOT_TEX_W;
+    uint8_t  *dst = (uint8_t *)sBotTex.data
+                  + (size_t)(sBotRow / 8) * BOT_TEX_W * 8 * sizeof(uint16_t);
+
+    unsigned long long t;
+
+    // Flush only the band about to move, not the whole stage. Same total work
+    // across a repaint, spread over the frames that do it.
+    t = CtrTicksNow();
+    GSPGPU_FlushDataCache(src, (size_t)rows * BOT_TEX_W * sizeof(uint16_t));
+    CtrProfile(kProfBot[1], t);
+
+    t = CtrTicksNow();
+    C3D_SyncDisplayTransfer((u32 *)src, GX_BUFFER_DIM(BOT_TEX_W, rows),
+                            (u32 *)dst, GX_BUFFER_DIM(BOT_TEX_W, rows),
+                            TEX_TRANSFER_FLAGS);
+    CtrProfile(kProfBot[2], t);
+
+    sBotRow += rows;
 }
 
 void CtrVideoPresent(void)
@@ -342,13 +420,22 @@ void CtrVideoPresent(void)
     CtrLogSlow("upload.top", t0);
 
     // The bottom screen is mostly static, so only re-tile it when the UI says
-    // something actually changed.
-    if (CtrBottomIsDirty()) {
-        t0 = CtrTimeNowMs();
-        upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
-               CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex, kProfBot);
-        CtrLogSlow("upload.bot", t0);
+    // something actually changed -- and then hand it over a slice per frame
+    // rather than all at once, so no single frame loses its budget to it.
+    //
+    // Cleared as soon as the snapshot is taken, not when the run finishes: a
+    // repaint arriving mid-run is a NEW picture, and it gets its own run after
+    // this one rather than being lost or tearing into it.
+    if (sBotRow >= CTR_BOTTOM_HEIGHT && CtrBottomIsDirty()) {
+        snapshot_bottom();
         CtrBottomClearDirty();
+        sBotRow = 0;
+    }
+
+    if (sBotRow < CTR_BOTTOM_HEIGHT) {
+        t0 = CtrTimeNowMs();
+        upload_bottom_slice();
+        CtrLogSlow("upload.bot", t0);
     }
 
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
