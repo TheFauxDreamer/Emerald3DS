@@ -603,6 +603,119 @@ void UiChevron(int x, int y)
     }
 }
 
+// The gold sparkle Emerald spins around a shiny, transcribed from
+// graphics/battle_anims/sprites/gold_stars.png -- ANIM_TAG_GOLD_STARS, the art
+// TryShinyAnimation (src/battle_anim_throw.c) throws around the encounter, and
+// the same art UI_COL_SHINY* took its colours from.
+//
+// That sheet is 16x24: six 8x8 tiles holding THREE stars, not one. Tiles 0-3
+// are a 16x16, tile 4 an 8x8, tile 5 a small twinkle, which the game picks
+// between by tile number (battle_anim_throw.c:2295). Transcribing all three
+// means the twinkle below steps through the artist's own frames instead of
+// scaling one of them, which is why there is no scaler in here.
+//
+// Transcribed rather than decompressed for the reason UiPokeball and sChevron
+// above are: the whole sheet is six tiles, this is the ink out of it, and a
+// runtime LZ decompress would want a cache and a size check to live in.
+//
+// The values are the SOURCE's palette roles, not ours: 6 is its pale gold, 7
+// the gold body, 8 the orange edge. sSparklePal maps them onto the three
+// UI_COL_SHINY* constants, which are indices 5, 7 and 9 of that same palette --
+// 7 is exact, 5 is within a shade of 6, and 9 is a deeper orange than 8. So a
+// sparkle is the ramp the notice already prints its headline in, one step wider.
+#define SPARKLE_BIG_W 16
+#define SPARKLE_BIG_H 14
+#define SPARKLE_MID_W 6
+#define SPARKLE_MID_H 6
+#define SPARKLE_SML_W 3
+#define SPARKLE_SML_H 3
+
+static const u8 sSparkleBig[SPARKLE_BIG_H][SPARKLE_BIG_W] =
+{
+    {0,0,0,0,0,0,0,8,8,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,7,7,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,8,6,6,8,0,0,0,0,0,0},
+    {0,0,0,0,0,0,7,6,6,7,0,0,0,0,0,0},
+    {0,0,0,0,0,0,7,6,6,7,0,0,0,0,0,0},
+    {8,7,7,7,7,6,6,6,6,6,6,7,7,7,7,8},
+    {0,8,7,6,6,6,6,6,6,6,6,6,6,7,8,0},
+    {0,0,0,8,6,6,6,6,6,6,6,6,8,0,0,0},
+    {0,0,0,0,7,6,6,6,6,6,6,7,0,0,0,0},
+    {0,0,0,0,8,6,6,6,6,6,6,8,0,0,0,0},
+    {0,0,0,0,8,6,6,7,7,6,6,8,0,0,0,0},
+    {0,0,0,8,6,6,7,0,0,7,6,6,8,0,0,0},
+    {0,0,0,8,6,8,0,0,0,0,8,6,8,0,0,0},
+    {0,0,0,7,0,0,0,0,0,0,0,0,7,0,0,0},
+};
+
+static const u8 sSparkleMid[SPARKLE_MID_H][SPARKLE_MID_W] =
+{
+    {0,0,8,7,0,0},
+    {0,0,6,6,0,0},
+    {8,7,6,6,7,8},
+    {0,7,6,6,7,0},
+    {0,6,7,7,6,0},
+    {0,6,0,0,6,0},
+};
+
+static const u8 sSparkleSml[SPARKLE_SML_H][SPARKLE_SML_W] =
+{
+    {0,6,0},
+    {6,6,6},
+    {0,6,0},
+};
+
+// Indexed by the source's palette role, so roles 0-5 are unused and the table
+// reads as the ramp rather than as three arbitrary slots.
+static const u16 sSparklePal[9] =
+{
+    0, 0, 0, 0, 0, 0,
+    UI_COL_SHINY_PALE,   // 6, the pale core
+    UI_COL_SHINY,        // 7, the gold body
+    UI_COL_SHINY_EDGE,   // 8, the orange edge
+};
+
+void UiSparkle(int cx, int cy, u8 size)
+{
+    // ax/ay are the star's own bright horizontal axis inside each frame, which
+    // is what (cx, cy) names. Centring on the bounding box instead would drift
+    // the twinkle upward as it grows, because every frame has a longer bottom
+    // than top -- these are wish stars with trailing legs, not symmetric ones.
+    static const struct
+    {
+        const u8 *ink;
+        u8 w, h, ax, ay;
+    } sFrames[UI_SPARKLE_SIZES] =
+    {
+        { &sSparkleSml[0][0], SPARKLE_SML_W, SPARKLE_SML_H, 1, 1 },
+        { &sSparkleMid[0][0], SPARKLE_MID_W, SPARKLE_MID_H, 3, 2 },
+        { &sSparkleBig[0][0], SPARKLE_BIG_W, SPARKLE_BIG_H, 8, 5 },
+    };
+
+    const u8 *ink;
+    int w, h, x, y;
+
+    if (size >= UI_SPARKLE_SIZES)
+        return;
+
+    ink = sFrames[size].ink;
+    w   = sFrames[size].w;
+    h   = sFrames[size].h;
+    x   = cx - sFrames[size].ax;
+    y   = cy - sFrames[size].ay;
+
+    for (int row = 0; row < h; row++)
+    {
+        for (int col = 0; col < w; col++)
+        {
+            u8 role = ink[row * w + col];
+
+            if (role != 0)
+                UiFillRect(x + col, y + row, 1, 1, sSparklePal[role]);
+        }
+    }
+}
+
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
 {
     return t->x >= x && t->x < x + w && t->y >= y && t->y < y + h;

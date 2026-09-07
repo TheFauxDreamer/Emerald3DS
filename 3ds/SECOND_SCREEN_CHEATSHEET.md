@@ -79,9 +79,9 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 522 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 720 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 654 / 146 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit`, `UiHoldRepeat` |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 767 / 161 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
 | [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
@@ -296,7 +296,7 @@ A full repaint is 76,800 pixels of software fill. Two separate flags in
 - `sNeedsRepaint`: the framebuffer contents are stale.
 - `sDirty`: the host has not uploaded the current contents yet.
 
-Do not conflate them. Two ways to get a repaint:
+Do not conflate them. Three ways to get a repaint:
 
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
@@ -344,11 +344,36 @@ in Options, being handed the Pokedex.
   `MON_DATA_ENCRYPT_SEPARATOR` (`include/pokemon.h:8-19`) and answer from the
   plaintext header, so a `personality ^ otId` fold is a plain load.
 
-`UiPartyTick()` ([tab_party.c:163](ui/tab_party.c#L163)) is the one animation.
-It must be called once per frame, not once per redraw, or it stalls whenever the
-screen happens not to be repainting. It returns TRUE while a bar is still
-moving, which the shell turns into a repaint request. It currently runs on every
-tab, so a moving HP bar forces a full repaint even with the MAP tab up.
+**3. Tick.** An animation asks for its own repaints. There are two, both called once per
+frame from `CtrBottomUpdate` and both returning TRUE while they still want
+frames, which the shell turns into `sNeedsRepaint`:
+
+| Tick | Runs while |
+|---|---|
+| `UiPartyTick()` ([tab_party.c:163](ui/tab_party.c#L163)) | an HP bar is still sliding |
+| `NoticeTick()` ([bottom_screen.c](ui/bottom_screen.c)) | the shiny panel is up |
+
+Three rules, and the third is the one that keeps this affordable:
+
+1. **Once per frame, not once per redraw.** A tick called from `Redraw` stalls
+   exactly when it is the thing that ought to be causing the redraw.
+2. **Count calls, not milliseconds.** `CtrBottomUpdate` runs once per DISPLAYED
+   frame, so a call is a 60th of a second even under fast-forward, and an
+   animation does not speed up with the game. `UiHold`
+   ([ui_draw.h](ui/ui_draw.h)) and both ticks all do this.
+3. **Return FALSE the moment the thing being animated is off screen.** A
+   repaint is 76,800 pixels of software fill plus a blocking texture upload on
+   the host ([video.c](../host/video.c)), so a tick that returns TRUE
+   unconditionally is a decision to pay that on every frame of the game.
+   `NoticeTick` returns FALSE whenever the panel is down, which is why a rare,
+   brief, 60fps animation costs nothing on the frames it is not running.
+
+`UiPartyTick` does not yet follow rule 3: it runs on every tab, so a moving HP
+bar forces a full repaint even with the MAP tab up. Do not copy that.
+
+A `u16` frame counter wraps after eighteen minutes. If a cycle length divides
+65536 the wrap lands on a boundary and nothing is visible; `NOTICE_CYCLE` is 64
+for that reason. Pick a power of two.
 
 ---
 
