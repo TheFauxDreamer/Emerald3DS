@@ -109,6 +109,8 @@
 static u8  sPocket = POCKET_ITEMS;   // pocket ids are 1-based
 static u16 sScroll;
 static u16 sCursor;                  // row the cursor is on, absolute
+// One counter per pager, so holding UP or DN runs the list. See UiHoldRepeat.
+static UiHold sHoldUp, sHoldDn;
 
 // The picker is modal over the whole content area, the same shape the PARTY
 // tab's detail view uses.
@@ -585,14 +587,40 @@ void UiBagTouch(const CtrTouchState *t)
 {
     u16 count;
 
-    if (!t->justReleased)
-        return;
-
     if (sView == VIEW_PICK_MON)
     {
-        PickerTouch(t);
+        if (t->justReleased)
+            PickerTouch(t);
         return;
     }
+
+    // Both pagers are tested ahead of the justReleased guard below, because a
+    // held one has to act on frames where nothing has been released. A plain
+    // tap still fires exactly once, on its release, so tapping is unchanged.
+    // They sit below the list and the pocket bar is above it, so nothing else
+    // wants these rects and testing them first costs the other controls nothing.
+    if (UiHoldRepeat(&sHoldUp, t, LEFT_X, PAGE_Y, PAGE_W, PAGE_H))
+    {
+        if (sScroll > 0)
+        {
+            sScroll--;
+            UiMarkDirty();
+        }
+        return;
+    }
+
+    if (UiHoldRepeat(&sHoldDn, t, LEFT_X + PAGE_W + 8, PAGE_Y, PAGE_W, PAGE_H))
+    {
+        if (sScroll + VISIBLE_ROWS < PocketCount(sPocket))
+        {
+            sScroll++;
+            UiMarkDirty();
+        }
+        return;
+    }
+
+    if (!t->justReleased)
+        return;
 
     if (t->y < POCKET_BAR_H)
     {
@@ -620,21 +648,6 @@ void UiBagTouch(const CtrTouchState *t)
     if (UiHit(t, USE_X, USE_Y, USE_W, USE_H))
     {
         UseTapped();
-        UiMarkDirty();
-        return;
-    }
-
-    if (UiHit(t, LEFT_X, PAGE_Y, PAGE_W, PAGE_H) && sScroll > 0)
-    {
-        sScroll--;
-        UiMarkDirty();
-        return;
-    }
-
-    if (UiHit(t, LEFT_X + PAGE_W + 8, PAGE_Y, PAGE_W, PAGE_H)
-     && sScroll + VISIBLE_ROWS < count)
-    {
-        sScroll++;
         UiMarkDirty();
         return;
     }

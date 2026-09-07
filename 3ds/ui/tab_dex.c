@@ -101,6 +101,9 @@ extern const struct PokedexEntry gPokedexEntries[];
 static u16   sScroll;
 static u16   sCursor;          // row index into the current dex order
 static bool8 sEntryOpen;
+// One counter per arrow, so holding one runs the list instead of stepping it.
+// The dex is the reason UiHoldRepeat exists: 386 rows is 386 taps without it.
+static UiHold sHoldUp, sHoldDn;
 
 static bool8 NationalMode(void)
 {
@@ -465,12 +468,9 @@ void UiDexTouch(const CtrTouchState *t)
 {
     u16 len;
 
-    if (!t->justReleased)
-        return;
-
     if (sEntryOpen)
     {
-        if (UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
+        if (t->justReleased && UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
         {
             sEntryOpen = FALSE;
             UiMarkDirty();
@@ -478,19 +478,27 @@ void UiDexTouch(const CtrTouchState *t)
         return;
     }
 
-    len = DexLength();
-
-    if (UiHit(t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
+    // Both arrows are tested ahead of the justReleased guard below, because a
+    // held one has to act on frames where nothing has been released. A plain
+    // tap still fires exactly once, on its release, so tapping is unchanged.
+    // Holding the jump modifier while an arrow repeats moves JUMP_ROWS a step,
+    // which is how the far end of the national dex is reachable at all.
+    if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         MoveCursor(-CursorStep());
         return;
     }
 
-    if (UiHit(t, PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H))
+    if (UiHoldRepeat(&sHoldDn, t, PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         MoveCursor(CursorStep());
         return;
     }
+
+    if (!t->justReleased)
+        return;
+
+    len = DexLength();
 
     // First tap moves the cursor and previews the mon, a second tap on the same
     // row opens the entry. That is the real dex's cursor-then-A, and the same

@@ -607,3 +607,48 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
 {
     return t->x >= x && t->x < x + w && t->y >= y && t->y < y + h;
 }
+
+// Press-and-hold auto-repeat. See the contract above UiHold in ui_draw.h.
+//
+// The state is rebuilt from this frame's touch rather than trusted across
+// frames: a press that slides off the control stops repeating, and every press
+// starts its own delay from zero. That matters because a handler stops being
+// called at all when its tab is swapped out from under a finger, which would
+// otherwise leave a counter parked past the delay and make the next press
+// repeat instantly.
+bool8 UiHoldRepeat(UiHold *h, const CtrTouchState *t, int x, int y, int w, int hgt)
+{
+    int inside = UiHit(t, x, y, w, hgt);
+
+    if (t->justPressed)
+    {
+        h->frames = 0;
+        h->next = UI_HOLD_DELAY;
+        h->repeated = 0;
+    }
+
+    if (t->touching && inside)
+    {
+        h->frames++;
+
+        if (h->frames < h->next)
+            return FALSE;
+
+        h->next = (u16)(h->frames + (h->frames >= UI_HOLD_FAST_AT
+                                     ? UI_HOLD_FAST : UI_HOLD_PERIOD));
+        h->repeated = 1;
+        return TRUE;
+    }
+
+    {
+        // A release inside the control that never got as far as repeating is an
+        // ordinary tap, and acts exactly where the old UiHit test did: on the
+        // release, so a touch that slides off does not fire it.
+        bool8 tap = (t->justReleased && inside && h->frames != 0 && !h->repeated);
+
+        h->frames = 0;
+        h->next = UI_HOLD_DELAY;
+        h->repeated = 0;
+        return tap;
+    }
+}
