@@ -257,8 +257,55 @@ u16 Ctr3dsMapSpecies(u16 species)
             return candidate;
     }
 
-    // Nothing qualified. Leaving the species alone is the only safe answer:
-    // it is exactly what vanilla would have given, so it cannot break anything.
+    // Nothing qualified in MAX_TRIES draws, and that is not the rare event the
+    // loop above assumes. The mask is preserved exactly, so a species that
+    // learns most of the field HMs draws from a very small pool: Tentacool's
+    // is 12 of 386, which 16 independent draws miss 60% of the time. Returning
+    // the original here therefore left the species with the TIGHTEST pools as
+    // the ones least likely to be randomised at all -- every water route kept
+    // its Tentacool on most save files -- which is most of why the feature
+    // looked like it was barely doing anything.
+    //
+    // So pick from the pool directly instead of giving up: count what qualifies,
+    // then take the nth. A species always covers its own mask, so the count is
+    // never zero and this always answers. It costs two passes over the species
+    // list, but it only runs when the draws above have already failed.
+    //
+    // Chosen over the obvious "scan forward from where the hash landed and take
+    // the first match", which is one pass but badly clumped: that hands the
+    // whole gap after a long run of non-qualifying species to whichever mon
+    // ends the run, and measured over Tentacool's 12-species pool it gave one
+    // of them 60% of the seeds. Counting first makes every member of the pool
+    // equally likely, which is the property the draws above have and the reason
+    // they are still tried first.
+    //
+    // The guarantee is untouched: every candidate returned here passes the same
+    // mask test the loop above applies, so wherever vanilla gave a mon that
+    // could learn a field HM, this still does.
+    {
+        u32 count = 0;
+        u32 pick;
+
+        for (i = 0; i < VALID_SPECIES_COUNT; i++)
+        {
+            if ((FieldHmMask(SpeciesFromIndex(i)) & need) == need)
+                count++;
+        }
+
+        pick = (h >> 8) % count;
+
+        for (i = 0; i < VALID_SPECIES_COUNT; i++)
+        {
+            u16 candidate = SpeciesFromIndex(i);
+
+            if ((FieldHmMask(candidate) & need) == need && pick-- == 0)
+                return candidate;
+        }
+    }
+
+    // Unreachable: the pool above always contains at least the original itself,
+    // so the pick always lands. Kept because a "cannot happen" is not a thing
+    // to leave to a fallthrough.
     return species;
 }
 

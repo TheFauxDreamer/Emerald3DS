@@ -356,7 +356,30 @@ Four things that cost real time and are not recoverable by reading the code:
 - **The randomiser needs no stored seed.** It is derived from
   `gSaveBlock2Ptr->playerTrainerId`, which makes the mapping stable for one
   playthrough, different between playthroughs, and unchanged by toggling the
-  option off and back on.
+  option off and back on. **That "different between playthroughs" was untrue
+  for the first year of this feature**, and nothing about the randomiser was
+  wrong: the ID's lower half comes from `REG_TM1CNT_L` in
+  `SeedRngAndSetTrainerId` (`src/main.c`), the GBA's Timer 1, started at the
+  naming screen so that it measures how long the player took to type a name.
+  This port has no timers. I/O is a zeroed buffer (`3ds/gba_mem.c`) nothing
+  writes, so that read was always 0, `SeedRng(0)` made the upper half
+  deterministic too, and every save file on every console got the same ID and
+  the same randomised world. It now reads `CtrTimeNowMs()` instead, which is
+  the same kind of source measured at the same moment. Anything inheriting
+  entropy from GBA hardware needs this check; the register reads fine and
+  answers 0 forever.
+- **A rejection loop with a give-up is biased toward whatever it gives up on.**
+  The HM-preserving guard drew 16 candidates and returned the ORIGINAL species
+  if none covered the mask, which reads as safe and is not: the pool a species
+  draws from is the number of mons learning everything it can, and Tentacool's
+  is 12 of 386, which 16 draws miss 60% of the time. The species with the
+  narrowest pools were therefore the least likely to be randomised at all --
+  measured across the 143 species in the wild tables, 13.6% came back
+  unchanged. Exactly one species in the game genuinely has no alternative. The
+  fix is to stop drawing and select: count the pool, take the nth, which is
+  uniform over it and always answers. Scanning forward from the hash instead
+  is one pass rather than two but clumps badly, handing one of Tentacool's 12
+  a 60% share.
 - **Two hooks on one path will map twice, and the starter is that path.** The
   mapping is not idempotent, so `map(map(x))` is a third species. The starter
   reaches `ScriptGiveMon` from `CB2_GiveStarter` carrying a species
