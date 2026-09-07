@@ -111,4 +111,36 @@ void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp);
 
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 
+// Press-and-hold auto-repeat for a control that steps something, so a list can
+// be crossed by holding an arrow instead of tapping it 300 times.
+//
+// One UiHold lives beside the state its control drives -- it is a frame
+// counter, not a widget. Both list tabs page with it; see UiDexTouch.
+//
+// Frames, counted in calls: CtrBottomUpdate runs the active tab's Touch once
+// per DISPLAYED frame, whether or not anything is being touched, so counting
+// calls is counting 60ths of a second even under fast-forward.
+typedef struct
+{
+    u16 frames;     // frames this press has spent inside the rect, 0 when idle
+    u16 next;       // frame count the next repeat fires on
+    u8  repeated;   // this press has already repeated, so its release must not
+} UiHold;
+
+// Long enough that a slow tap is still one step, then two rates: the second one
+// exists because the national dex is 386 rows and one fixed rate makes crossing
+// it either twitchy at the top or a chore at the bottom.
+#define UI_HOLD_DELAY    18   // frames held before the first repeat
+#define UI_HOLD_PERIOD   6    // frames between repeats to begin with
+#define UI_HOLD_FAST_AT  60   // frames held before the rate steps up
+#define UI_HOLD_FAST     3    // frames between repeats after that
+
+// TRUE on each frame the control should act. Call it once per frame, BEFORE the
+// handler's `if (!t->justReleased) return;` guard -- a hold has to act on frames
+// where nothing has been released. It still fires once on the release of a
+// plain tap, so a control converted to this keeps its old tap behaviour; a press
+// that got as far as repeating does not act again when it is lifted.
+bool8 UiHoldRepeat(UiHold *h, const CtrTouchState *t,
+                   int x, int y, int w, int hgt);
+
 #endif // CTR_UI_DRAW_H

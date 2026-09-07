@@ -81,12 +81,12 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 |---|---|---|
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 522 | Tab list, tab bar, dispatch, overlays, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 609 / 114 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit` |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 654 / 146 | Framebuffer, blitters, window frames, icons, HP bar, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
 | [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 654 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/tab_bag.c](ui/tab_bag.c) | 667 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
-| [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
+| [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 704 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 210 / 43 | Reads about the opposing mon: type effectiveness for the party badges, and `UiShinyOpponent` behind the notice |
 
@@ -204,8 +204,8 @@ Two things follow, and both are load bearing:
 2. Because of (1), a tab's `Touch` is called every frame with stale coordinates
    once the player has tapped inside the content area. **Every handler therefore
    opens with `if (!t->justReleased) return;`** Do not remove that guard unless
-   you are deliberately implementing a drag, in which case gate on
-   `t->touching` yourself.
+   you are deliberately implementing a drag or a press-and-hold, in which case
+   gate on `t->touching` yourself, or use `UiHoldRepeat` below, which does.
 
 Acting on release rather than press means a touch that slides off a control does
 not fire it. Keep that convention.
@@ -221,7 +221,43 @@ Order matters: test overlays and pagers **before** the controls underneath them
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
-as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:243](ui/tab_dex.c#L243).
+as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:246](ui/tab_dex.c#L246).
+
+### Press and hold
+
+`UiHoldRepeat` ([ui_draw.c:619](ui/ui_draw.c#L619)) is the one exception to the
+`justReleased` guard, and it is why the guard moved down a few lines in the two
+list tabs. Both scroll controls in DEX ([tab_dex.c:486](ui/tab_dex.c#L486)) and
+BAG ([tab_bag.c:602](ui/tab_bag.c#L602)) run through it:
+
+```c
+static UiHold sHoldUp, sHoldDn;   // one counter per control, beside its state
+
+if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
+{
+    MoveCursor(-CursorStep());
+    return;
+}
+```
+
+- **Call it above the handler's `justReleased` guard.** A held control has to
+  act on frames where nothing has been released, which is exactly what that
+  guard exists to throw away.
+- **It still fires once on the release of a plain tap**, so a control converted
+  to it behaves as it did before for anyone who taps. A press that got as far as
+  repeating does not act again when it is lifted, so a hold does not end in one
+  extra step.
+- **The counter is rebuilt from the current frame**, never trusted across
+  frames: sliding off the control stops the repeat, and `justPressed` zeroes it.
+  Without that reset a finger still down when the tab is swapped out (the
+  handler simply stops being called) would leave a counter parked past the delay
+  and make the *next* press repeat instantly.
+- **`UI_HOLD_DELAY` / `UI_HOLD_PERIOD` / `UI_HOLD_FAST`** are in frames, and a
+  frame here is a *displayed* frame, so the rate is the same under
+  fast-forward. Two rates rather than one because the national dex is 386 rows.
+- **Every repeat is a full repaint** (section 7), and on DEX it is also one
+  `UiMonPic` decompress, because each step lands on a new species. That is the
+  real ceiling on the repeat rate; it is not a free-running scroll.
 
 ### Established interaction idioms
 
@@ -329,6 +365,8 @@ void UiClear(u16 color);
 void UiFillRect(int x, int y, int w, int h, u16 color);
 void UiRect(int x, int y, int w, int h, u16 color);        // 1px outline
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
+bool8 UiHoldRepeat(UiHold *h, const CtrTouchState *t,     // section 6
+                   int x, int y, int w, int hgt);
 ```
 
 ### Panels
