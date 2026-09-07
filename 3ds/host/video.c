@@ -252,18 +252,50 @@ void CtrDiagSplash(void)
 }
 #endif
 
+// Three profile names per caller, not one name plus a suffix built at runtime:
+// CtrProfile keys on the string's ADDRESS, so a constructed name would never
+// match itself and every sample would open a new stage.
+//
+// Split three ways because that is the open question. A bottom repaint costs
+// about a whole VBlank and the paint itself is nowhere near that, so the cost
+// is somewhere in here -- and which of the three it is decides whether the fix
+// is a narrower transfer, a smaller flush, or not blocking on the transfer at
+// all. The top screen carries the same three as the control: it uploads on
+// every frame at 256x160 against the bottom's 512x240, so it is the same code
+// doing a third of the work.
+static const char *const kProfTop[3] = {
+    "upload.top.copy", "upload.top.flush", "upload.top.xfer"
+};
+static const char *const kProfBot[3] = {
+    "upload.bot.copy", "upload.bot.flush", "upload.bot.xfer"
+};
+
 // Copy a linear w x h RGB565 image into a wider staging buffer, then let the
 // transfer engine tile it into the texture.
 static void upload(uint16_t *stage, int stageW, const uint16_t *src,
-                   int w, int h, C3D_Tex *tex)
+                   int w, int h, C3D_Tex *tex, const char *const *prof)
 {
+    unsigned long long t = CtrTicksNow();
+
     for (int y = 0; y < h; y++)
         memcpy(stage + (size_t)y * stageW, src + (size_t)y * w, (size_t)w * 2);
 
+    CtrProfile(prof[0], t);
+    t = CtrTicksNow();
+
+    // Note this flushes the WHOLE stage, padding included: stageW is 512 for a
+    // 320-wide bottom screen, so 37% of both this and the transfer below is
+    // blank. Whether that matters is what the numbers are for.
     GSPGPU_FlushDataCache(stage, (size_t)stageW * h * sizeof(uint16_t));
+
+    CtrProfile(prof[1], t);
+    t = CtrTicksNow();
+
     C3D_SyncDisplayTransfer((u32 *)stage, GX_BUFFER_DIM(stageW, h),
                             (u32 *)tex->data, GX_BUFFER_DIM(stageW, h),
                             TEX_TRANSFER_FLAGS);
+
+    CtrProfile(prof[2], t);
 }
 
 void CtrVideoPresent(void)
@@ -305,7 +337,8 @@ void CtrVideoPresent(void)
     }
 #endif
     t0 = CtrTimeNowMs();
-    upload(sTopStage, TOP_TEX_W, sGbaFrame, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, &sTopTex);
+    upload(sTopStage, TOP_TEX_W, sGbaFrame, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
+           &sTopTex, kProfTop);
     CtrLogSlow("upload.top", t0);
 
     // The bottom screen is mostly static, so only re-tile it when the UI says
@@ -313,7 +346,7 @@ void CtrVideoPresent(void)
     if (CtrBottomIsDirty()) {
         t0 = CtrTimeNowMs();
         upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
-               CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex);
+               CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex, kProfBot);
         CtrLogSlow("upload.bot", t0);
         CtrBottomClearDirty();
     }
@@ -354,7 +387,14 @@ void CtrVideoPresent(void)
     C2D_DrawImageAt(sBotImage, 0.0f, 0.0f, 0.0f, NULL, 1.0f, 1.0f);
 
     t0 = CtrTimeNowMs();
-    C3D_FrameEnd(0);
+    {
+        unsigned long long tf = CtrTicksNow();
+        C3D_FrameEnd(0);
+        // The VBlank wait, so this is the SLACK: about 16 ms on a frame that
+        // had time to spare and near zero on one that overran. It is the direct
+        // read on whether a repaint fits inside the budget.
+        CtrProfile("frameend", tf);
+    }
     // C3D_FrameEnd is the VBlank wait, so at 60 Hz this is ~16 ms by design and
     // is expected to stay under the threshold. It is measured anyway: a frame
     // that waited far longer than one VBlank is the signature of the GPU or the

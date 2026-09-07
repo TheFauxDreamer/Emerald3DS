@@ -156,6 +156,74 @@ unsigned int CtrTimeNowMs(void)
     return (unsigned int)osGetTime();
 }
 
+// ---- stage profiling -------------------------------------------------------
+//
+// CtrLogSlow above only speaks when a stage exceeds SLOW_MS, which is the right
+// shape for a stall and the wrong one for a cost. The bottom screen's repaint
+// costs about a whole VBlank and never trips a 50 ms threshold, so it was
+// invisible to every tool in this file while setting the frame rate.
+//
+// Same pointer-keyed table as CtrLogSlow, and for the same reason: every caller
+// passes a string literal, so identical stages share an address and this stays
+// a handful of compares on a path that runs several times a frame.
+//
+// Reported every PROFILE_PERIOD samples of a given stage rather than every
+// frame: one line per stage per ten seconds keeps the report inside
+// LOG_MAX_LINES while still averaging over enough samples to resolve a stage
+// far below the clock's own granularity.
+#define PROFILE_STAGES  16
+#define PROFILE_PERIOD  600
+
+unsigned long long CtrTicksNow(void)
+{
+    return svcGetSystemTick();
+}
+
+void CtrProfile(const char *stage, unsigned long long startTicks)
+{
+    static const char        *sName[PROFILE_STAGES];
+    static unsigned long long sTotal[PROFILE_STAGES];
+    static unsigned long long sWorst[PROFILE_STAGES];
+    static unsigned           sSamples[PROFILE_STAGES];
+    static int                sUsed;
+
+    unsigned long long elapsed = CtrTicksNow() - startTicks;
+    int i;
+
+    for (i = 0; i < sUsed; i++)
+        if (sName[i] == stage)
+            break;
+
+    if (i == sUsed) {
+        if (sUsed == PROFILE_STAGES)
+            return;             // more stages than expected: drop the newcomer
+        sName[sUsed++] = stage;
+    }
+
+    sTotal[i] += elapsed;
+    sSamples[i]++;
+    if (elapsed > sWorst[i])
+        sWorst[i] = elapsed;
+
+    if (sSamples[i] < PROFILE_PERIOD)
+        return;
+
+    {
+        // Microseconds, computed in ticks and converted once. SYSCLOCK_ARM11 is
+        // 268111856, so dividing by 268 is a microsecond to within 0.04%, and
+        // doing it here rather than per sample keeps the accumulator exact.
+        unsigned long long meanUs  = sTotal[i] / sSamples[i] / (SYSCLOCK_ARM11 / 1000000);
+        unsigned long long worstUs = sWorst[i] / (SYSCLOCK_ARM11 / 1000000);
+
+        CtrLog("emerald3ds: prof %s mean %llu us worst %llu us over %u\n",
+               stage, meanUs, worstUs, sSamples[i]);
+    }
+
+    sTotal[i] = 0;
+    sWorst[i] = 0;
+    sSamples[i] = 0;
+}
+
 void CtrLogSlow(const char *stage, unsigned int startMs)
 {
     // Keyed on the POINTER, not on strcmp: every caller passes a string

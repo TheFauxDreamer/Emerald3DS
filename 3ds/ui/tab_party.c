@@ -163,20 +163,18 @@ static s8 sMoveSel = -1;
 // UiMonIcon blitted the top half. So the grid was showing a still of an
 // animation the ROM already had in memory.
 //
-// Six frames apiece is the game's own pace -- sAnim_0 in src/pokemon_icon.c,
-// the anim CreateMonIcon starts by default -- so the icons here move at exactly
-// the rate they do in Emerald's party menu rather than at a rate invented here.
+// The pace is the shell's shared animation clock (UiAnimStepped), not this
+// file's own counter and not the game's.
 //
-// Six is also what makes this affordable. The picture changes ten times a
-// second, not sixty, and the tick below asks for a repaint only on the frames
-// it actually changes on, so an always-visible animation costs ten full
-// repaints a second rather than a repaint every frame.
-#define ICON_ANIM_FRAMES 6
-
+// Emerald's own party menu swaps these every six frames, ten times a second,
+// and that is what this did first. It cost 7fps: a repaint on this screen costs
+// an entire VBlank, so ten of them a second is fps = 3600/(60+10) = 51, and 53
+// is what the hardware actually showed. Five steps a second is about 55fps.
+// Half the game's pace is the price of those four frames, and the icons are
+// visibly slower than the ones in the game's own party menu because of it.
 static u32   sShownHp[PARTY_SIZE];
 static u32   sShownMax[PARTY_SIZE];
 static u32   sShownSpecies[PARTY_SIZE];
-static u8    sIconTimer;
 static u8    sIconFrame;
 static bool8 sTabVisible;
 
@@ -221,9 +219,8 @@ bool8 UiPartyTick(bool8 visible)
         return FALSE;
     }
 
-    if (++sIconTimer >= ICON_ANIM_FRAMES)
+    if (UiAnimStepped())
     {
-        sIconTimer = 0;
         sIconFrame ^= 1;
         moving = TRUE;
     }
