@@ -377,4 +377,25 @@ void Ctr3dsApplyAudioDbg(int which, int on);
 unsigned int CtrTimeNowMs(void);
 void CtrLogSlow(const char *stage, unsigned int startMs);
 
+// ---- stage profiling ------------------------------------------------------
+//
+// CtrLogSlow is a stall DETECTOR: it writes nothing under 50 ms. That makes it
+// blind to the thing that actually sets this port's frame rate. A bottom-screen
+// repaint costs about one whole VBlank -- 60 repaints a second ran the game at
+// 30fps and 10 ran it at 53 -- and 15 ms is invisible to a 50 ms threshold, so
+// nothing in this tree has ever measured it.
+//
+// This measures instead of detecting: accumulate a stage across many frames and
+// report the mean and the worst. Averaging is also what recovers resolution,
+// since one sample of a sub-millisecond stage tells you nothing.
+//
+// Ticks rather than milliseconds for the same reason: CtrTimeNowMs is
+// osGetTime, whose 1 ms granularity cannot resolve a paint at all.
+// SYSCLOCK_ARM11 makes a tick about 3.7 ns.
+//
+// `unsigned long long` crosses the seam safely, like the `unsigned int` above:
+// bridge.h is included by game-side code that must never see <3ds.h>.
+unsigned long long CtrTicksNow(void);
+void CtrProfile(const char *stage, unsigned long long startTicks);
+
 #endif // CTR_BRIDGE_H

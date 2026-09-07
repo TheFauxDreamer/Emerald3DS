@@ -79,11 +79,11 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 721 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 737 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 147 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
-| [ui/tab_party.c](ui/tab_party.c) | 947 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
+| [ui/tab_party.c](ui/tab_party.c) | 944 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP and mon-icon animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
@@ -353,6 +353,9 @@ frames, which the shell turns into `sNeedsRepaint`:
 | `UiPartyTick(visible)` ([tab_party.c](ui/tab_party.c)) | the PARTY tab is up: mon icons cycle their two frames, HP bars slide |
 | `NoticeTick()` ([bottom_screen.c](ui/bottom_screen.c)) | the shiny panel is up |
 
+Both advance on `UiAnimStepped()`, the shared step clock, rather than on their
+own frame counts.
+
 Three rules, and the third is the one that keeps this affordable:
 
 1. **Once per frame, not once per redraw.** A tick called from `Redraw` stalls
@@ -365,8 +368,10 @@ Three rules, and the third is the one that keeps this affordable:
    repaint is 76,800 pixels of software fill plus a blocking texture upload on
    the host ([video.c](../host/video.c)), so a tick that returns TRUE
    unconditionally is a decision to pay that on every frame of the game.
-   `NoticeTick` returns FALSE whenever the panel is down, which is why a rare,
-   brief, 60fps animation costs nothing on the frames it is not running.
+   `NoticeTick` returns FALSE whenever the panel is down, which is why it costs
+   nothing on the frames it is not running.
+4. **Advance on `UiAnimStepped()`, never on your own frame counter.** See below:
+   a private period is a private repaint budget, and they add up.
 
 `UiPartyTick` takes its tab's visibility as an argument rather than reading
 `sTab` itself, which is rule 3 made hard to skip: the shell has to say whether
@@ -376,16 +381,42 @@ damage taken while it was hidden. It resyncs on the ARRIVAL, not on every
 hidden frame -- `GetMonData` decrypts in place, so a per-frame resync across
 the other four tabs would cost more than the repaints the gate saves.
 
-**An animation's rate is its repaint rate.** The party icons change every sixth
-frame because that is the pace of the game's own `sAnim_0`
-(`src/pokemon_icon.c`), so an idle party grid asks for ten repaints a second,
-not sixty. Tie an animation to the rate its source art actually moves at and
-the cost follows; pick a rate freely and you have picked a repaint budget
-without noticing.
+### What an animation actually costs
 
-A `u16` frame counter wraps after eighteen minutes. If a cycle length divides
-65536 the wrap lands on a boundary and nothing is visible; `NOTICE_CYCLE` is 64
-for that reason. Pick a power of two.
+**A repaint costs one whole VBlank.** Measured on hardware, not assumed:
+
+> **fps = 3600 / (60 + repaints per second)**
+
+Both data points fit it. The shiny notice repainting every frame ran the game at
+**30fps** (model: 30.0). The party icons repainting every sixth frame ran it at
+**53** (model: 51.4). Two consequences, and neither is negotiable:
+
+- **The cost is per repaint, near-constant, and barely related to what is
+  drawn.** The party grid and the shiny panel draw very different amounts and
+  cost about the same. The paint is a fraction of it; the rest is the host's
+  blocking `C3D_SyncDisplayTransfer` of a 512-wide stage for a 320-wide image
+  ([video.c](../host/video.c)). Optimising the drawing is aiming at the wrong
+  half -- profile it with `CtrProfile` before touching anything.
+- **No animation rate reaches 60fps.** `3600/(60+N)` gets there only at N = 0.
+  Picking a rate IS picking a frame rate: 5/sec is ~55fps, 10/sec is ~51,
+  20/sec is ~45.
+
+**So there is one clock, `UI_ANIM_STEP_FRAMES`, and everything shares it.**
+Repaints coalesce through a single `sNeedsRepaint`, but only when they land on
+the same frames. Two animations on private periods ask on different frames and
+cost close to double; on the shared clock, a shiny panel over an animating party
+grid still costs 5 repaints a second, not 10. That makes the frame rate a
+property of this screen rather than of how many things happen to be moving.
+
+Corollaries worth keeping:
+
+- **A moving thing needs a rate its motion survives.** The notice's opening
+  glint was a 4px band crossing 224px; at 5 steps a second it would have taken
+  eleven seconds to cross, so it was replaced by a burst. Continuous motion and
+  a low repaint budget are incompatible -- prefer state changes.
+- A `u16` step counter wraps after about an hour. If a cycle length divides
+  65536 the wrap lands on a boundary and nothing is visible; `NOTICE_CYCLE` is 8
+  for that reason. Pick a power of two.
 
 ---
 
@@ -779,6 +810,7 @@ appears.
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
+| The frame rate drops while something on the bottom screen is animating | Expected, and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.copy/flush/xfer` the host's three upload stages, and `frameend` is the VBlank wait, so a `frameend` near zero means the frame had no slack left. |
 | A symptom with no cause anywhere in the source | A stale host object. `make -C 3ds clean` and rebuild before reading any more code. |
 
 ---

@@ -73,6 +73,14 @@ enum UiTab
 // only re-uploads the 320x240 texture when the screen is dirty.
 void UiMarkDirty(void);
 
+// TRUE on the frames animations are allowed to advance on, roughly five times a
+// second. Every animated thing on this screen asks this rather than counting
+// frames itself, so that two of them moving at once still cost one repaint per
+// step instead of two -- and on this screen a repaint costs a whole VBlank, so
+// that is the difference between about 55fps and about 51. See the note above
+// UI_ANIM_STEP_FRAMES in bottom_screen.c.
+bool8 UiAnimStepped(void);
+
 // The party slot the BAG tab will act on. Set by the party grid.
 u8   UiSelectedMon(void);
 void UiSetSelectedMon(u8 index);
