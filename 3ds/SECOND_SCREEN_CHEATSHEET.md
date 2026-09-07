@@ -425,6 +425,41 @@ So: the cost is per-repaint work that is neither the upload nor the sync, which
 leaves the **paint** (`Redraw()`), and that is now instrumented too. Profile
 before optimising, and be suspicious of a model that only fits.
 
+Then the missing stages were added and the answer fell out:
+
+| Stage | Mean | |
+|---|---|---|
+| `ppu` | **~9000 µs** | every frame, the GBA rasteriser |
+| `framebegin` | **~5700 µs** | every frame -- **this is the slack** |
+| `paint` | **~4900 µs** | per bottom-screen repaint |
+| `upload.bot.copy` | 500 µs | per repaint |
+
+**A frame has 5.7 ms spare and a full repaint costs 5.6 ms of it**, 87% of that
+being `paint`. It fits or misses depending on how the PPU's 7-10 ms lands that
+frame, which is why the symptom was 55fps rather than 30.
+
+### So the screen does not repaint to animate
+
+`UiSnapshot` / `UiRestoreRect` ([ui_draw.h](ui/ui_draw.h)) keep a copy of the
+last full paint. An animation step puts back the rects it is about to redraw and
+draws only those -- six 32x32 icons, or four 16x14 sparkles. Measured 18x
+cheaper: **~270 µs against 4900**.
+
+The rule that makes it correct, and it is not optional:
+
+> **The snapshot must be taken BEFORE anything that animates is drawn.**
+
+`Redraw` paints the still screen, snapshots, then calls `DrawAnimatedLayer`.
+Bake a moving element into the snapshot and every later restore paints it back:
+mon icons blit with index 0 transparent, so the old frame shows through the
+holes in the new one. That is why `DrawCell` no longer draws its icon and
+`DrawNotice` no longer draws its sparkles -- both moved into the animated layer.
+
+An animation whose change is not confined to rects it can name must ask for a
+full repaint instead. `UiPartyTick` does exactly that: a sliding HP bar changes
+the rest of the cell, so `UiPartyIconOnly()` answers FALSE and the shell
+rebuilds.
+
 - **Measure, do not reason, about the drawing primitives either.** `UiFillRect`
   pairing pixels into 32-bit stores is **2.14x**; the identical change to
   `UiClear` is **0.93x**, because one long store loop is something the compiler

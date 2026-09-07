@@ -177,6 +177,8 @@ static u32   sShownMax[PARTY_SIZE];
 static u32   sShownSpecies[PARTY_SIZE];
 static u8    sIconFrame;
 static bool8 sTabVisible;
+static bool8 sIconStepped;   // the icon frame flipped this tick
+static bool8 sHpMoving;      // a bar slid this tick, so the whole cell changed
 
 // Adopt what the party actually holds, with no animation. Used on arrival at
 // the tab: a bar that slides on the frame the player switches to PARTY is
@@ -200,6 +202,8 @@ bool8 UiPartyTick(bool8 visible)
 {
     bool8 moving = FALSE;
 
+    sHpMoving = FALSE;
+
     // Nothing on another tab is watching either of these, and a tick that
     // returns TRUE off screen is a full 76,800-pixel repaint of a view nobody
     // can see. This gate is the reason an always-on animation is affordable at
@@ -219,7 +223,12 @@ bool8 UiPartyTick(bool8 visible)
         return FALSE;
     }
 
-    if (UiAnimStepped())
+    // Recorded rather than inferred: the HP loop below can also set `moving`,
+    // and the shell needs to know which of the two it was to choose between a
+    // six-rect redraw and a whole-screen one.
+    sIconStepped = UiAnimStepped();
+
+    if (sIconStepped)
     {
         sIconFrame ^= 1;
         moving = TRUE;
@@ -258,9 +267,18 @@ bool8 UiPartyTick(bool8 visible)
             sShownHp[i] = (hp - sShownHp[i] <= step) ? hp : sShownHp[i] + step;
 
         moving = TRUE;
+        sHpMoving = TRUE;       // outside the icon rects, so this needs it all
     }
 
     return moving;
+}
+
+// Whether the only thing that changed this tick was the icon frame. The shell
+// uses it to choose between putting six 32x32 rects back and rebuilding the
+// whole 320x240, which measured 4.9 ms against a 5.7 ms frame budget.
+bool8 UiPartyIconOnly(void)
+{
+    return sIconStepped && !sHpMoving;
 }
 
 #define ARROW_GAP 3
@@ -330,6 +348,47 @@ static bool8 AnyTweakOn(void)
 static int TagStripH(void) { return AnyTweakOn() ? TAG_STRIP_H : 0; }
 static int CellH(void)     { return AnyTweakOn() ? CELL_H_TIGHT : CELL_H_FULL; }
 static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
+
+// The icons, and nothing else: restore what the last full paint had under them
+// and draw the current frame back. Everything else in the cell -- the window
+// frame, the name, the HP bar, the status badge -- is already correct in the
+// snapshot and is not touched.
+void UiPartyRedrawIcons(void)
+{
+    const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
+
+    // The detail view covers the grid, and shows one icon of its own.
+    if (sDetailOpen)
+    {
+        struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
+        u32 species = GetMonData(mon, MON_DATA_SPECIES);
+
+        if (species != SPECIES_NONE)
+        {
+            UiRestoreRect(12, 12, 32, 32);
+            UiMonIconFrame(12, 12, (u16)species,
+                           GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+        }
+        return;
+    }
+
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gPlayerParty[i];
+        u32 species = GetMonData(mon, MON_DATA_SPECIES);
+        int x, y;
+
+        if (species == SPECIES_NONE)
+            continue;
+
+        x = (int)(i % COLS) * CELL_W + CELL_ICON_X;
+        y = CellTop((int)i) + rows->iconY;
+
+        UiRestoreRect(x, y, 32, 32);
+        UiMonIconFrame(x, y, (u16)species,
+                       GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+    }
+}
 
 // Semantic colours, so the tag carries its meaning before the text is read:
 // green for the one that helps you, amber and red for the one holding you back
@@ -409,8 +468,11 @@ static void DrawCell(int index)
     if (species == SPECIES_NONE)
         return;
 
-    UiMonIconFrame(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
-                   GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+    // The icon is NOT drawn here. It is the animated layer, painted after the
+    // shell takes its snapshot, so the snapshot holds the still background
+    // beneath it -- see UiPartyRedrawIcons. Drawing it here too would bake a
+    // frame into that background, and since a mon icon blits with index 0
+    // transparent, the baked frame would show through the next one.
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
@@ -711,8 +773,9 @@ static void DrawDetail(void)
         return;
     }
 
-    UiMonIconFrame(12, 12, (u16)species,
-                   GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+    // Likewise not drawn here: the detail view's icon is animated too, and
+    // UiPartyRedrawIcons paints it after the snapshot.
+    (void)species;
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(52, 12, name, UiThemeText(), UiThemeShadow());

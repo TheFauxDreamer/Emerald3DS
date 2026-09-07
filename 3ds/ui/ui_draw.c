@@ -812,6 +812,47 @@ void UiSparkle(int cx, int cy, u8 size)
     }
 }
 
+// The last full paint. 153,600 bytes of .bss, which is the price of not
+// repainting the screen to move an icon; the UI layer is heap-free by design
+// (see the cheatsheet's memory-model note) so this is a static like every other
+// cache here.
+static u16 sSnap[UI_W * UI_H];
+static int sSnapValid;
+
+void UiSnapshot(void)
+{
+    for (int i = 0; i < UI_W * UI_H; i++)
+        sSnap[i] = sFb[i];
+
+    sSnapValid = 1;
+}
+
+int UiHasSnapshot(void)
+{
+    return sSnapValid;
+}
+
+void UiRestoreRect(int x, int y, int w, int h)
+{
+    if (!sSnapValid)
+        return;
+
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > UI_W) w = UI_W - x;
+    if (y + h > UI_H) h = UI_H - y;
+    if (w <= 0 || h <= 0)
+        return;
+
+    for (int row = 0; row < h; row++)
+    {
+        int base = (y + row) * UI_W + x;
+
+        for (int col = 0; col < w; col++)
+            sFb[base + col] = sSnap[base + col];
+    }
+}
+
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h)
 {
     return t->x >= x && t->x < x + w && t->y >= y && t->y < y + h;
