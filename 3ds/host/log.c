@@ -173,6 +173,12 @@ unsigned int CtrTimeNowMs(void)
 // far below the clock's own granularity.
 #define PROFILE_STAGES  16
 #define PROFILE_PERIOD  600
+// ...or this long, whichever comes first. 600 samples is ten seconds for a
+// stage that runs every frame and TWO MINUTES for one that runs five times a
+// second, which is how `paint` -- the single most important number here --
+// managed to be absent from a whole log while every per-frame stage reported
+// twelve times. A rare stage has to be able to speak.
+#define PROFILE_MAX_TICKS ((unsigned long long)SYSCLOCK_ARM11 * 10)
 
 unsigned long long CtrTicksNow(void)
 {
@@ -184,10 +190,12 @@ void CtrProfile(const char *stage, unsigned long long startTicks)
     static const char        *sName[PROFILE_STAGES];
     static unsigned long long sTotal[PROFILE_STAGES];
     static unsigned long long sWorst[PROFILE_STAGES];
+    static unsigned long long sSince[PROFILE_STAGES];   // window opened at
     static unsigned           sSamples[PROFILE_STAGES];
     static int                sUsed;
 
-    unsigned long long elapsed = CtrTicksNow() - startTicks;
+    unsigned long long now = CtrTicksNow();
+    unsigned long long elapsed = now - startTicks;
     int i;
 
     for (i = 0; i < sUsed; i++)
@@ -198,6 +206,7 @@ void CtrProfile(const char *stage, unsigned long long startTicks)
         if (sUsed == PROFILE_STAGES)
             return;             // more stages than expected: drop the newcomer
         sName[sUsed++] = stage;
+        sSince[i] = now;
     }
 
     sTotal[i] += elapsed;
@@ -205,7 +214,7 @@ void CtrProfile(const char *stage, unsigned long long startTicks)
     if (elapsed > sWorst[i])
         sWorst[i] = elapsed;
 
-    if (sSamples[i] < PROFILE_PERIOD)
+    if (sSamples[i] < PROFILE_PERIOD && now - sSince[i] < PROFILE_MAX_TICKS)
         return;
 
     {
@@ -222,6 +231,7 @@ void CtrProfile(const char *stage, unsigned long long startTicks)
     sTotal[i] = 0;
     sWorst[i] = 0;
     sSamples[i] = 0;
+    sSince[i] = now;
 }
 
 void CtrLogSlow(const char *stage, unsigned int startMs)

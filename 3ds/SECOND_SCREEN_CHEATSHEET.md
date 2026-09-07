@@ -392,30 +392,45 @@ the other four tabs would cost more than the repaints the gate saves.
 
 ### What an animation actually costs
 
-**A repaint costs one whole VBlank.** Measured on hardware, not assumed:
+**Repaints cost frames, and every attempt so far to say WHY has been wrong.**
+This section is the record of that, because the wrong answers were all
+plausible and two of them shipped.
+
+The observed relationship holds:
 
 > **fps = 3600 / (60 + repaints per second)**
 
-Both data points fit it. The shiny notice repainting every frame ran the game at
-**30fps** (model: 30.0). The party icons repainting every sixth frame ran it at
-**53** (model: 51.4). Two consequences, and neither is negotiable:
+Both data points fit. The notice repainting every frame ran the game at **30fps**
+(model 30.0); the party icons every sixth frame ran it at **53** (model 51.4).
+**But fitting is not explaining.** The formula was read as "a repaint costs one
+whole VBlank in the upload", the upload was sliced across five frames to fix it,
+and the frame rate did not move. Then the profiler was finally read:
 
-- **The cost is per repaint, near-constant, and barely related to what is
-  drawn.** The party grid and the shiny panel draw very different amounts and
-  cost about the same. The paint is a fraction of it; the rest was the host's
-  blocking `C3D_SyncDisplayTransfer` of a 512-wide stage for a 320-wide image
-  ([video.c](../host/video.c)) -- 245,760 bytes, three times what the top screen
-  moves. Optimising the drawing is aiming at the wrong half; profile with
-  `CtrProfile` before touching anything.
-- **The formula is what the upload used to force, not a law.** It described a
-  whole-image bottom upload landing inside one frame. That upload is now sliced
-  across five frames (`BOT_CHUNK_ROWS`), so no single frame loses its budget to
-  it and the top screen should hold 60fps whatever the bottom is doing. The
-  asymmetry is deliberate and worth stating plainly: **the top screen must stay
-  at 60fps, the bottom is allowed to arrive late.**
+| Stage | Mean | |
+|---|---|---|
+| `upload.top.copy` + `.flush` + `.xfer` | **441 µs** | whole top upload, every frame |
+| `upload.bot.flush` + `.xfer` | **206 µs** | one bottom slice |
+| `frameend` | **311 µs** | and this one is the tell |
+
+**The entire bottom upload path is about 1 ms per repaint.** At five repaints a
+second that is 5 ms in every 1000 and it cannot move the frame rate at all. The
+slicing was aimed at something that was never the cost.
+
+`frameend` at 311 µs is the second lesson: `C3D_FrameEnd` is **not** the VBlank
+wait. `C3D_FRAME_SYNCDRAW` waits at `C3D_FrameBegin`, which went uninstrumented
+for the whole investigation while a comment above the wrong call asserted
+otherwise. **`framebegin` is the frame's slack** -- read it first.
+
+So: the cost is per-repaint work that is neither the upload nor the sync, which
+leaves the **paint** (`Redraw()`), and that is now instrumented too. Profile
+before optimising, and be suspicious of a model that only fits.
+
+- **Measure, do not reason, about the drawing primitives either.** `UiFillRect`
+  pairing pixels into 32-bit stores is **2.14x**; the identical change to
+  `UiClear` is **0.93x**, because one long store loop is something the compiler
+  already emits well. Both were "obviously" faster.
 - **Keep the step period longer than a slice run.** Five frames to upload, so a
-  step every twelve leaves seven idle. A step period under five would have the
-  bottom uploading on every frame, which is the cost the slicing removed.
+  step every twelve leaves seven idle.
 
 **So there is one clock, `UI_ANIM_STEP_FRAMES`, and everything shares it.**
 Repaints coalesce through a single `sNeedsRepaint`, but only when they land on
