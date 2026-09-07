@@ -135,6 +135,23 @@ void UiSparkle(int cx, int cy, u8 size);
 // target picker shows the real value.
 void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp);
 
+// ---- partial repaint ------------------------------------------------------
+//
+// A full repaint is 4.9 ms, measured on hardware, and a frame has 5.7 ms of
+// slack (`framebegin`). Rebuilding all 320x240 to step two 32x32 mon icons is
+// what spends it, and the game loses a frame every time.
+//
+// So: keep a copy of the last full paint, and let an animation put back the
+// piece it is about to redraw instead of the screen rebuilding itself. The
+// restore is a memcpy of a few thousand pixels against a thousand tile blits.
+//
+// The copy is the WHOLE composited screen -- tab, overlay and bar as they were
+// last painted -- so restoring a rect is correct whatever was on top of it, and
+// an element drawn back over it lands exactly where it did before.
+void UiSnapshot(void);
+int  UiHasSnapshot(void);
+void UiRestoreRect(int x, int y, int w, int h);
+
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 
 // Press-and-hold auto-repeat for a control that steps something, so a list can

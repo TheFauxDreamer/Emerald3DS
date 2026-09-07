@@ -284,6 +284,7 @@ bool8 UiAnimStepped(void)
 static u16   sNoticeStep;     // animation steps this panel has been up
 static u32   sNoticeAnimId;   // the encounter those steps belong to
 static bool8 sNoticeAnimSet;
+static bool8 sNoticeOpened;   // this tick was the panel APPEARING, not stepping
 
 static bool8 NoticeTick(void)
 {
@@ -303,8 +304,11 @@ static bool8 NoticeTick(void)
         sNoticeAnimId = id;
         sNoticeAnimSet = TRUE;
         sNoticeStep = 0;
-        return TRUE;          // paint the burst on the frame the panel opens
+        sNoticeOpened = TRUE;   // the panel itself has to be painted, not just
+        return TRUE;            // its sparkles
     }
+
+    sNoticeOpened = FALSE;
 
     // Otherwise only on a step frame. Returning TRUE on the other eleven would
     // repaint the screen to draw exactly what is already on it, which is the
@@ -349,16 +353,28 @@ static int TwinkleSize(u16 phase)
 // All four corners are bare ground to draw on: the headline block, the species
 // line and the 100px DISMISS button are every one of them centred, which leaves
 // the ends of the top and bottom rows empty.
+// The four corner rects, big enough for the largest frame of the art: it is
+// 16x14 around its axis, which sits 8 left and 5 above the centre.
+#define NOTICE_SPK_W  16
+#define NOTICE_SPK_H  14
+#define NOTICE_SPK_AX 8
+#define NOTICE_SPK_AY 5
+
+// Ordered around the panel rather than in reading order, so the twinkle travels
+// round it. Shared by the full paint and the sparkles-only step below.
+static const struct { s16 dx, dy; } sCorners[NOTICE_CORNERS] =
+{
+    { NOTICE_SPK_IN_X,               NOTICE_SPK_IN_T },
+    { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_SPK_IN_T },
+    { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_IN_H - NOTICE_SPK_IN_B },
+    { NOTICE_SPK_IN_X,               NOTICE_IN_H - NOTICE_SPK_IN_B },
+};
+
+static int sCornerDx(u32 i) { return sCorners[i].dx; }
+static int sCornerDy(u32 i) { return sCorners[i].dy; }
+
 static void DrawCornerSparkles(void)
 {
-    static const struct { s16 dx, dy; } sCorners[NOTICE_CORNERS] =
-    {
-        { NOTICE_SPK_IN_X,               NOTICE_SPK_IN_T },
-        { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_SPK_IN_T },
-        { NOTICE_IN_W - NOTICE_SPK_IN_X, NOTICE_IN_H - NOTICE_SPK_IN_B },
-        { NOTICE_SPK_IN_X,               NOTICE_IN_H - NOTICE_SPK_IN_B },
-    };
-
     for (u32 i = 0; i < NOTICE_CORNERS; i++)
     {
         u16 phase = (u16)((sNoticeStep + i * (NOTICE_CYCLE / NOTICE_CORNERS))
@@ -371,6 +387,20 @@ static void DrawCornerSparkles(void)
             UiSparkle(NOTICE_IN_X + sCorners[i].dx,
                       NOTICE_IN_Y + sCorners[i].dy, (u8)size);
     }
+}
+
+// The same four sparkles, over the snapshot rather than over a fresh panel.
+// This is the whole of an animation step's drawing when the notice is up: four
+// 16x14 restores and four glyphs, against the 4.9 ms it costs to rebuild the
+// screen for them.
+static void RedrawNoticeSparkles(void)
+{
+    for (u32 i = 0; i < NOTICE_CORNERS; i++)
+        UiRestoreRect(NOTICE_IN_X + sCornerDx(i) - NOTICE_SPK_AX,
+                      NOTICE_IN_Y + sCornerDy(i) - NOTICE_SPK_AY,
+                      NOTICE_SPK_W, NOTICE_SPK_H);
+
+    DrawCornerSparkles();
 }
 
 static void DrawNotice(u16 species, u32 personality)
@@ -440,10 +470,10 @@ static void DrawNotice(u16 species, u32 personality)
            NOTICE_BTN_Y + (NOTICE_BTN_H - UI_GLYPH_H) / 2,
            label, UI_COL_SHINY_PALE, UI_COL_SHADOW);
 
-    // Last, so a sparkle is never half-hidden behind the text it is decorating.
-    // The corners are clear of every element above, but "clear" is a property
-    // of the current layout and drawing order is a property of this function.
-    DrawCornerSparkles();
+    // The sparkles are NOT drawn here. They are the animated layer, painted
+    // after the shell snapshots this panel, so the snapshot is the still panel
+    // beneath them -- see DrawAnimatedLayer. Baking a sparkle into the
+    // background would leave it behind when a smaller frame is drawn over it.
 }
 
 // ------------------------------------------------------------- lifecycle ---
@@ -568,6 +598,9 @@ static void DrawTabBar(const u8 *vis, u32 n)
     }
 }
 
+// Defined below, next to the animation-step path that shares it.
+static void DrawAnimatedLayer(void);
+
 static void Redraw(void)
 {
     u8 vis[UI_TAB_COUNT];
@@ -622,8 +655,49 @@ static void Redraw(void)
     sNeedsRepaint = 0;
     sDirty = 1;          // tell the host to re-upload
 
+    // Remember the finished screen, so the next animation step can put back
+    // what it covers rather than rebuilding all of this. Composited -- tab,
+    // overlay and bar -- which is what makes restoring a rect correct whatever
+    // happened to be on top of it.
+    UiSnapshot();
+
+    // ...and only now the moving parts, so they are never inside the thing an
+    // animation step restores from.
+    DrawAnimatedLayer();
+
     CtrLogSlow("redraw", t0);
     CtrProfile("paint", tp);
+}
+
+// Everything on this screen that moves, drawn OVER the snapshot rather than
+// into it. Each of these restores its own rects first, which is a no-op right
+// after a full paint and is the whole trick on an animation step.
+//
+// The panel is modal and covers the middle of the screen, so while it is up the
+// icons are its business, not the grid's. They resume when it closes.
+static void DrawAnimatedLayer(void)
+{
+    if (NoticeActive(NULL, NULL))
+        RedrawNoticeSparkles();
+    else if (sTab == UI_TAB_PARTY)
+        UiPartyRedrawIcons();
+}
+
+// An animation step, and nothing else: a few rects put back from the snapshot
+// and the moving pieces drawn again over them.
+//
+// This exists because of one measurement. A full repaint is 4.9 ms and the
+// frame has 5.7 ms of slack, so rebuilding the screen five times a second to
+// step some icons spends nearly all of it and the game drops to 55fps. The
+// same step through here is a few thousand pixels.
+static void RedrawAnimated(void)
+{
+    unsigned long long tp = CtrTicksNow();
+
+    DrawAnimatedLayer();
+    sDirty = 1;
+
+    CtrProfile("paint.anim", tp);
 }
 
 void CtrBottomInit(void)
@@ -641,6 +715,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
 {
     u32 hash;
     u32 noticeIdentity = 0;
+    int animParty = 0, animNotice = 0;
     // The whole of the touch response, so the log can separate it from the
     // repaint it usually ends in: `update` slow with `redraw` fast means the
     // cost is in a touch handler or in UiStateHash, not in the painting.
@@ -710,15 +785,30 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // The party grid's HP bars and mon icons, and only while that grid is the
     // thing on screen -- the tab is passed in rather than assumed, so the four
     // other tabs pay nothing for either animation.
+    //
+    // An animation that only moved its own small rects asks for the cheap path;
+    // anything else -- a sliding HP bar, the panel appearing -- still needs the
+    // screen rebuilt. Getting that split wrong shows up as a stale screen, not
+    // a crash, so when in doubt a tick should ask for the full repaint.
     if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
-        sNeedsRepaint = 1;
+    {
+        if (UiPartyIconOnly())
+            animParty = 1;
+        else
+            sNeedsRepaint = 1;
+    }
 
     // The shiny panel's sparkles, on the same terms. Both ticks live here
     // rather than inside Redraw because a tick that only ran when the screen
     // happened to repaint would stall exactly when it is the thing that ought
     // to be causing the repaint.
     if (sInGame && NoticeTick())
-        sNeedsRepaint = 1;
+    {
+        if (sNoticeOpened)
+            sNeedsRepaint = 1;   // the panel itself, not just its sparkles
+        else
+            animNotice = 1;
+    }
 
     // This state can change without any touch at all -- taking damage, an
     // evolution, a level-up, the player changing the border in Options, or
@@ -730,8 +820,19 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         sNeedsRepaint = 1;
     }
 
+    // Full repaint wins over the cheap one: it redraws everything the cheap
+    // path would have, and refreshes the snapshot the cheap path restores from.
     if (sNeedsRepaint)
         Redraw();
+    else if (animParty || animNotice)
+    {
+        // No snapshot yet means nothing to restore from -- the first paint of a
+        // session, or straight after the title screen. Build one.
+        if (UiHasSnapshot())
+            RedrawAnimated();
+        else
+            Redraw();
+    }
 
     CtrLogSlow("bottom.update", t0);
 }
