@@ -35,12 +35,21 @@ Rp2350PresentFrame()                 3ds/host/main.c:551   (end of every game fr
                                        UiStateHash()      poll for change
                                        Redraw() if needed -> paints sFb
   if (++sSubFrame >= sSpeed)
-     CtrVideoPresent()               3ds/host/video.c:269
-        if (CtrBottomIsDirty())      video.c:313
-           upload(CtrBottomFramebuffer()); CtrBottomClearDirty()
+     CtrVideoPresent()               3ds/host/video.c
+        upload(top)                                       WHOLE, every frame
+        if (idle && CtrBottomIsDirty())
+           snapshot_bottom(); CtrBottomClearDirty()        320x240 -> stage
+        if (mid-run)
+           upload_bottom_slice()                           48 ROWS, 5 frames
      CtrSaveFlush(0)                 3ds/host/save.c      the save image
      CtrSettingsFlush(0)             3ds/host/settings.c  settings.bin
 ```
+
+The bottom screen is uploaded **a slice per frame, not whole**. The top screen
+has to hold 60fps and the bottom is allowed to arrive late, so a repaint reaches
+the panel five frames after it was painted. See `BOT_CHUNK_ROWS` in
+[video.c](../host/video.c) for why 48 rows, and section 7 for what it cost
+before.
 
 The two flushes are at the bottom for a reason: this is the only point in the
 frame where blocking on the SD card is affordable, because `CtrVideoPresent()`
@@ -393,13 +402,20 @@ Both data points fit it. The shiny notice repainting every frame ran the game at
 
 - **The cost is per repaint, near-constant, and barely related to what is
   drawn.** The party grid and the shiny panel draw very different amounts and
-  cost about the same. The paint is a fraction of it; the rest is the host's
+  cost about the same. The paint is a fraction of it; the rest was the host's
   blocking `C3D_SyncDisplayTransfer` of a 512-wide stage for a 320-wide image
-  ([video.c](../host/video.c)). Optimising the drawing is aiming at the wrong
-  half -- profile it with `CtrProfile` before touching anything.
-- **No animation rate reaches 60fps.** `3600/(60+N)` gets there only at N = 0.
-  Picking a rate IS picking a frame rate: 5/sec is ~55fps, 10/sec is ~51,
-  20/sec is ~45.
+  ([video.c](../host/video.c)) -- 245,760 bytes, three times what the top screen
+  moves. Optimising the drawing is aiming at the wrong half; profile with
+  `CtrProfile` before touching anything.
+- **The formula is what the upload used to force, not a law.** It described a
+  whole-image bottom upload landing inside one frame. That upload is now sliced
+  across five frames (`BOT_CHUNK_ROWS`), so no single frame loses its budget to
+  it and the top screen should hold 60fps whatever the bottom is doing. The
+  asymmetry is deliberate and worth stating plainly: **the top screen must stay
+  at 60fps, the bottom is allowed to arrive late.**
+- **Keep the step period longer than a slice run.** Five frames to upload, so a
+  step every twelve leaves seven idle. A step period under five would have the
+  bottom uploading on every frame, which is the cost the slicing removed.
 
 **So there is one clock, `UI_ANIM_STEP_FRAMES`, and everything shares it.**
 Repaints coalesce through a single `sNeedsRepaint`, but only when they land on

@@ -227,9 +227,13 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 // rate a property of this screen rather than of how many things happen to be
 // moving on it.
 //
-// 12 frames is 5 steps a second, which the formula above puts at about 55fps.
-// Raising the rate is a direct trade against frame rate and nothing else: 6
-// frames would be 10 steps a second and about 51fps.
+// 12 frames is 5 steps a second. It also has to stay clear of the host's
+// upload: 3ds/host/video.c hands a repaint to the GPU 48 rows at a time, five
+// frames per repaint, so that the top screen keeps its 60fps. A step period
+// shorter than five frames would ask for the next picture before the last one
+// had finished arriving, and the bottom screen would be uploading on every
+// frame -- which is the cost this is all avoiding. 12 leaves seven idle frames
+// between runs.
 #define UI_ANIM_STEP_FRAMES 12
 
 static u8    sAnimSub;
