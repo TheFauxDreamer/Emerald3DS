@@ -109,7 +109,7 @@ Most new views need **no key at all**: encounter tables, learnsets, base stats a
 
 The PC box case is the one that looks expensive and is not. `GetMonData` decrypts in place (`src/pokemon.c:3745`), so hashing 420 species reads would be 420 decrypt round trips. But `MON_DATA_PERSONALITY`, `MON_DATA_OT_ID` and `MON_DATA_SANITY_HAS_SPECIES` sit **before** `MON_DATA_ENCRYPT_SEPARATOR` (`include/pokemon.h:8-19`), so they answer from the plaintext header. Hashing 30 visible `personality ^ otId` pairs is 60 plain loads and zero decryptions. Write that rule into `ui_view.h`.
 
-Two wins fall out of the same refactor: `UiPartyTick()` currently runs on every tab (`bottom_screen.c:332`), so a moving HP bar forces a full 76,800-pixel repaint while the MAP tab is up; and the 6-mon party loop in the hash does six decrypt round trips per frame on all five tabs. Both move into the party views' own `key`/`tick`.
+One win falls out of the same refactor: the 6-mon party loop in the hash does six decrypt round trips per frame on all five tabs, and moves into the party views' own `key`. (`UiPartyTick()` no longer needs this: it takes the tab's visibility as an argument and returns immediately off screen, which it had to once the mon icons started animating on it.)
 
 ### Build-script hazard, worth fixing regardless
 

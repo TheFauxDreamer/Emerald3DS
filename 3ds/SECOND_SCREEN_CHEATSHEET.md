@@ -79,11 +79,11 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 720 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 721 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 112 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 767 / 161 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
-| [ui/tab_party.c](ui/tab_party.c) | 882 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
+| [ui/tab_party.c](ui/tab_party.c) | 947 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
@@ -350,7 +350,7 @@ frames, which the shell turns into `sNeedsRepaint`:
 
 | Tick | Runs while |
 |---|---|
-| `UiPartyTick()` ([tab_party.c:163](ui/tab_party.c#L163)) | an HP bar is still sliding |
+| `UiPartyTick(visible)` ([tab_party.c](ui/tab_party.c)) | the PARTY tab is up: mon icons cycle their two frames, HP bars slide |
 | `NoticeTick()` ([bottom_screen.c](ui/bottom_screen.c)) | the shiny panel is up |
 
 Three rules, and the third is the one that keeps this affordable:
@@ -368,8 +368,20 @@ Three rules, and the third is the one that keeps this affordable:
    `NoticeTick` returns FALSE whenever the panel is down, which is why a rare,
    brief, 60fps animation costs nothing on the frames it is not running.
 
-`UiPartyTick` does not yet follow rule 3: it runs on every tab, so a moving HP
-bar forces a full repaint even with the MAP tab up. Do not copy that.
+`UiPartyTick` takes its tab's visibility as an argument rather than reading
+`sTab` itself, which is rule 3 made hard to skip: the shell has to say whether
+anyone is looking. Off screen it returns immediately, and adopts the party's
+real HP on the frame the tab comes back rather than sliding on arrival for
+damage taken while it was hidden. It resyncs on the ARRIVAL, not on every
+hidden frame -- `GetMonData` decrypts in place, so a per-frame resync across
+the other four tabs would cost more than the repaints the gate saves.
+
+**An animation's rate is its repaint rate.** The party icons change every sixth
+frame because that is the pace of the game's own `sAnim_0`
+(`src/pokemon_icon.c`), so an idle party grid asks for ten repaints a second,
+not sixty. Tie an animation to the rate its source art actually moves at and
+the cost follows; pick a rate freely and you have picked a repaint budget
+without noticing.
 
 A `u16` frame counter wraps after eighteen minutes. If a cycle length divides
 65536 the wrap lands on a boundary and nothing is visible; `NOTICE_CYCLE` is 64
@@ -419,7 +431,8 @@ It also returns 0 when `gSaveBlock2Ptr` is NULL. Fold it into any redraw trigger
 ### Game art
 
 ```c
-void UiMonIcon(int x, int y, u16 species, u32 personality);   // 32x32
+void UiMonIcon(int x, int y, u16 species, u32 personality);   // 32x32, frame 0
+void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame);
 void UiItemIcon(int x, int y, u16 itemId);                    // 32x32
 void UiMonPic(int x, int y, u16 species);                     // 64x64, cached
 void UiPokeball(int x, int y);                                // 7x7

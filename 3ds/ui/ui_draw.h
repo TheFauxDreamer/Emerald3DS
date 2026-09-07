@@ -59,6 +59,17 @@ u16 UiThemeShadow(void);
 // A party/box mon icon: 32x32, 4bpp, 4x4 tiles in 1D sprite order.
 void UiMonIcon(int x, int y, u16 species, u32 personality);
 
+// The same icon, at one of its TWO frames.
+//
+// A mon icon in this ROM is not one picture: every graphics/pokemon/*/icon.png
+// is 32x64, two 32x32 frames, and the game cycles the pair on every icon it
+// draws (sAnim_0, src/pokemon_icon.c, six game frames each). All 387 sheets
+// have both, so `frame` never needs a per-species check; only bit 0 is read.
+//
+// UiMonIcon above is this at frame 0, which is what a still icon wants. A
+// caller that wants the animation advances a frame itself and passes it here.
+void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame);
+
 // A bag item icon: 32x32, drawn the way the game builds its own item sprites.
 void UiItemIcon(int x, int y, u16 itemId);
 

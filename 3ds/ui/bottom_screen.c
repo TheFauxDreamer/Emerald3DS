@@ -687,9 +687,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         }
     }
 
-    // A moving HP bar needs a repaint every frame until it settles, and then
-    // must stop: this screen is otherwise static and full repaints are not free.
-    if (sInGame && UiPartyTick())
+    // The party grid's HP bars and mon icons, and only while that grid is the
+    // thing on screen -- the tab is passed in rather than assumed, so the four
+    // other tabs pay nothing for either animation.
+    if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
         sNeedsRepaint = 1;
 
     // The shiny panel's sparkles, on the same terms. Both ticks live here

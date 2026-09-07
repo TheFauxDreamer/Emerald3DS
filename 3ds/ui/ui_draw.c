@@ -210,7 +210,7 @@ u16 UiThemeShadow(void)
     return UiBgr555ToRgb565(gStandardMenuPalette[TEXT_COLOR_LIGHT_GRAY]);
 }
 
-void UiMonIcon(int x, int y, u16 species, u32 personality)
+void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame)
 {
     const u8 *gfx = GetMonIconPtr(species, personality, FALSE);
     const u16 *gbaPal = GetValidMonIconPalettePtr(species);
@@ -219,11 +219,22 @@ void UiMonIcon(int x, int y, u16 species, u32 personality)
     if (gfx == NULL || gbaPal == NULL)
         return;
 
+    // gMonIconTable points at the whole 32x64 sheet, so the second frame is one
+    // frame's worth of tiles in: 16 tiles of 32 bytes. This is the same
+    // arithmetic the hardware does for ANIMCMD_FRAME(1, ...) on a 32x32 OAM
+    // sprite in 1D mapping, which is how the game itself reaches this frame.
+    gfx += (frame & 1) * (16 * 32);
+
     UiLoadPal(pal, gbaPal, 16);
 
     // 32x32 sprite, 1D mapping: 16 consecutive tiles, four per row.
     for (int t = 0; t < 16; t++)
         UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, gfx + t * 32, pal, TRUE);
+}
+
+void UiMonIcon(int x, int y, u16 species, u32 personality)
+{
+    UiMonIconFrame(x, y, species, personality, 0);
 }
 
 // Item icons are stored LZ-compressed as 3x3 tiles and expanded into a 4x4
