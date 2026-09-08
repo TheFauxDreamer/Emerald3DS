@@ -101,11 +101,20 @@
 
 // WILD opens the encounter list for whatever the caption is describing. It
 // shares FLY's row and FLY's width, so the right-hand end of the caption is one
-// right-aligned cluster: [WILD] [FLY], either of them alone, or neither. See
-// WildBtnX, which is the single place that decides which of those it is.
+// right-aligned cluster: [FLY] [WILD], either of them alone, or neither.
+//
+// WILD is the one PINNED to the right-aligned slot, and FLY is the one that
+// steps inward to make room for it. That is by frequency, not by importance:
+// almost everywhere on the map has wild Pokemon, while FLY appears only on the
+// handful of towns the player has actually reached. Pinning the common button
+// means the one they reach for most is always in the same place, and the rare
+// one is what moves. FLY still right-aligns whenever WILD is absent, so a town
+// with no encounters has its button in the corner rather than stranded inboard.
+//
+// See WildBtnX and FlyBtnX, which are the single places that decide each.
 #define WILD_BTN_W    FLY_BTN_W
-#define WILD_ALONE_X  FLY_BTN_X
-#define WILD_PAIR_X   (WILD_ALONE_X - 8 - WILD_BTN_W)
+#define WILD_BTN_X    FLY_BTN_X
+#define FLY_INNER_X   (FLY_BTN_X - 8 - WILD_BTN_W)
 
 #define MAP_TILE_COUNT 233
 #define MAP_PAL_BASE   112
@@ -490,8 +499,6 @@ static u8 EncSource(void)
 // deciding this in two places is how they would come to disagree.
 static int WildBtnX(mapsec_u16_t mapSecId)
 {
-    u8 state;
-
     if (mapSecId >= MAPSEC_NONE)
         return -1;
 
@@ -500,23 +507,26 @@ static int WildBtnX(mapsec_u16_t mapSecId)
     if (!UiEncountersAvailable(EncSource(), mapSecId))
         return -1;
 
-    if (!PickIsSet())
-        return WILD_ALONE_X;
-
-    state = FlyState(mapSecId);
-
     // A raised confirm owns the whole row -- the ask right-aligns at CFM_ASK_X,
     // then NO and YES fill it to the margin. There is nowhere to put this, and a
     // third button beside a live YES is a mis-tap either way.
-    if (state == FLY_READY && sConfirm)
+    if (PickIsSet() && sConfirm && FlyState(mapSecId) == FLY_READY)
         return -1;
 
-    // Only a drawn FLY button needs room made for it. A refusal is text and
-    // moves its own right edge instead; see DrawFlyControls.
-    if (state == FLY_READY)
-        return WILD_PAIR_X;
+    // Otherwise always the same slot, whatever else is on the row. That is the
+    // whole point of pinning it: see the note on WILD_BTN_X.
+    return WILD_BTN_X;
+}
 
-    return WILD_ALONE_X;
+// Where the FLY button goes: the row's right-aligned slot, or one step inward
+// when WILD has taken it. Asked by the drawing and asked again by the hit test,
+// for the same reason WildBtnX is.
+//
+// Only meaningful while a FLY button is actually drawn, which is FLY_READY and
+// no raised confirm. The refusal string and the YES/NO pair place themselves.
+static int FlyBtnX(mapsec_u16_t mapSecId)
+{
+    return WildBtnX(mapSecId) >= 0 ? FLY_INNER_X : FLY_BTN_X;
 }
 
 // Right-hand end of the caption row: a FLY button, or the reason there is not
@@ -547,7 +557,7 @@ static void DrawFlyControls(mapsec_u16_t mapSecId, int textRight)
 
     if (!sConfirm)
     {
-        DrawBtn(FLY_BTN_X, FLY_BTN_W, "FLY", FALSE);
+        DrawBtn(FlyBtnX(mapSecId), FLY_BTN_W, "FLY", FALSE);
         return;
     }
 
@@ -595,8 +605,7 @@ static void DrawCaption(void)
     // Route 114, whose own name is short. The longest name there is, EVER GRANDE
     // CITY at 90px, ends at 100.
     wildX = WildBtnX(mapSecId);
-    textRight = (wildX == WILD_ALONE_X) ? WILD_ALONE_X - 8
-                                        : CTR_BOTTOM_WIDTH - CAP_MARGIN;
+    textRight = (wildX >= 0) ? WILD_BTN_X - 8 : CTR_BOTTOM_WIDTH - CAP_MARGIN;
 
     // Landmarks are only for the player's own location: they are keyed on which
     // tile of a multi-tile mapsec you are standing in, and a tapped tile has no
@@ -719,7 +728,7 @@ static bool8 HandleFlyTouch(const CtrTouchState *t)
 
     if (!sConfirm)
     {
-        if (!UiHit(t, FLY_BTN_X, FLY_BTN_Y, FLY_BTN_W, FLY_BTN_H))
+        if (!UiHit(t, FlyBtnX(mapSecId), FLY_BTN_Y, FLY_BTN_W, FLY_BTN_H))
             return FALSE;
 
         sConfirm = TRUE;
