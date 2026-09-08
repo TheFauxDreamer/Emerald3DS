@@ -99,22 +99,32 @@
 #define CFM_NO_X      (CFM_YES_X - 8 - CFM_W)
 #define CFM_ASK_X     (CFM_NO_X - 8)
 
-// WILD opens the encounter list for whatever the caption is describing. It
-// shares FLY's row and FLY's width, so the right-hand end of the caption is one
-// right-aligned cluster: [FLY] [WILD], either of them alone, or neither.
+// WILD PKMN opens the encounter list for whatever the caption is describing. It
+// shares FLY's row, so the right-hand end of the caption is one right-aligned
+// cluster: [FLY] [WILD PKMN], either of them alone, or neither.
 //
-// WILD is the one PINNED to the right-aligned slot, and FLY is the one that
+// WILD PKMN is the one PINNED to the right-aligned slot, and FLY is the one that
 // steps inward to make room for it. That is by frequency, not by importance:
 // almost everywhere on the map has wild Pokemon, while FLY appears only on the
 // handful of towns the player has actually reached. Pinning the common button
 // means the one they reach for most is always in the same place, and the rare
-// one is what moves. FLY still right-aligns whenever WILD is absent, so a town
-// with no encounters has its button in the corner rather than stranded inboard.
+// one is what moves. FLY still right-aligns whenever WILD PKMN is absent, so a
+// town with no encounters has its button in the corner rather than stranded
+// inboard.
+//
+// 66 rather than FLY's 54 because the label is 51px and 54 would have it
+// touching its own border. That is measured, not guessed: 66 leaves 7px each
+// side, and every string that can share this row still clears the place name at
+// the resulting right edge of 236. The tightest pairing is a landmark, and the
+// widest of those is FOSSIL MANIAC'S HOUSE at 117px, which from 236 starts at
+// 119 -- 19px clear of where the longest place name, EVER GRANDE CITY at 90px,
+// ends. The refusals are all 100px or less and clear it by 36px or more. The
+// button could go as wide as 84 before the worst pairing touched.
 //
 // See WildBtnX and FlyBtnX, which are the single places that decide each.
-#define WILD_BTN_W    FLY_BTN_W
-#define WILD_BTN_X    FLY_BTN_X
-#define FLY_INNER_X   (FLY_BTN_X - 8 - WILD_BTN_W)
+#define WILD_BTN_W    66
+#define WILD_BTN_X    (CTR_BOTTOM_WIDTH - CAP_MARGIN - WILD_BTN_W)
+#define FLY_INNER_X   (WILD_BTN_X - 8 - FLY_BTN_W)
 
 #define MAP_TILE_COUNT 233
 #define MAP_PAL_BASE   112
@@ -465,7 +475,10 @@ static void DrawPick(void)
 // tab_extra.c, and hoisting a widget for a second user is premature.
 static void DrawBtn(int x, int w, const char *text, int accent)
 {
-    u8 label[8];
+    // Sized past the longest label rather than to it: UiAscii truncates to what
+    // it is given without saying so, which turns a label that outgrew this into
+    // a button reading WILD PK.
+    u8 label[16];
 
     UiRect(x, FLY_BTN_Y, w, FLY_BTN_H, UI_COL_DIM);
 
@@ -624,7 +637,7 @@ static void DrawCaption(void)
     }
 
     if (wildX >= 0)
-        DrawBtn(wildX, WILD_BTN_W, "WILD", FALSE);
+        DrawBtn(wildX, WILD_BTN_W, "WILD PKMN", FALSE);
 }
 
 void UiMapDraw(void)
