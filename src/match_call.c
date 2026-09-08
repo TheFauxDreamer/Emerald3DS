@@ -33,6 +33,11 @@
 #include "constants/songs.h"
 #include "constants/trainers.h"
 
+#if PLATFORM_3DS
+// The phone-call switch, toggled from the bottom screen's EXTRA tab.
+#include "../3ds/tweaks.h"
+#endif
+
 // In this file only the values normally associated with Battle Pike and Factory are swapped.
 // Note that this is *not* a bug, because they are properly swapped consistently in this file.
 // There would only be an issue if anything in this file interacted with something expecting
@@ -1155,7 +1160,17 @@ static u32 GetActiveMatchCallTrainerId(u32 activeMatchCallId)
 */
 bool32 TryStartMatchCall(void)
 {
-    if (FlagGet(FLAG_HAS_MATCH_CALL)
+    if (
+#if PLATFORM_3DS
+        // FIRST, and that is not cosmetic. Three of the six tests below have
+        // side effects -- the two counters advance and SelectMatchCallTrainer
+        // stores its pick -- so short-circuiting ahead of them leaves the whole
+        // system exactly where it was rather than ticking on unseen. Switching
+        // the option back off then resumes from there instead of releasing a
+        // backlog of calls the player never heard.
+        !Ctr3dsMatchCallSuppressed() &&
+#endif
+        FlagGet(FLAG_HAS_MATCH_CALL)
         && UpdateMatchCallStepCounter()
         && UpdateMatchCallMinutesCounter()
         && CheckMatchCallChance()

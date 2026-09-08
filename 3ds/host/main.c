@@ -309,6 +309,7 @@ static uint8_t sExpAll;
 static uint8_t sLevelCap;    // CTR_CAP_*
 static uint8_t sRandomizer;
 static uint8_t sBagSort;     // CTR_BAGSORT_*
+static uint8_t sPhoneCallsOff;
 
 // The shiny test switch. No Apply/Set split and no CtrSettingsMarkDirty()
 // call, because it is the one tweak that is not persisted -- see the note in
@@ -387,6 +388,26 @@ void Ctr3dsSetRandomizer(int on)
 int Ctr3dsGetRandomizer(void)
 {
     return sRandomizer;
+}
+
+void Ctr3dsApplyPhoneCallsOff(int on)
+{
+    sPhoneCallsOff = on ? 1 : 0;
+}
+
+void Ctr3dsSetPhoneCallsOff(int on)
+{
+    int before = sPhoneCallsOff;
+
+    Ctr3dsApplyPhoneCallsOff(on);
+
+    if (sPhoneCallsOff != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetPhoneCallsOff(void)
+{
+    return sPhoneCallsOff;
 }
 
 void Ctr3dsApplyBagSort(int mode)

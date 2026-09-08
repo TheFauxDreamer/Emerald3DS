@@ -244,6 +244,17 @@ int  Ctr3dsGetRandomizer(void);
 void Ctr3dsSetBagSort(int mode);    // CTR_BAGSORT_*
 int  Ctr3dsGetBagSort(void);
 
+// Silences Emerald's unsolicited Match Call -- the trainer who rings mid-route,
+// freezes you and makes small talk. ONLY that one: the scripted story calls and
+// the PokeNav's own Match Call screen reach the same window by other routes and
+// are untouched, so nothing that gates progress can be switched off here.
+//
+// Stored NEGATED, as "off", so that a zero settings byte means calls happen --
+// which is what every file written before this option existed meant. Same
+// reasoning as audioDbgMuted in settings.c.
+void Ctr3dsSetPhoneCallsOff(int on);
+int  Ctr3dsGetPhoneCallsOff(void);
+
 // Shiny test switch (EXTRA page 2).
 //
 // Arms the NEXT wild encounter to be shiny, then disarms itself. It exists

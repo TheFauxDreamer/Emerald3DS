@@ -78,4 +78,13 @@ void Ctr3dsSortBagPocket(u8 pocketId);
 // overworld safety gate that Ctr3dsSortBagPocket deliberately does not.
 void Ctr3dsSortBagNow(void);
 
+// TRUE when Emerald's unsolicited Match Call should not fire -- the trainer who
+// rings you mid-route, freezes you and makes small talk.
+//
+// ONLY that one. The seven scripted story calls reach the same window through
+// StartMatchCallFromScript, and the PokeNav's own Match Call screen never
+// creates the task at all, so neither is reachable from here and nothing that
+// gates story progress can be switched off by this.
+bool8 Ctr3dsMatchCallSuppressed(void);
+
 #endif // CTR_TWEAKS_H

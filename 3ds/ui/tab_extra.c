@@ -147,18 +147,24 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_W         26
 #define PGR_H         17
 #define PGR_Y         TOP_LINE_Y
-// Two pages of settings, plus the debug page when it is compiled in. Every
+// Three pages of settings, plus the debug page when it is compiled in. Every
 // other constant below is derived, so this is the only thing the flag moves.
+//
+// Page 3 exists because page 2 has no vertical room left: four rows fill y
+// 8..183 with gaps of 7 and 6, and the fourth already carries its label beside
+// its buttons to fit at all. Adding a fifth would have cost two of the existing
+// rows their hint text.
 #if CTR_DEBUG_MENU
-#define PAGE_COUNT    3
+#define PAGE_COUNT    4
 #else
-#define PAGE_COUNT    2
+#define PAGE_COUNT    3
 #endif
 
 // Right-aligned to the interior edge, growing leftwards as pages are added, so
-// the last button always lands in the same place however many there are. At
-// PAGE_COUNT 2 this is the same arithmetic the two-page version spelled out
-// longhand: 256 and 286.
+// the last button always lands in the same place however many there are. The
+// leftmost sits at 226 with three pages and 196 with the debug page's four,
+// which page 2's top line clears -- the only thing on it is "EXP ALL" at x=16,
+// 63px wide, and every P2_HINT_X use is on a row below.
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
@@ -350,6 +356,40 @@ static void DrawPage2(void)
                mode == CTR_BAGSORT_NAME);
 }
 
+// ---- PAGE 3: quality of life -----------------------------------------------
+//
+// Rows start below the pager rather than beside it, the way page 1 and the
+// debug page do, and reuse page 1's grid and page 2's button columns. That is
+// the same cross-page constant sharing page 2 already does with SCL_X/SCL_W,
+// and it is what keeps three differently-populated pages aligned with each
+// other. One row so far; the grid holds three.
+static void DrawPage3(void)
+{
+    u8 label[40];
+    int off = Ctr3dsGetPhoneCallsOff();
+
+    UiText(16, P1_ROW_Y(0), UiAscii(label, "PHONE CALLS", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    // The reassurance is the thing worth spending the line on. What this
+    // silences is only the trainer who rings unprompted mid-route; every
+    // scripted call, Norman and Wally and Scott and the Rayquaza call included,
+    // comes through StartMatchCallFromScript and still happens. So does the
+    // PokeNav's own Match Call screen.
+    //
+    // Not said here, for want of room: a suppressed call also stops offering
+    // the occasional "I'll be waiting on Route N" rematch. Rematches still
+    // arrive on the map-load path, and the PokeNav still marks who is ready.
+    UiText(P2_HINT_X, P1_ROW_Y(0),
+           UiAscii(label, "story calls still ring", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+
+    DrawButton(WIDE_X(0), P1_BTN_Y(0), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+               !off);
+    DrawButton(WIDE_X(1), P1_BTN_Y(0), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               off);
+}
+
 // PAGE 3: the debug menu.
 //
 // Everything that exists to test the PORT rather than to play the game, in one
@@ -435,7 +475,7 @@ static void DebugRowSet(u32 row, int on)
     }
 }
 
-static void DrawPage3(void)
+static void DrawPageDebug(void)
 {
     u8 label[40];
     u32 i;
@@ -469,7 +509,7 @@ static void DrawPage3(void)
     }
 }
 
-static void TouchPage3(const CtrTouchState *t)
+static void TouchPageDebug(const CtrTouchState *t)
 {
     for (u32 i = 0; i < DBG_ROW_COUNT; i++)
     {
@@ -516,9 +556,11 @@ void UiExtraDraw(void)
         DrawPage1();
     else if (sPage == 1)
         DrawPage2();
+    else if (sPage == 2)
+        DrawPage3();
 #if CTR_DEBUG_MENU
     else
-        DrawPage3();
+        DrawPageDebug();
 #endif
 
     DrawPager();
@@ -676,6 +718,24 @@ static void TouchPage2(const CtrTouchState *t)
     }
 }
 
+static void TouchPage3(const CtrTouchState *t)
+{
+    // ON is vanilla, so it clears the stored flag; the flag stores OFF. Same
+    // coordinate expressions the draw uses, so the two cannot disagree.
+    if (UiHit(t, WIDE_X(0), P1_BTN_Y(0), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetPhoneCallsOff(0);
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, WIDE_X(1), P1_BTN_Y(0), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetPhoneCallsOff(1);
+        UiMarkDirty();
+        return;
+    }
+}
+
 void UiExtraTouch(const CtrTouchState *t)
 {
     if (!t->justReleased)
@@ -697,8 +757,10 @@ void UiExtraTouch(const CtrTouchState *t)
         TouchPage1(t);
     else if (sPage == 1)
         TouchPage2(t);
+    else if (sPage == 2)
+        TouchPage3(t);
 #if CTR_DEBUG_MENU
     else
-        TouchPage3(t);
+        TouchPageDebug(t);
 #endif
 }
