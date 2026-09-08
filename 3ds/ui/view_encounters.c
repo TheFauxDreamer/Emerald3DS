@@ -63,11 +63,19 @@
 
 #define UI_ENC_PER_PAGE (GRID_ROWS * GRID_COLS)
 
-// Inside one cell. The icon is 32x32 and the name sits beside it with the type
-// badges under the name, which puts the cell's right edge at cx+102 -- column 2
-// therefore ends at 262, clear of the 311 interior edge.
+// Inside one cell. The icon is 32x32, then a 12px gutter for the caught marker,
+// then the name with the type badges under it. That puts the cell's right edge
+// at cx+114 -- column 2 therefore ends at 274, clear of the 311 interior edge,
+// and column 1 ends at 122, clear of column 2's icon at 160. The name gets the
+// remaining 104px of its column, against about 60px for the longest
+// ten-character species name.
+//
+// The ball's column is reserved whether or not a given cell draws one, which is
+// what stops names shuffling sideways down a page -- the same reason the dex
+// list reserves its own (tab_dex.c:62).
 #define CELL_ICON_W  32
-#define CELL_TEXT_X  36
+#define CELL_BALL_X  36
+#define CELL_TEXT_X  48
 #define CELL_TYPE_Y  16
 #define CELL_TYPE2_X (CELL_TEXT_X + UI_TYPE_ICON_W + 2)
 
@@ -114,20 +122,33 @@ static u8    sPage;
 
 // ------------------------------------------------------------- gathering ----
 
-static bool8 SpeciesSeen(u16 species)
+// The dex's own three-state readout for one species: nothing, seen, or caught.
+//
+// Both flags in one call because every caller wants both, and the bounds guard
+// and the species -> national conversion are the same work for either.
+#define DEX_SEEN    (1u << 0)
+#define DEX_CAUGHT  (1u << 1)
+
+static u32 DexState(u16 species)
 {
     u16 national;
+    u32 state = 0;
 
     // SpeciesToNationalPokedexNum indexes [species - 1] into a table of
     // NUM_SPECIES - 1 entries with no bound of its own (src/pokemon.c:5690).
     if (species == SPECIES_NONE || species >= NUM_SPECIES)
-        return FALSE;
+        return 0;
 
     national = SpeciesToNationalPokedexNum(species);
     if (national == 0)
-        return FALSE;
+        return 0;
 
-    return GetSetPokedexFlag(national, FLAG_GET_SEEN) != 0;
+    if (GetSetPokedexFlag(national, FLAG_GET_SEEN))
+        state |= DEX_SEEN;
+    if (GetSetPokedexFlag(national, FLAG_GET_CAUGHT))
+        state |= DEX_CAUGHT;
+
+    return state;
 }
 
 static void AddSpecies(u16 species)
@@ -299,8 +320,22 @@ static u32 PageCount(void)
 static void DrawCell(int cx, int ry, u16 species)
 {
     u8 label[16];
+    u32 state = DexState(species);
 
-    if (!SpeciesSeen(species))
+    // A ball only for caught, nothing for merely seen: the same three-state
+    // readout the real dex list gives, in the same glyph and the same column
+    // (tab_dex.c:326). Centred on the name's glyph row, which is what that
+    // list's `y + 4` is.
+    //
+    // Ahead of the seen branch rather than inside it. Caught implies seen, so
+    // this can only ever land on a row that also draws a name -- but
+    // GetSetPokedexFlag exists precisely because the three seen mirrors can
+    // disagree, and a readout that hides a caught mark to keep its own layout
+    // tidy is the wrong way round.
+    if (state & DEX_CAUGHT)
+        UiPokeball(cx + CELL_BALL_X, ry + (UI_GLYPH_H - UI_BALL_H) / 2);
+
+    if (!(state & DEX_SEEN))
     {
         // The shape and nothing else. Drawn in the frame's own shadow colour
         // rather than a fixed dark one, because the 20 window frames run
@@ -508,25 +543,29 @@ u32 UiEncountersStateKey(void)
     else
         key |= (u32)sOpenMapSec << 4;
 
-    // What is actually on the page, and whether each of it has been seen. The
-    // bottom screen is live during battle, so a mon met while this panel is up
-    // has to turn from a silhouette into a name without anything else moving.
+    // What is actually on the page, and what the dex says about each of it. The
+    // bottom screen is live during battle, so both transitions have to land with
+    // nothing else moving: a mon MET while this panel is up turns from a
+    // silhouette into a name, and one CAUGHT while it is up grows a ball. Both
+    // bits of DexState are folded for that reason -- seen alone would leave the
+    // ball a repaint behind.
     //
-    // Eight species ids and eight flags do not fit in what is left of the word,
+    // Eight species ids and their flags do not fit in what is left of the word,
     // so they are folded through a multiply instead of placed in bits. The slot
     // index goes into the value being folded: that is what makes each slot's
     // contribution distinct, and two contributions that cancel are the one
     // failure this hash exists to prevent (the note in UiMapStateKey).
     //
-    // Deliberately not GetNationalPokedexCount, which the DEX tab can afford
-    // because counting is what it shows. A key must be O(what is on screen).
+    // Sixteen GetSetPokedexFlag calls a frame at eight rows, and deliberately
+    // not GetNationalPokedexCount, which the DEX tab can afford because counting
+    // is what it shows. A key must be O(what is on screen).
     first = (u32)sPage * UI_ENC_PER_PAGE;
 
     for (u32 i = 0; i < UI_ENC_PER_PAGE && first + i < sCount; i++)
     {
         u32 v = (u32)sSpecies[first + i]
-              | ((u32)(SpeciesSeen(sSpecies[first + i]) != 0) << 16)
-              | ((u32)i << 17);
+              | (DexState(sSpecies[first + i]) << 16)
+              | ((u32)i << 18);
 
         key ^= v * 2654435761u;
     }
