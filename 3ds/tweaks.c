@@ -42,6 +42,13 @@ bool8 Ctr3dsExpAllOn(void)
     return Ctr3dsGetExpAll() ? TRUE : FALSE;
 }
 
+// ---- Phone calls -----------------------------------------------------------
+
+bool8 Ctr3dsMatchCallSuppressed(void)
+{
+    return Ctr3dsGetPhoneCallsOff() ? TRUE : FALSE;
+}
+
 // ---- Level cap -------------------------------------------------------------
 
 // Emerald's real gym leader ace levels, then the Elite Four. The cap is the

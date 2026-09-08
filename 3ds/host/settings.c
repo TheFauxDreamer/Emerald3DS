@@ -60,7 +60,13 @@
 // v7 added a fourth switch, which does grow the struct. It migrates as a short
 // read like v3 and v4 did, and the byte it adds means "not muted" when zero, so
 // a v6 file still loads as the normal mixer.
-#define SETTINGS_VERSION 7
+//
+// v8 claimed the first of v7's three explicit padding bytes for the phone-call
+// switch, so like v6 before it it is the same SIZE as its predecessor and needs
+// no migration beyond accepting the older version number. Every v7 file has a
+// zero there, and the field stores OFF rather than on precisely so that zero
+// keeps meaning "calls happen", which is what those files meant.
+#define SETTINGS_VERSION 8
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -89,10 +95,15 @@ struct CtrSettings {
     // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
     // "nothing is muted", which is the default and what that file meant.
     uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
-    // Explicit again for the same reason v5's was: four bytes at offset 17 puts
-    // the struct at 21, which the compiler would round to 24 by itself and
-    // settings_write() would then write three bytes of uninitialised stack.
-    uint8_t  pad[3];
+    // v8, in the first of the three bytes v7 reserved as explicit padding, the
+    // same trick v6 played on v5. Stores OFF rather than on, so the zero a v7
+    // file already has means "calls happen" -- the behaviour that file had.
+    uint8_t  phoneCallsOff;
+    // Explicit again for the same reason v5's and v7's were: five bytes at
+    // offset 17 puts the struct at 22, which the compiler would round to 24 by
+    // itself and settings_write() would then write two bytes of uninitialised
+    // stack.
+    uint8_t  pad[2];
 };
 
 // How much of the struct each older layout fills: everything up to the fields
@@ -120,6 +131,8 @@ extern int  Ctr3dsGetBagSort(void);
 extern void Ctr3dsApplyBagSort(int mode);
 extern int  Ctr3dsGetFfAudio(void);
 extern void Ctr3dsApplyFfAudio(int mode);
+extern int  Ctr3dsGetPhoneCallsOff(void);
+extern void Ctr3dsApplyPhoneCallsOff(int on);
 
 // How long after the last change to write.
 //
@@ -239,6 +252,14 @@ void CtrSettingsLoad(void)
         if (n != sizeof(s))
             return;
     }
+    else if (s.version == 7)
+    {
+        // 24 bytes, the same shape as v8. v7 wrote its three trailing bytes as
+        // padding and v8 gave the first of them meaning, but v7 always wrote
+        // zero and zero is "calls happen", so the two load identically here.
+        if (n != sizeof(s))
+            return;
+    }
     else if (s.version == 6 || s.version == 5)
     {
         // Both are 20 bytes. v5 wrote its last three as padding and v6 gave
@@ -287,6 +308,10 @@ void CtrSettingsLoad(void)
     // the default, so an older file loads as exactly what it meant.
     Ctr3dsApplyFfAudio(s.ffAudio);
 
+    // Zero for anything older than v8, which is "calls happen" -- vanilla, and
+    // what every file written before this option existed meant.
+    Ctr3dsApplyPhoneCallsOff(s.phoneCallsOff != 0);
+
     // Zero for anything older than v6, which is "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
@@ -312,6 +337,7 @@ static void settings_write(void)
     s.randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
     s.bagSort    = (uint8_t)Ctr3dsGetBagSort();
     s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
+    s.phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
