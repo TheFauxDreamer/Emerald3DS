@@ -246,6 +246,20 @@ bool8 UiAnimStepped(void)
     return sAnimStepped;
 }
 
+// TRUE while a modal overlay is covering the tab.
+//
+// A tab asks this to know that the animated layer will not be run for it this
+// frame, because the overlay has that layer to itself -- anything drawn there
+// while the panel is up would land ON TOP of the panel, the overlay being part
+// of the snapshot the layer paints over. A tab with a piece deferred to that
+// layer has to draw a still version of it into its own paint instead, or the
+// piece is simply missing for as long as the panel is up. See DrawCell in
+// tab_party.c, which is the case that found this.
+bool8 UiOverlayActive(void)
+{
+    return NoticeActive(NULL, NULL);
+}
+
 // ------------------------------------------------------- notice animation --
 //
 // The only thing on this screen that moves on its own, and the only reason it
@@ -673,8 +687,15 @@ static void Redraw(void)
 // into it. Each of these restores its own rects first, which is a no-op right
 // after a full paint and is the whole trick on an animation step.
 //
-// The panel is modal and covers the middle of the screen, so while it is up the
-// icons are its business, not the grid's. They resume when it closes.
+// The overlay has this layer to itself while it is up, and it has to: the
+// snapshot this paints over already includes the panel, so a tab drawing here
+// would draw on top of it.
+//
+// That is why it is an else rather than both. What it does NOT mean is that the
+// tab's deferred pieces stop existing -- the panel is 240x112 in the middle of a
+// 320x192 area, and only one of the party's six icons is fully behind it. A tab
+// with a piece deferred to this layer draws a still version of it into its own
+// paint while UiOverlayActive(), which is where the other five come from.
 static void DrawAnimatedLayer(void)
 {
     if (NoticeActive(NULL, NULL))
