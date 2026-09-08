@@ -322,6 +322,30 @@ void UiMonIcon(int x, int y, u16 species, u32 personality)
     UiMonIconFrame(x, y, species, personality, 0);
 }
 
+// The same art with every ink pixel flattened to one colour.
+//
+// No new blitter, and that is the whole point: a 4bpp blit is already a palette
+// lookup, so a palette whose 15 ink slots hold the same value turns the icon
+// into its own silhouette for free. Index 0 stays the transparent slot, which
+// is what keeps the outline the icon's real shape rather than a 32x32 block.
+//
+// The palette is not read at all, so unlike UiMonIconFrame this draws for a
+// species whose icon palette is missing. Only the gfx pointer can refuse.
+void UiMonIconSilhouette(int x, int y, u16 species, u32 personality, u16 color)
+{
+    const u8 *gfx = GetMonIconPtr(species, personality, FALSE);
+    u16 pal[16];
+
+    if (gfx == NULL)
+        return;
+
+    for (int i = 0; i < 16; i++)
+        pal[i] = color;
+
+    for (int t = 0; t < 16; t++)
+        UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, gfx + t * 32, pal, TRUE);
+}
+
 // Item icons are stored LZ-compressed as 3x3 tiles and expanded into a 4x4
 // sprite, so this follows the game's own sequence: decompress, then let its
 // CopyItemIconPicTo4x4Buffer do the rearrangement (src/item_icon.c).

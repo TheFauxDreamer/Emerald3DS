@@ -70,6 +70,12 @@ void UiMonIcon(int x, int y, u16 species, u32 personality);
 // caller that wants the animation advances a frame itself and passes it here.
 void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame);
 
+// The same icon reduced to a single flat colour, keeping its outline: what an
+// unidentified mon looks like. Pass UiThemeShadow() for anything drawn on a
+// window frame -- the 20 frames run near-white to near-dark, so a silhouette in
+// a fixed colour disappears against half of them.
+void UiMonIconSilhouette(int x, int y, u16 species, u32 personality, u16 color);
+
 // A bag item icon: 32x32, drawn the way the game builds its own item sprites.
 void UiItemIcon(int x, int y, u16 itemId);
 
