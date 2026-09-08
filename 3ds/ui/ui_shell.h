@@ -81,6 +81,14 @@ void UiMarkDirty(void);
 // UI_ANIM_STEP_FRAMES in bottom_screen.c.
 bool8 UiAnimStepped(void);
 
+// TRUE while a modal overlay (currently only the shiny notice) is covering the
+// tab. A tab that defers part of its drawing to the shell's animated layer must
+// draw a STILL version of that part itself while this is TRUE: the overlay owns
+// that layer while it is up, so the deferred piece is otherwise not drawn at
+// all -- and it cannot simply be drawn there anyway, because the animated layer
+// paints over a snapshot that already contains the panel.
+bool8 UiOverlayActive(void);
+
 // The party slot the BAG tab will act on. Set by the party grid.
 u8   UiSelectedMon(void);
 void UiSetSelectedMon(u8 index);

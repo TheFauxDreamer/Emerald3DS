@@ -468,11 +468,26 @@ static void DrawCell(int index)
     if (species == SPECIES_NONE)
         return;
 
-    // The icon is NOT drawn here. It is the animated layer, painted after the
-    // shell takes its snapshot, so the snapshot holds the still background
-    // beneath it -- see UiPartyRedrawIcons. Drawing it here too would bake a
-    // frame into that background, and since a mon icon blits with index 0
+    // The icon is NOT normally drawn here. It is the animated layer, painted
+    // after the shell takes its snapshot, so the snapshot holds the still
+    // background beneath it -- see UiPartyRedrawIcons. Drawing it here too would
+    // bake a frame into that background, and since a mon icon blits with index 0
     // transparent, the baked frame would show through the next one.
+    //
+    // The exception is a modal overlay. While one is up it owns the animated
+    // layer, so UiPartyRedrawIcons is not called and the icons are not drawn at
+    // all -- and they cannot just be added to that layer, because it paints over
+    // a snapshot that already contains the panel and they would land on top of
+    // it. So they go into the still paint here instead, and the panel covers the
+    // one of the six it actually overlaps.
+    //
+    // Frame 0 rather than sIconFrame: this is a still icon, which is exactly
+    // what UiMonIcon is for. There is no ghosting risk in baking it, because the
+    // restore-and-redraw that would show through it is the very thing not
+    // running while the overlay is up.
+    if (UiOverlayActive())
+        UiMonIcon(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
+                  GetMonData(mon, MON_DATA_PERSONALITY));
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
@@ -774,8 +789,10 @@ static void DrawDetail(void)
     }
 
     // Likewise not drawn here: the detail view's icon is animated too, and
-    // UiPartyRedrawIcons paints it after the snapshot.
-    (void)species;
+    // UiPartyRedrawIcons paints it after the snapshot. And likewise the overlay
+    // exception -- see the longer note in DrawCell.
+    if (UiOverlayActive())
+        UiMonIcon(12, 12, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(52, 12, name, UiThemeText(), UiThemeShadow());
