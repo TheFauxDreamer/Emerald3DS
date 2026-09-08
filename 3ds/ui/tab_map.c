@@ -53,6 +53,7 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "view_encounters.h"
 
 // The drawn artwork's real extent inside the 64x64 tilemap: everything outside
 // this is the blank tile. Measured from map.bin rather than assumed, because the
@@ -97,6 +98,14 @@
 #define CFM_YES_X     (CTR_BOTTOM_WIDTH - CAP_MARGIN - CFM_W)
 #define CFM_NO_X      (CFM_YES_X - 8 - CFM_W)
 #define CFM_ASK_X     (CFM_NO_X - 8)
+
+// WILD opens the encounter list for whatever the caption is describing. It
+// shares FLY's row and FLY's width, so the right-hand end of the caption is one
+// right-aligned cluster: [WILD] [FLY], either of them alone, or neither. See
+// WildBtnX, which is the single place that decides which of those it is.
+#define WILD_BTN_W    FLY_BTN_W
+#define WILD_ALONE_X  FLY_BTN_X
+#define WILD_PAIR_X   (WILD_ALONE_X - 8 - WILD_BTN_W)
 
 #define MAP_TILE_COUNT 233
 #define MAP_PAL_BASE   112
@@ -463,14 +472,64 @@ static void DrawBtn(int x, int w, const char *text, int accent)
            label, accent ? UI_COL_ACCENT : UiThemeText(), UiThemeShadow());
 }
 
+// ------------------------------------------------------------ encounters ---
+//
+// Which of the two lookups the encounter list should use for what the caption is
+// currently describing. A tapped tile is a mapsec; the player's own location is
+// a MAP, and has to be, because the region map has no cave interiors -- see the
+// note on UI_ENC_SRC_PLAYER.
+static u8 EncSource(void)
+{
+    return PickIsSet() ? UI_ENC_SRC_MAPSEC : UI_ENC_SRC_PLAYER;
+}
+
+// Where the WILD button goes on the caption row, or -1 for "it is not there".
+//
+// Asked by the drawing and asked again by the hit test, so that a button which
+// is not on the screen cannot be tapped -- the row has four possible tenants and
+// deciding this in two places is how they would come to disagree.
+static int WildBtnX(mapsec_u16_t mapSecId)
+{
+    u8 state;
+
+    if (mapSecId >= MAPSEC_NONE)
+        return -1;
+
+    // A place with nothing to list gets no button at all, rather than one that
+    // opens an empty panel.
+    if (!UiEncountersAvailable(EncSource(), mapSecId))
+        return -1;
+
+    if (!PickIsSet())
+        return WILD_ALONE_X;
+
+    state = FlyState(mapSecId);
+
+    // A raised confirm owns the whole row -- the ask right-aligns at CFM_ASK_X,
+    // then NO and YES fill it to the margin. There is nowhere to put this, and a
+    // third button beside a live YES is a mis-tap either way.
+    if (state == FLY_READY && sConfirm)
+        return -1;
+
+    // Only a drawn FLY button needs room made for it. A refusal is text and
+    // moves its own right edge instead; see DrawFlyControls.
+    if (state == FLY_READY)
+        return WILD_PAIR_X;
+
+    return WILD_ALONE_X;
+}
+
 // Right-hand end of the caption row: a FLY button, or the reason there is not
 // one, or the confirmation that replaces it.
+//
+// `textRight` is where a refusal string may reach, which is the caption's own
+// margin unless the WILD button has taken that end of the row.
 //
 // Nothing here is cached. FlyState is re-read on every repaint so the row keeps
 // up with a player who walks indoors, faints their last flyer or starts a
 // script while this tab is open, and so the touch handler's own re-check can
 // never disagree with what is on screen.
-static void DrawFlyControls(mapsec_u16_t mapSecId)
+static void DrawFlyControls(mapsec_u16_t mapSecId, int textRight)
 {
     u8 label[24];
     u8 state = FlyState(mapSecId);
@@ -480,7 +539,7 @@ static void DrawFlyControls(mapsec_u16_t mapSecId)
 
     if (state != FLY_READY)
     {
-        UiTextRight(CTR_BOTTOM_WIDTH - CAP_MARGIN, CAP_TEXT_Y,
+        UiTextRight(textRight, CAP_TEXT_Y,
                     UiAscii(label, FlyRefusal(state), sizeof(label)),
                     UI_COL_DIM, UiThemeShadow());
         return;
@@ -506,6 +565,8 @@ static void DrawCaption(void)
     u8 posWithinMapSec = 0;
     mapsec_u16_t mapSecId = CaptionMapSec(&posWithinMapSec);
     const u8 *landmark;
+    int wildX;
+    int textRight;
     // Not MAP_NAME_LENGTH (16): the game's own struct RegionMap sizes this field
     // at 20, and GetMapName's empty-name fallback fills 18 plus a terminator.
     u8 name[32];
@@ -524,24 +585,51 @@ static void DrawCaption(void)
     GetMapNameGeneric(name, mapSecId);
     UiText(CAP_MARGIN, CAP_TEXT_Y, name, UiThemeText(), UiThemeShadow());
 
+    // Whatever text shares this row stops short of the WILD button when that
+    // button has taken the end of it.
+    //
+    // Both strings that can be there clear the place name in every real pair.
+    // The widest refusal is "can't FLY from here" at about 100px, which from
+    // this edge runs 148..248; the longest landmark is FOSSIL MANIAC'S HOUSE at
+    // 21 characters, about 118px, running 130..248 -- and that one belongs to
+    // Route 114, whose own name is short. The longest name there is, EVER GRANDE
+    // CITY at 90px, ends at 100.
+    wildX = WildBtnX(mapSecId);
+    textRight = (wildX == WILD_ALONE_X) ? WILD_ALONE_X - 8
+                                        : CTR_BOTTOM_WIDTH - CAP_MARGIN;
+
     // Landmarks are only for the player's own location: they are keyed on which
     // tile of a multi-tile mapsec you are standing in, and a tapped tile has no
     // such position to offer. A tapped tile has a fly control instead, and the
     // two share this end of the row precisely because they never coexist.
     if (PickIsSet())
     {
-        DrawFlyControls(mapSecId);
-        return;
+        DrawFlyControls(mapSecId, textRight);
+    }
+    else
+    {
+        landmark = GetLandmarkName((mapsec_u8_t)mapSecId, posWithinMapSec, 0);
+        if (landmark != NULL)
+            UiTextRight(textRight, CAP_TEXT_Y, landmark,
+                        UI_COL_DIM, UiThemeShadow());
     }
 
-    landmark = GetLandmarkName((mapsec_u8_t)mapSecId, posWithinMapSec, 0);
-    if (landmark != NULL)
-        UiTextRight(CTR_BOTTOM_WIDTH - CAP_MARGIN, CAP_TEXT_Y, landmark,
-                    UI_COL_DIM, UiThemeShadow());
+    if (wildX >= 0)
+        DrawBtn(wildX, WILD_BTN_W, "WILD", FALSE);
 }
 
 void UiMapDraw(void)
 {
+    // The encounter list replaces the whole tab while it is up, the way the DEX
+    // tab's entry screen replaces its list. Not an overlay: there is nothing
+    // behind it worth seeing, and an overlay would have to absorb touches the
+    // map has no business receiving anyway.
+    if (UiEncountersIsOpen())
+    {
+        UiEncountersDraw();
+        return;
+    }
+
     EnsureLoaded();
 
     if (!sLoaded)
@@ -598,6 +686,15 @@ u32 UiMapStateKey(void)
         key ^= fly * 2654435761u;
     }
 
+    // The encounter panel's own inputs: which page it is on, which map it is
+    // describing, and whether each mon on that page has been seen yet. Zero
+    // while it is closed, so this costs nothing on the map itself.
+    //
+    // Its own multiplier, not the fly row's. Two contributions folded through
+    // the same constant are two contributions that can cancel, which is the
+    // failure the note above exists to prevent.
+    key ^= UiEncountersStateKey() * 0x85EBCA6Bu;
+
     return key;
 }
 
@@ -650,15 +747,42 @@ void UiMapTouch(const CtrTouchState *t)
 {
     int tx, ty;
 
+    // The panel covers the whole tab, so it takes every touch -- presses and
+    // drags included, not just releases -- until its own BACK closes it.
+    if (UiEncountersIsOpen())
+    {
+        UiEncountersTouch(t);
+        return;
+    }
+
     if (!t->justReleased)
         return;
 
-    // Tested before the deselect below, which would otherwise claim every tap
-    // outside the map -- the fly controls among them, since they sit in the
-    // caption band. Anything in that band it does not want falls through and
-    // deselects, so tapping away from a raised confirm cancels it.
-    if (PickIsSet() && t->y >= CAP_Y && HandleFlyTouch(t))
-        return;
+    // The caption band's two tenants, both tested before the deselect below,
+    // which would otherwise claim every tap outside the map. Anything in that
+    // band neither of them wants falls through and deselects, so tapping away
+    // from a raised confirm still cancels it.
+    if (t->y >= CAP_Y)
+    {
+        u8 posWithinMapSec = 0;
+        mapsec_u16_t capMapSec;
+        int wildX;
+
+        // Fly first: it is the tenant that can be mid-confirm, and its own
+        // re-check at the moment of the tap is what decides whether its buttons
+        // are on the screen at all.
+        if (PickIsSet() && HandleFlyTouch(t))
+            return;
+
+        capMapSec = CaptionMapSec(&posWithinMapSec);
+        wildX = WildBtnX(capMapSec);
+
+        if (wildX >= 0 && UiHit(t, wildX, FLY_BTN_Y, WILD_BTN_W, FLY_BTN_H))
+        {
+            UiEncountersOpen(EncSource(), capMapSec);
+            return;
+        }
+    }
 
     // Anywhere off the map, the caption band included, drops the selection and
     // goes back to reporting where the player actually is.
