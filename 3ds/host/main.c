@@ -310,6 +310,12 @@ static uint8_t sLevelCap;    // CTR_CAP_*
 static uint8_t sRandomizer;
 static uint8_t sBagSort;     // CTR_BAGSORT_*
 static uint8_t sPhoneCallsOff;
+static uint8_t sQuickBallOff;
+
+// The last ball thrown, as a raw item id. Not range-checked here on purpose:
+// the valid range is a game constant this side may not include, so the check
+// lives with UiQuickBallItem(). See the note in bridge.h.
+static uint8_t sLastBall;
 
 // The shiny test switch. No Apply/Set split and no CtrSettingsMarkDirty()
 // call, because it is the one tweak that is not persisted -- see the note in
@@ -408,6 +414,53 @@ void Ctr3dsSetPhoneCallsOff(int on)
 int Ctr3dsGetPhoneCallsOff(void)
 {
     return sPhoneCallsOff;
+}
+
+void Ctr3dsApplyQuickBallOff(int on)
+{
+    sQuickBallOff = on ? 1 : 0;
+}
+
+void Ctr3dsSetQuickBallOff(int on)
+{
+    int before = sQuickBallOff;
+
+    Ctr3dsApplyQuickBallOff(on);
+
+    if (sQuickBallOff != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetQuickBallOff(void)
+{
+    return sQuickBallOff;
+}
+
+// Unlike every other setter here this one is called from BATTLE LOGIC rather
+// than from a button on the EXTRA tab -- HandleAction_UseItem() in
+// src/battle_util.c, once per ball the player throws. That is safe for exactly
+// the reason the header of settings.c gives: CtrSettingsMarkDirty() only
+// queues, and the card is not touched until CtrSettingsFlush() runs from the
+// frame loop, a second after the last change. A player emptying a bag of balls
+// into one stubborn mon costs one write, not one per throw.
+void Ctr3dsApplyLastBall(int item)
+{
+    sLastBall = (uint8_t)(item & 0xFF);
+}
+
+void Ctr3dsSetLastBall(int item)
+{
+    int before = sLastBall;
+
+    Ctr3dsApplyLastBall(item);
+
+    if (sLastBall != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetLastBall(void)
+{
+    return sLastBall;
 }
 
 void Ctr3dsApplyBagSort(int mode)

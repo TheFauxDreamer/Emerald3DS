@@ -88,16 +88,17 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 737 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 147 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 911 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 164 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
 | [ui/tab_party.c](ui/tab_party.c) | 944 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP and mon-icon animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 704 | Page 1 port settings, page 2 gameplay tweaks, page 3 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
-| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 210 / 43 | Reads about the opposing mon: type effectiveness for the party badges, and `UiShinyOpponent` behind the notice |
+| [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
+| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
+| [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload),
@@ -123,10 +124,29 @@ tab bar is painted **after** it returns, so it must not draw below
 ### Overlays
 
 An overlay is drawn over whichever tab just painted, and claims its rect of
-touches before any tab sees them. The shiny notice
-([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the pattern: a 240x112 modal
-panel centred in the content area, with a DISMISS button, keyed on the encounter
-rather than on a bare flag so the next shiny still gets its own notice.
+touches before any tab sees them. There are two, and they are worth reading as a
+pair because they answer the same question differently:
+
+- The **shiny notice** ([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the
+  pattern: a 240x112 modal panel centred in the content area, with a DISMISS
+  button, keyed on the encounter rather than on a bare flag so the next shiny
+  still gets its own notice. It lives in the shell because the shell owns
+  overlay paint order.
+- The **quick-throw strip** ([ui_quickball.c](ui/ui_quickball.c)) is a 320x40
+  band along the bottom of the content area, offering back the ball the player
+  last threw. It lives in its OWN file and the shell calls four functions --
+  `Active` / `Draw` / `Touch` / `StateKey` -- which is the shape to copy for a
+  third overlay. Its geometry starts at y 152 for one reason: the notice ends
+  there, so the two abut exactly and neither has to paint over the other's
+  border in the case where both are up, which is a catchable shiny.
+
+An overlay that is up for a COMMON state rather than a rare one has a cost the
+notice does not pay. Every tab's layout is hand-fitted to a 192px content area,
+so the strip is bound to the action-selection window
+(`Ctr3dsPlayerIsChoosingAction()`) rather than to "there is a wild battle": it
+appears while the top screen is already asking what to do and goes again the
+moment the player answers. If a third overlay cannot find a bracket that tight,
+that is an argument against the overlay, not for a bigger one.
 
 It is an overlay rather than a band the tabs make room for because every tab's
 layout is hand-fitted to a 192px content area, which `UI_SKIN_PLAN.md` declares
@@ -148,8 +168,19 @@ Four rules, all of them learned the hard way on this one:
    not anyone pressed anything. An overlay that can only be dismissed by hand is
    an overlay that gets left up.
 
-And fold an "is it up" bit into `UiStateHash`, or it will not appear until
-something else happens to dirty the screen.
+And fold an "is it up" bit into `UiStateHash`, **in a slot of its own**, or it
+will not appear until something else happens to dirty the screen. The strip is
+the sharper version of this: nothing else in that hash moves when action
+selection opens or closes, so without `top[6]` it would never be drawn at all.
+
+Finally, `UiOverlayActive()` is not bookkeeping. A tab that defers drawing to
+the shell's animated layer paints a STILL version while it is TRUE, and the
+reason is that the layer paints over a snapshot which now contains the overlay
+-- so the party grid's bottom row of mon icons, which sits under the strip,
+would otherwise be redrawn straight through it on every animation step. Since
+that layer then has nothing to draw for the party, `CtrBottomUpdate` also skips
+asking for the cheap animated redraw while the strip is up, or the host would
+upload an unchanged screen five times a second.
 
 **Do not size a panel in pixels and hope.** `UiWindowFrame` takes 8px TILES, so
 pick tile counts that centre exactly: 30x14 tiles is 240x112, and (320-240)/2
@@ -657,7 +688,8 @@ symptom was every other tab's border changing colour. See
 
 ## 11. Writing game state
 
-Only BAG writes today, and its gates are the design, not a detail.
+Two things write: the BAG tab, and the quick-throw strip. Their gates are the
+design, not a detail.
 
 ### Out of battle: four gates ([tab_bag.c:153](ui/tab_bag.c#L153))
 
@@ -683,6 +715,37 @@ requires `gBattlerControllerFuncs[player] == HandleInputChooseAction`
 saves and restores `gActiveBattler` and `gBattlerInMenuId`, and registers
 `B_ACTION_USE_ITEM` so the item costs a turn and the opponent responds, exactly
 as the d-pad route does. Copy this shape for any future battle write.
+
+The quick-throw strip ([ui_quickball.c](ui/ui_quickball.c)) is what copying it
+looks like: it calls that one function and has **no gate of its own**, because
+everything it would need to refuse for -- the wrong moment, a barred battle
+type, a full party and box -- is already inside. A second copy of those checks
+out here is a second copy free to be subtly wrong.
+
+Note what this means for the Safari Zone. `Ctr3dsPlayerIsChoosingAction()` asks
+about the PLAYER controller, and the Safari Zone runs
+`src/battle_controller_safari.c`, whose identically named action handler is a
+different static function at a different address. So it is FALSE there and
+neither the touch bag nor the strip can throw a Safari Ball. That is a real
+limitation rather than an oversight, and any new battle write inherits it.
+
+### Persisted state that is not save data
+
+The last ball thrown is a byte of `settings.bin`, not of the save block. The
+write is one fenced line in `HandleAction_UseItem()` (`src/battle_util.c`),
+which is the single point every route the player can choose a ball by passes
+through -- the d-pad bag, the touch BAG tab and the strip all arrive as
+`B_ACTION_USE_ITEM`.
+
+Two things about that are worth copying. It calls a setter from **battle logic**
+rather than from `CtrBottomUpdate()`, which is safe only because
+`CtrSettingsMarkDirty()` queues and `CtrSettingsFlush()` does the writing from
+the frame loop -- see section 13, and the header of `host/settings.c` for what
+happened when a setter wrote synchronously. And the value crosses the seam as a
+raw number that the host does **not** range-check, because the valid range is
+`FIRST_BALL..LAST_BALL` in a game header the host may not include; the check
+lives in `UiQuickBallItem()` where those constants are. That is the exception to
+`settings.c`'s "range-check rather than trust the file" rule, and the only one.
 
 ### Classify by the game's tables, not by item id
 
@@ -791,7 +854,10 @@ value without writing the file back out during the load that produced it.
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
    `UiExtraStateKey()` ([:544](ui/tab_extra.c#L544)) in a bit range nothing else
-   claims.
+   claims -- but only if it can change with **no touch on this tab**, the way
+   the shiny test does when its encounter fires. A plain toggle needs no slot:
+   its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
+   `quickBallOff` are absent from that hash rather than overlooked.
 
 The file is `sdmc:/3ds/emerald3ds/settings.bin`. It is opened once at boot and
 rewritten in place, on a `CTR_SETTINGS_QUIET_MS` debounce so a pass through the
@@ -809,8 +875,17 @@ A failed write is also not retried: one attempt per change, or a read-only card
 would turn one tap into an FS attempt on every frame for the rest of the
 session.
 
-**Two settings deliberately break the pattern**, and both are worth knowing
-before you copy it:
+The struct is currently **24 bytes at v9 with no padding left**. Every version
+from v5 on has grown by claiming bytes its predecessor wrote as explicit zero
+padding, which is why v6, v8 and v9 needed no migration at all -- same size, and
+each new field means at zero exactly what that file already meant. That padding
+existed to stop the compiler rounding the struct up to its 4-byte alignment and
+`settings_write()` then putting uninitialised stack on the card. There is none
+left, so **the next field added grows the struct to 25 and must bring explicit
+padding back with it.**
+
+**Three settings deliberately break the pattern**, and all three are worth
+knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
   `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:322](host/main.c#L322)),
@@ -826,6 +901,15 @@ before you copy it:
   readers that touch the static array themselves, as `CtrAudioFrame` does for
   the stereo downmix. Choose the neutral value carefully; for the audio A/B
   switches it is ON, because ON is the real mixer.
+- **A value written by the game, not by a button, is not range-checked here.**
+  `lastBall` is set from `HandleAction_UseItem()` (`src/battle_util.c`) and its
+  valid range is `FIRST_BALL..LAST_BALL`, a game constant `settings.c` may not
+  include -- copying the numbers across the seam would be a second definition
+  free to drift from the first. So `Ctr3dsApplyLastBall` stores whatever it is
+  given and `UiQuickBallItem()` checks it game-side, where the constants are.
+  This is the ONLY exception to "range-check rather than trust the file"; a
+  corrupt byte simply fails that test and the strip falls back to the first ball
+  in the pocket.
 
 ---
 
@@ -841,6 +925,20 @@ UI_W / UI_H        320 / 240  // ui_draw.h
 
 `UI_TABBAR_H` and `UI_CONTENT_H` are declared load bearing by
 `UI_SKIN_PLAN.md`. Do not change them casually.
+
+The two overlays divide that 192px content area between them, and their numbers
+are load bearing against **each other**:
+
+```c
+NOTICE_Y / NOTICE_H   40 / 112   // bottom_screen.c, the shiny notice: y 40..152
+UI_QB_Y  / UI_QB_H   152 /  40   // ui_quickball.h, the strip:        y 152..192
+```
+
+152 appears in both on purpose. Move either and they overlap, and then the one
+drawn second eats the other's border row -- which is visible, because
+`UiWindowFrame`'s centre tiles are opaque. Both are expressed in TILES
+(`NOTICE_TY`, `UI_QB_TY`) because that is what `UiWindowFrame` takes, so any new
+value has to land on an 8px boundary as well as clear the other panel.
 
 Per-view constants are `#define`d at the top of each tab file, derived from each
 other rather than tabulated twice (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`).
@@ -874,6 +972,8 @@ appears.
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
+| Mon icons punch through an overlay every few frames | The tab redrew them on the shell's animated layer, which paints over a snapshot that already contains the overlay. Fold the overlay into `UiOverlayActive()` so the tab paints still icons instead. |
+| A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
 | The frame rate drops while something on the bottom screen is animating | Expected, and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.copy/flush/xfer` the host's three upload stages, and `frameend` is the VBlank wait, so a `frameend` near zero means the frame had no slack left. |
@@ -892,6 +992,14 @@ appears.
 - Write paths verified against their gates, not only their happy paths: refused
   during a battle, during a script, with field controls locked, and outside
   `CB2_Overworld`.
+- Overlays verified against the states they must NOT appear in, which for a
+  battle overlay is the long tail rather than the obvious case: trainer battles,
+  the Battle Frontier, Wally's tutorial, Birch's bag on Route 101, link and
+  recorded battles, and after `gBattleOutcome` is set. `UNCATCHABLE_BATTLE` in
+  [ui/matchup.c](ui/matchup.c) is one flag test covering most of them, so use it
+  rather than assembling a second list.
+- A settings version bump verified by **loading the previous version's file**,
+  not only by writing the new one. Keep a copy before changing the struct.
 - On hardware, not only in an emulator (`AGENTS.md`). The boot log and the frame
   600 audio health report stay clean, and repaint frequency has not visibly
   risen.

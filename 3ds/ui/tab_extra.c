@@ -362,11 +362,12 @@ static void DrawPage2(void)
 // debug page do, and reuse page 1's grid and page 2's button columns. That is
 // the same cross-page constant sharing page 2 already does with SCL_X/SCL_W,
 // and it is what keeps three differently-populated pages aligned with each
-// other. One row so far; the grid holds three.
+// other. Two rows so far; the grid holds three.
 static void DrawPage3(void)
 {
     u8 label[40];
     int off = Ctr3dsGetPhoneCallsOff();
+    int qb;
 
     UiText(16, P1_ROW_Y(0), UiAscii(label, "PHONE CALLS", sizeof(label)),
            UiThemeText(), UiThemeShadow());
@@ -388,6 +389,33 @@ static void DrawPage3(void)
                !off);
     DrawButton(WIDE_X(1), P1_BTN_Y(0), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                off);
+
+    // The quick-throw strip (3ds/ui/ui_quickball.c). It is the one thing on
+    // this screen that COVERS a tab while the player is using it, so it gets a
+    // switch: the strip takes the bottom 40 rows of the content area during
+    // every wild battle's action select, which is the bottom half of the party
+    // grid's third row, and a player who would rather keep that should be able
+    // to.
+    //
+    // Label width is the constraint on this row, not the button: the label
+    // starts at 16 and P2_HINT_X is 96, so it has to stay under 80px. "QUICK
+    // BALL" is ten glyphs.
+    qb = Ctr3dsGetQuickBallOff();
+
+    UiText(16, P1_ROW_Y(1), UiAscii(label, "QUICK BALL", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    // What it actually does, in the space there is. Not said here for want of
+    // room: it remembers across launches, and it is remembered per CONSOLE
+    // rather than per save file, because it lives in settings.bin.
+    UiText(P2_HINT_X, P1_ROW_Y(1),
+           UiAscii(label, "last ball, one tap", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+
+    DrawButton(WIDE_X(0), P1_BTN_Y(1), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+               !qb);
+    DrawButton(WIDE_X(1), P1_BTN_Y(1), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               qb);
 }
 
 // PAGE 3: the debug menu.
@@ -731,6 +759,21 @@ static void TouchPage3(const CtrTouchState *t)
     if (UiHit(t, WIDE_X(1), P1_BTN_Y(0), WIDE_W, BTN_H))
     {
         Ctr3dsSetPhoneCallsOff(1);
+        UiMarkDirty();
+        return;
+    }
+
+    // Same shape on the second row. ON is the default, so it clears the stored
+    // flag; the flag stores OFF.
+    if (UiHit(t, WIDE_X(0), P1_BTN_Y(1), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetQuickBallOff(0);
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, WIDE_X(1), P1_BTN_Y(1), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetQuickBallOff(1);
         UiMarkDirty();
         return;
     }

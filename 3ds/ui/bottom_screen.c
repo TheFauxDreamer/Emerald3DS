@@ -27,6 +27,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "matchup.h"
+#include "ui_quickball.h"
 
 // Two distinct flags: sNeedsRepaint means the framebuffer contents are stale,
 // sDirty means the host has not uploaded the current contents yet. Conflating
@@ -257,7 +258,7 @@ bool8 UiAnimStepped(void)
 // tab_party.c, which is the case that found this.
 bool8 UiOverlayActive(void)
 {
-    return NoticeActive(NULL, NULL);
+    return NoticeActive(NULL, NULL) || UiQuickBallActive();
 }
 
 // ------------------------------------------------------- notice animation --
@@ -513,7 +514,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[6];
+    u32 top[7];
     top[0] = UiFrameId();
     top[1] = sInGame;
     // The override is host-side and always safe to read; the three flags are
@@ -561,6 +562,13 @@ static u32 UiStateHash(void)
     // disappears again when the battle ends. Safe before there is a save block,
     // because everything behind it is a plain global gated on gMain.inBattle.
     top[5] = NoticeActive(NULL, NULL);
+
+    // The quick-throw strip, in a slot of its own for the same reason the
+    // tab-conditional key above has one: two keys sharing a slot can cancel.
+    // Nothing else in this hash moves when action selection opens or closes,
+    // which is exactly when the strip appears and disappears, so without this
+    // it would never be drawn at all. Zero while it is down.
+    top[6] = UiQuickBallStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
@@ -659,8 +667,14 @@ static void Redraw(void)
     case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
-    // Last, and over the top of whichever tab just drew: it is an alert, and an
-    // alert a view can paint over is not one.
+    // Both overlays, over the top of whichever tab just drew. The strip first
+    // and the notice second, so that if the geometry is ever changed such that
+    // they do overlap, the ALERT is the one that survives -- an alert a view
+    // can paint over is not one. As they stand they abut exactly (y 152) and
+    // neither touches the other.
+    if (UiQuickBallActive())
+        UiQuickBallDraw();
+
     if (NoticeActive(&noticeSpecies, &noticePersonality))
         DrawNotice(noticeSpecies, noticePersonality);
 
@@ -700,7 +714,13 @@ static void DrawAnimatedLayer(void)
 {
     if (NoticeActive(NULL, NULL))
         RedrawNoticeSparkles();
-    else if (sTab == UI_TAB_PARTY)
+    // Not while the quick-throw strip is up. It has no animation of its own, so
+    // there is nothing to draw here for it -- but the snapshot this layer
+    // paints over now CONTAINS the strip, and the party grid's bottom row of
+    // icons sits under it, so redrawing them here would punch them straight
+    // through the panel. UiOverlayActive() is TRUE for the strip precisely so
+    // that DrawCell paints still icons into the tab instead.
+    else if (!UiQuickBallActive() && sTab == UI_TAB_PARTY)
         UiPartyRedrawIcons();
 }
 
@@ -776,6 +796,17 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             sNeedsRepaint = 1;
         }
     }
+    // The quick-throw strip, on the same terms and for the same reasons: it
+    // takes every touch inside its rect, release or not, so a drag begun on it
+    // cannot carry through into the tab it is covering. Below the notice in
+    // this chain because the two can be up together and the notice is the
+    // alert, though as drawn they do not overlap.
+    else if (touch != NULL
+             && UiHit(touch, UI_QB_X, UI_QB_Y, UI_QB_W, UI_QB_H)
+             && UiQuickBallActive())
+    {
+        UiQuickBallTouch(touch);
+    }
     // A tap on the tab bar switches views; anything above it belongs to the
     // active view. Acting on release rather than press means a touch that
     // slides off a tab does not trigger it.
@@ -813,11 +844,28 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // a crash, so when in doubt a tick should ask for the full repaint.
     if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
     {
-        if (UiPartyIconOnly())
-            animParty = 1;
-        else
+        if (!UiPartyIconOnly())
+        {
             sNeedsRepaint = 1;
+        }
+        // ...but not while the quick-throw strip is up. DrawAnimatedLayer has
+        // nothing to draw for the party then -- the icons are frozen into the
+        // tab's own paint, which is what UiOverlayActive() asked it for -- so
+        // the cheap path would put back four rects that already hold what they
+        // held and then make the host upload an unchanged screen. The tick
+        // itself still runs, so the phase carries on underneath and the icons
+        // pick up where they were when the strip goes down.
+        else if (!UiQuickBallActive())
+        {
+            animParty = 1;
+        }
     }
+
+    // Per-frame, and deliberately not gated on sInGame or on the strip being
+    // up: its whole job is to clear state once the battle is over, which is a
+    // moment at which the strip is by definition already down. It asks for no
+    // repaint, because everything it clears is invisible by then.
+    UiQuickBallTick();
 
     // The shiny panel's sparkles, on the same terms. Both ticks live here
     // rather than inside Redraw because a tick that only ran when the screen

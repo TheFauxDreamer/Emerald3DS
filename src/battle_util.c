@@ -36,6 +36,13 @@
 #include "constants/species.h"
 #include "constants/weather.h"
 
+#if PLATFORM_3DS
+// The bottom screen's quick-throw strip offers back whichever ball the player
+// last threw, and this file is where it learns which one that was. See the note
+// on the call in HandleAction_UseItem below for why here and nowhere else.
+#include "../3ds/bridge.h"
+#endif
+
 /*
 NOTE: The data and functions in this file up until (but not including) sSoundMovesTable
 are actually part of battle_main.c. They needed to be moved to this file in order to
@@ -319,6 +326,25 @@ void HandleAction_UseItem(void)
 
     if (gLastUsedItem <= LAST_BALL) // is ball
     {
+#if PLATFORM_3DS
+        // Remember it for the bottom screen's quick-throw strip.
+        //
+        // This line is here rather than in Cmd_handleballthrow because this is
+        // the one point EVERY route the player can choose a ball by passes
+        // through: the d-pad bag, the touch BAG tab and the strip itself all
+        // arrive as B_ACTION_USE_ITEM and are read back out of gBattleBufferB
+        // on the line above. Wally's tutorial ball does not -- that is
+        // B_ACTION_WALLY_THROW and lands in HandleAction_WallyBallThrow -- and
+        // neither does the Safari Zone, so neither can overwrite a preference
+        // the player never expressed.
+        //
+        // The side test is not redundant: this whole function runs for the AI's
+        // item use too. No trainer throws a ball today, but the branch it would
+        // land in if one ever did is this one.
+        if (gLastUsedItem != ITEM_NONE
+            && GetBattlerSide(gBattlerAttacker) == B_SIDE_PLAYER)
+            Ctr3dsSetLastBall(gLastUsedItem);
+#endif
         gBattlescriptCurrInstr = gBattlescriptsForBallThrow[gLastUsedItem];
     }
     else if (gLastUsedItem == ITEM_POKE_DOLL || gLastUsedItem == ITEM_FLUFFY_TAIL)
