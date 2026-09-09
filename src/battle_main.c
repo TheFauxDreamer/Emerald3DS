@@ -5207,6 +5207,75 @@ static void HandleEndTurn_FinishBattle(void)
 
 static void FreeResetData_ReturnToOvOrDoEvolutions(void)
 {
+#if PLATFORM_3DS
+    // Reordered: nothing is freed until the sprites that read it are gone.
+    //
+    // The vanilla version below runs the frees on EVERY frame the end-of-battle
+    // fade is still going, and only calls ResetSpriteData() once it has
+    // finished. So for the length of the fade the battle sprites are alive and
+    // animating over data that has already been freed, with
+    // gBattleSpritesDataPtr set to NULL by FreeBattleSpritesData().
+    //
+    // On a GBA that is harmless. There is no MMU, address 0 is the BIOS, and a
+    // read through a null pointer quietly returns junk that nothing looks at
+    // again. On the ARM11 address 0 is simply not mapped, so the same read is a
+    // data abort -- "Translation - Section", FAR 00000000 -- and takes the
+    // process out. It is the same class of bug as the gSaveBlock1Ptr null read
+    // in the bottom screen's SaveDataLive(), and it bites for the same reason.
+    //
+    // SpriteCB_EnemyShadow (src/battle_gfx_sfx_util.c) is the one that found
+    // this. It ends with an UNGUARDED
+    //
+    //     gBattleSpritesDataPtr->battlerData[battler].behindSubstitute
+    //
+    // and battlerData is the FIRST member of struct BattleSpriteData, so with
+    // the pointer NULL that load addresses exactly 0.
+    //
+    // Why it presented as "running from a wild battle sometimes crashes":
+    //
+    //   - Only the outcomes that leave the opponent STANDING are affected. A
+    //     faint (HideBattlerShadowSprite from the faint animation) and a catch
+    //     (the same call when the mon is drawn into the ball) both put the
+    //     shadow back on SpriteCB_SetInvisible, which touches nothing.
+    //     BattleScript_GotAwaySafely is a printstring and a waitmessage, so the
+    //     run path clears nothing -- and neither do B_OUTCOME_MON_FLED,
+    //     Teleport, or being Roared out of a wild battle.
+    //   - Only 61 species have a shadow callback at all.
+    //     SetBattlerShadowSpriteCallback only installs SpriteCB_EnemyShadow
+    //     when gEnemyMonElevation[species] is non-zero, i.e. for the ones that
+    //     hover. Run from a Zubat, Wingull, Beautifly, Skiploom or Duskull and
+    //     it aborts; run from a Zigzagoon or a Poochyena and it does not.
+    //
+    // Fixing it here rather than by guarding that one callback is deliberate:
+    // sixteen sprite and task callbacks dereference a pointer this function
+    // nulls, and a guard in each is sixteen chances to miss one. Freeing after
+    // ResetSpriteData() removes the window they all share.
+    //
+    // Net behavioural difference on this platform: the four frees happen once,
+    // on the frame the fade completes, instead of repeatedly during it. They
+    // are all idempotent and null-guarded, and nothing runs in between, so the
+    // only observable change is that the memory stays allocated for the few
+    // frames of the fade. Everything downstream still sees it freed --
+    // TryEvolvePokemon included, since the frees land before gBattleMainFunc is
+    // next called.
+    if (gPaletteFade.active)
+        return;
+
+    ResetSpriteData();
+
+    FreeAllWindowBuffers();
+    if (!(gBattleTypeFlags & BATTLE_TYPE_LINK))
+    {
+        FreeMonSpritesGfx();
+        FreeBattleResources();
+        FreeBattleSpritesData();
+    }
+
+    if (gLeveledUpInBattle == 0 || gBattleOutcome != B_OUTCOME_WON)
+        gBattleMainFunc = ReturnFromBattleToOverworld;
+    else
+        gBattleMainFunc = TryEvolvePokemon;
+#else
     if (!gPaletteFade.active)
     {
         ResetSpriteData();
@@ -5228,6 +5297,7 @@ static void FreeResetData_ReturnToOvOrDoEvolutions(void)
         FreeBattleResources();
         FreeBattleSpritesData();
     }
+#endif
 }
 
 static void TryEvolvePokemon(void)

@@ -962,6 +962,7 @@ appears.
 | Symptom | Cause |
 |---|---|
 | Data abort at boot, address near 0x1300 | Reading `gSaveBlock1Ptr` before a file is loaded. Gate on `SaveDataLive()`. |
+| Data abort with **FAR exactly 00000000**, Read | A null pointer dereferenced at offset 0. On a GBA this is free -- no MMU, address 0 is the BIOS, the read returns junk nobody looks at -- so vanilla code does it in places and gets away with it. On the ARM11 it is fatal. `FreeResetData_ReturnToOvOrDoEvolutions` (`src/battle_main.c`) was one: it freed the battle sprite data on every frame of the end-of-battle fade while those sprites were still animating, and `SpriteCB_EnemyShadow` read `gBattleSpritesDataPtr->battlerData` (first member, so offset 0) straight through the NULL. It presented as "running from a wild battle sometimes crashes" -- only outcomes that leave the opponent standing, and only the 61 species with a non-zero `gEnemyMonElevation`. |
 | Every tab's border changes colour after viewing a dex entry | Decompress overrun into neighbouring statics. Size-check first. |
 | Invisible text | Using the game's `DecompressGlyphTile()` instead of `ui_text.c`'s own decoder. |
 | Text overruns into the next panel | No clipping exists. Measure, or add `UiClipPush`. |
@@ -1000,6 +1001,11 @@ appears.
   rather than assembling a second list.
 - A settings version bump verified by **loading the previous version's file**,
   not only by writing the new one. Keep a copy before changing the struct.
+- **Teardown paths on hardware specifically.** Emulators are far more forgiving
+  of a read through a null pointer than a real ARM11 is, and vanilla frees data
+  out from under live sprite and task callbacks in more than one place. When a
+  crash reports FAR 00000000, look for a pointer the game nulls on the way out
+  of a mode rather than for something the port did.
 - On hardware, not only in an emulator (`AGENTS.md`). The boot log and the frame
   600 audio health report stay clean, and repaint frequency has not visibly
   risen.
