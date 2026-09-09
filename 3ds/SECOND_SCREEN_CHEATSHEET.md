@@ -962,6 +962,7 @@ appears.
 | Symptom | Cause |
 |---|---|
 | Data abort at boot, address near 0x1300 | Reading `gSaveBlock1Ptr` before a file is loaded. Gate on `SaveDataLive()`. |
+| Data abort with a **small or struct-sized FAR**, Read | A null pointer plus a field offset -- FAR *is* the offset, so it is 0 only when the field is the struct's first member. `offsetof` the FAR against every struct the code frees and it names the pointer outright. The naming screen was one: `MainState_Exit` frees `sNamingScreen` while the sprites and helper tasks it created are still running, and `SpriteCB_Cursor` reads `currentPage` at offset **0x1E22** every frame, which was the reported FAR exactly. Note the trap: that screen ALREADY had a `VBLANK_REQUIRE(sNamingScreen)` guard, which fixed the VBlank reader and left the `AnimateSprites()` one. Guarding readers one at a time is how these survive. |
 | Data abort with **FAR exactly 00000000**, Read | A null pointer dereferenced at offset 0. On a GBA this is free -- no MMU, address 0 is the BIOS, the read returns junk nobody looks at -- so vanilla code does it in places and gets away with it. On the ARM11 it is fatal. `FreeResetData_ReturnToOvOrDoEvolutions` (`src/battle_main.c`) was one: it freed the battle sprite data on every frame of the end-of-battle fade while those sprites were still animating, and `SpriteCB_EnemyShadow` read `gBattleSpritesDataPtr->battlerData` (first member, so offset 0) straight through the NULL. It presented as "running from a wild battle sometimes crashes" -- only outcomes that leave the opponent standing, and only the 61 species with a non-zero `gEnemyMonElevation`. |
 | Every tab's border changes colour after viewing a dex entry | Decompress overrun into neighbouring statics. Size-check first. |
 | Invisible text | Using the game's `DecompressGlyphTile()` instead of `ui_text.c`'s own decoder. |
@@ -1003,9 +1004,15 @@ appears.
   not only by writing the new one. Keep a copy before changing the struct.
 - **Teardown paths on hardware specifically.** Emulators are far more forgiving
   of a read through a null pointer than a real ARM11 is, and vanilla frees data
-  out from under live sprite and task callbacks in more than one place. When a
-  crash reports FAR 00000000, look for a pointer the game nulls on the way out
-  of a mode rather than for something the port did.
+  out from under live sprite and task callbacks in more than one place -- battle
+  teardown and the naming screen both did, and the 24 `VBLANK_REQUIRE` guards
+  across 10 files mark the ones already found. When a crash reports a low FAR,
+  look for a pointer the game nulls on the way out of a mode rather than for
+  something the port did, and `offsetof` the FAR against the freed structs to
+  name it. Prefer destroying the leftovers (`ResetSpriteData()` / `ResetTasks()`
+  before the free) over guarding each reader: the readers are reached through
+  function-pointer tables and helpers, so the list is never as short as it
+  looks, and a per-reader guard is what left the naming screen still crashing.
 - On hardware, not only in an emulator (`AGENTS.md`). The boot log and the frame
   600 audio health report stay clean, and repaint frequency has not visibly
   risen.
