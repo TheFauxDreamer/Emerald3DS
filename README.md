@@ -117,7 +117,9 @@ four are off by default:
 
 *Page 3* is quality of life. **PHONE CALLS** can be turned off, which silences
 only the trainers who ring unprompted mid-route. Every scripted call still comes
-through, and so does the PokéNav's own Match Call screen.
+through, and so does the PokéNav's own Match Call screen. **QUICK BALL** turns off
+the quick-throw strip described below, for anyone who would rather keep those
+forty rows of their party grid during a wild battle.
 
 **A fourth page exists in debug builds only.** It holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
@@ -126,6 +128,21 @@ mixer at a time. One value in `3ds/bridge.h` turns the page off, and turning it
 off also pins those settings to their harmless values, so a `settings.bin`
 written by a debug build cannot leave a player with a muted channel and no
 control to unmute it.
+
+**Quick throw.** The NDS games remembered which ball you last threw and kept it
+in reach on the touch screen. Emerald has no such idea, so this adds one: when a
+wild battle asks what you want to do, a strip appears along the bottom of
+whichever tab you are on with that ball, how many you have left, and a THROW
+button that spends your turn on it. Tap the name to cycle through the other
+balls you own; only an actual throw changes what it remembers, so browsing costs
+you nothing. It remembers across launches, and it learns from the in-game bag
+too, not just from itself.
+
+It appears only while the game is waiting for your decision, so it is gone
+again the moment you make one, and only against something you could really
+throw a ball at. Until you have thrown one it offers the first ball in your bag
+that is not the Master Ball, which it will never suggest on its own. It can be
+switched off on page 3 of EXTRA.
 
 **Shiny alerts, over every tab.** When a wild Pokémon is shiny, a gold panel
 takes the middle of the bottom screen and names it at double size, whichever tab
@@ -158,6 +175,7 @@ emulator.
 | Bottom: encounter lists and Fly from the map | ✅ |
 | Tweaks: EXP All, level cap, randomiser, bag sort | ✅ |
 | Battle items from the touch screen | ✅ |
+| Bottom: quick throw of your last used ball | ✅ |
 | Audio | ✅ Stereo PCM16: music, cries and PSG. Needs a DSP firmware dump |
 | Link cable and wireless | 🚧 On the `local-wireless` branch, unbuilt and untested |
 | Battery life, sustained timing | ❓ Never measured over a long session |

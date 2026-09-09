@@ -142,7 +142,7 @@ u32 UiMatchupOpponentKey(void)
          | ((u32)gBattleMons[foe].types[1] << 24);
 }
 
-// ----------------------------------------------------------- shiny check ---
+// ------------------------------------------------------- catchable check ---
 //
 // Battles the player cannot throw a ball in. BATTLE_TYPE_TRAINER covers far
 // more than it looks: the whole Battle Frontier, the Battle Tower, secret bases
@@ -160,10 +160,12 @@ u32 UiMatchupOpponentKey(void)
                           | BATTLE_TYPE_WALLY_TUTORIAL   \
                           | BATTLE_TYPE_FIRST_BATTLE)
 
-bool8 UiShinyOpponent(u16 *species, u32 *identity)
+// Split out of UiShinyOpponent rather than duplicated, because the quick-throw
+// strip asks the same question and two copies of this would drift. Every check
+// below records a bug; see the comments.
+bool8 UiCatchableOpponent(void)
 {
     struct Pokemon *foe = &gEnemyParty[0];
-    u32 otId, personality;
 
     if (!gMain.inBattle)
         return FALSE;
@@ -186,15 +188,23 @@ bool8 UiShinyOpponent(u16 *species, u32 *identity)
     // gMain.inBattle going true (src/battle_main.c:708) and the intro's
     // BattleIntroGetMonsData completing, that array still holds the PREVIOUS
     // battle's mons. A stale type matchup during the transition is a shrug; a
-    // shiny alert for a mon that is no longer there is not. gEnemyParty is
-    // written before inBattle is set in both cases -- CreateWildMon during the
-    // encounter, CreateNPCTrainerParty on the line above it -- so it is correct
-    // from the first frame of the battle.
+    // shiny alert for a mon that is no longer there is not, and neither is a
+    // ball offered against one. gEnemyParty is written before inBattle is set
+    // in both cases -- CreateWildMon during the encounter, CreateNPCTrainerParty
+    // on the line above it -- so it is correct from the first frame.
     //
     // Slot 0 is the whole answer here because Emerald has no wild double
     // battles: every battle with a second opponent is a trainer battle, and
     // those returned above.
-    if (!GetMonData(foe, MON_DATA_SANITY_HAS_SPECIES))
+    return GetMonData(foe, MON_DATA_SANITY_HAS_SPECIES) != 0;
+}
+
+bool8 UiShinyOpponent(u16 *species, u32 *identity)
+{
+    struct Pokemon *foe = &gEnemyParty[0];
+    u32 otId, personality;
+
+    if (!UiCatchableOpponent())
         return FALSE;
 
     // These two sit BEFORE MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h:8-19),

@@ -255,6 +255,28 @@ int  Ctr3dsGetBagSort(void);
 void Ctr3dsSetPhoneCallsOff(int on);
 int  Ctr3dsGetPhoneCallsOff(void);
 
+// The last Poke Ball the player actually threw, so the bottom screen can offer
+// it straight back rather than making them walk the bag for it every encounter.
+//
+// Stored as a RAW ITEM ID and deliberately not range-checked on this side. The
+// ball ids are FIRST_BALL..LAST_BALL in include/constants/items.h, which is a
+// game header, and bridge.h may not include one -- copying the numbers here
+// would be a second definition free to drift from the first. UiQuickBallItem()
+// (3ds/ui/ui_quickball.c) validates instead, where the real constants are.
+// Zero means nothing has been thrown yet.
+void Ctr3dsSetLastBall(int item);
+int  Ctr3dsGetLastBall(void);
+
+// The quick-throw strip itself (EXTRA page 3). It appears over whichever tab is
+// up while a catchable wild battle is asking the player what to do, so a player
+// who would rather keep those 40 rows of their party grid can switch it off.
+//
+// Stored NEGATED, as "off", for the same reason phoneCallsOff above is: a zero
+// settings byte then means the strip is shown, which is both the default and
+// what every file written before this option existed says.
+void Ctr3dsSetQuickBallOff(int on);
+int  Ctr3dsGetQuickBallOff(void);
+
 // Shiny test switch (EXTRA page 2).
 //
 // Arms the NEXT wild encounter to be shiny, then disarms itself. It exists

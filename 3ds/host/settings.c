@@ -66,7 +66,18 @@
 // no migration beyond accepting the older version number. Every v7 file has a
 // zero there, and the field stores OFF rather than on precisely so that zero
 // keeps meaning "calls happen", which is what those files meant.
-#define SETTINGS_VERSION 8
+//
+// v9 claimed the LAST TWO padding bytes for the quick-throw strip: the ball the
+// player last threw, and whether the strip is shown at all. Same size again, so
+// again no migration beyond accepting v8. Both mean the right thing at zero --
+// "nothing thrown yet", and (stored as OFF) "the strip is shown".
+//
+// There is now no padding left. That is not a problem in itself, because 24 is
+// already a multiple of the struct's 4-byte alignment and the compiler adds
+// nothing, but it does mean the NEXT field to be added grows the struct and
+// must bring explicit padding back with it -- see the comment on the fields
+// themselves for what that padding is actually protecting against.
+#define SETTINGS_VERSION 9
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -99,11 +110,20 @@ struct CtrSettings {
     // same trick v6 played on v5. Stores OFF rather than on, so the zero a v7
     // file already has means "calls happen" -- the behaviour that file had.
     uint8_t  phoneCallsOff;
-    // Explicit again for the same reason v5's and v7's were: five bytes at
-    // offset 17 puts the struct at 22, which the compiler would round to 24 by
-    // itself and settings_write() would then write two bytes of uninitialised
-    // stack.
-    uint8_t  pad[2];
+    // v9, in the two bytes v7 reserved and v8 left. lastBall is a raw item id
+    // and is the one value in this struct NOT range-checked on load: the ball
+    // ids are game constants this side may not include, so UiQuickBallItem()
+    // checks them where they are defined. quickBallOff stores OFF for the same
+    // reason phoneCallsOff does.
+    //
+    // These were the last of the explicit padding, which existed because
+    // without it the compiler would round the struct up to its 4-byte alignment
+    // itself and settings_write() would write uninitialised stack to the card.
+    // 22 + 2 is 24, which is already aligned, so nothing implicit is added --
+    // but a v10 field would take the struct to 25 and that hazard comes
+    // straight back. Pad explicitly again when it does.
+    uint8_t  lastBall;
+    uint8_t  quickBallOff;
 };
 
 // How much of the struct each older layout fills: everything up to the fields
@@ -133,6 +153,10 @@ extern int  Ctr3dsGetFfAudio(void);
 extern void Ctr3dsApplyFfAudio(int mode);
 extern int  Ctr3dsGetPhoneCallsOff(void);
 extern void Ctr3dsApplyPhoneCallsOff(int on);
+extern int  Ctr3dsGetQuickBallOff(void);
+extern void Ctr3dsApplyQuickBallOff(int on);
+extern int  Ctr3dsGetLastBall(void);
+extern void Ctr3dsApplyLastBall(int item);
 
 // How long after the last change to write.
 //
@@ -252,11 +276,13 @@ void CtrSettingsLoad(void)
         if (n != sizeof(s))
             return;
     }
-    else if (s.version == 7)
+    else if (s.version == 8 || s.version == 7)
     {
-        // 24 bytes, the same shape as v8. v7 wrote its three trailing bytes as
-        // padding and v8 gave the first of them meaning, but v7 always wrote
-        // zero and zero is "calls happen", so the two load identically here.
+        // 24 bytes, the same shape as v9. Each of the three gave meaning to
+        // bytes its predecessor wrote as zero padding, and every one of those
+        // fields stores the value zero already meant -- "calls happen",
+        // "nothing thrown yet", "the strip is shown" -- so all three load
+        // identically here with no conversion at all.
         if (n != sizeof(s))
             return;
     }
@@ -312,6 +338,17 @@ void CtrSettingsLoad(void)
     // what every file written before this option existed meant.
     Ctr3dsApplyPhoneCallsOff(s.phoneCallsOff != 0);
 
+    // Zero for anything older than v9: the strip is shown, and no ball has been
+    // thrown yet. lastBall is passed through UNCHECKED, which is the one
+    // exception to this function's "range-check rather than trust" rule and is
+    // deliberate: the range is FIRST_BALL..LAST_BALL in
+    // include/constants/items.h, a game header this translation unit may not
+    // include, so the check belongs where those constants are. A corrupt byte
+    // reaches UiQuickBallItem(), fails its test, and the strip falls back to
+    // the first ball in the pocket -- which is what an empty memory does too.
+    Ctr3dsApplyQuickBallOff(s.quickBallOff != 0);
+    Ctr3dsApplyLastBall(s.lastBall);
+
     // Zero for anything older than v6, which is "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
@@ -338,6 +375,8 @@ static void settings_write(void)
     s.bagSort    = (uint8_t)Ctr3dsGetBagSort();
     s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
     s.phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
+    s.quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
+    s.lastBall      = (uint8_t)Ctr3dsGetLastBall();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);

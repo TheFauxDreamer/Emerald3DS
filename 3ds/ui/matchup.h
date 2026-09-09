@@ -32,6 +32,18 @@ u16 UiMatchupRisk(struct Pokemon *mon);
 // badges must refresh when the other side switches.
 u32 UiMatchupOpponentKey(void);
 
+// TRUE when there is a mon on the other side that the player could actually
+// throw a ball at: a live wild encounter that is theirs to catch, still
+// undecided.
+//
+// Goes FALSE the moment the encounter is decided -- caught, knocked out, fled
+// from or run from -- so anything drawn from it clears itself without needing
+// to be told the battle ended.
+//
+// Does NOT ask whether a ball can be thrown RIGHT NOW; that is a question about
+// the player's controller, and Ctr3dsPlayerIsChoosingAction() answers it.
+bool8 UiCatchableOpponent(void);
+
 // TRUE when the mon on the other side is shiny AND the player could actually
 // throw a ball at it, which is the only case worth interrupting them for.
 //
