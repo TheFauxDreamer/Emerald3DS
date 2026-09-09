@@ -1,8 +1,8 @@
 # 3DS port roadmap
 
 Outstanding work on the port, and the reasoning behind the decisions already
-taken. Companion to the root `README.md`, which describes how the port is built
-and why it is structured the way it is.
+taken. Companion to the root `README-TECHNICAL.md`, which describes how the port is
+built and why it is structured the way it is.
 
 ---
 

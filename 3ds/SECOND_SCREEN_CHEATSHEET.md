@@ -1,8 +1,8 @@
 # Second screen cheatsheet
 
 Working reference for changing the 3DS bottom screen. Read this before touching
-anything under `3ds/ui/`. Companion documents: the root `README.md` (why the
-port is built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
+anything under `3ds/ui/`. Companion documents: the root `README-TECHNICAL.md` (why
+the port is built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
 catalogue, **not implemented**), `3ds/UI_SKIN_PLAN.md` (a proposed visual
 reskin, **not implemented**). This file describes the code as it actually is.
 
