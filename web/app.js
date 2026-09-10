@@ -190,10 +190,16 @@ function gbaColor(value) {
   return [r | 0, g | 0, b | 0];
 }
 
-function inWindowRange(value, range) {
+// Window bounds do not wrap. GBATEK: X2>240 or X1>X2 is interpreted as X2=240,
+// Y2>160 or Y1>Y2 as Y2=160 -- an inverted range runs to the screen edge and is
+// empty once the start passes it. `limit` is which edge, since this is used for
+// both axes below. Kept in step with inWindowRange/winrowFill in rp2350/ppu.c;
+// both wrapped, and ppu_validate.sh compares the two.
+function inWindowRange(value, range, limit) {
   const start = range >> 8;
-  const end = range & 0xff;
-  return start <= end ? value >= start && value < end : value >= start || value < end;
+  let end = range & 0xff;
+  if (start > end || end > limit) end = limit;
+  return value >= start && value < end;
 }
 
 function windowMask(x, y) {
@@ -202,14 +208,14 @@ function windowMask(x, y) {
   if (!windowsEnabled) return 0x3f;
 
   if ((dispcnt & 0x2000)
-      && inWindowRange(x, u16[(REG + 0x40) >> 1])
-      && inWindowRange(y, u16[(REG + 0x44) >> 1])) {
+      && inWindowRange(x, u16[(REG + 0x40) >> 1], WIDTH)
+      && inWindowRange(y, u16[(REG + 0x44) >> 1], HEIGHT)) {
     return u16[(REG + 0x48) >> 1] & 0x3f;
   }
 
   if ((dispcnt & 0x4000)
-      && inWindowRange(x, u16[(REG + 0x42) >> 1])
-      && inWindowRange(y, u16[(REG + 0x46) >> 1])) {
+      && inWindowRange(x, u16[(REG + 0x42) >> 1], WIDTH)
+      && inWindowRange(y, u16[(REG + 0x46) >> 1], HEIGHT)) {
     return (u16[(REG + 0x48) >> 1] >> 8) & 0x3f;
   }
 

@@ -65,7 +65,7 @@ static u16 TypeMultiplier(u8 atkType, u8 defType1, u8 defType2, bool8 foresighte
     return mul;
 }
 
-u16 UiMatchupOffence(struct Pokemon *mon)
+static u16 ComputeOffence(struct Pokemon *mon)
 {
     u8 foe = OpposingBattler();
     bool8 foresighted = (gBattleMons[foe].status2 & STATUS2_FORESIGHT) != 0;
@@ -96,7 +96,7 @@ u16 UiMatchupOffence(struct Pokemon *mon)
     return best;
 }
 
-u16 UiMatchupRisk(struct Pokemon *mon)
+static u16 ComputeRisk(struct Pokemon *mon)
 {
     u8 foe = OpposingBattler();
     u16 species = (u16)GetMonData(mon, MON_DATA_SPECIES);
@@ -126,6 +126,92 @@ u16 UiMatchupRisk(struct Pokemon *mon)
     }
 
     return worst;
+}
+
+// ------------------------------------------------------------- memo --------
+//
+// A cache in front of the two walks above, not a replacement for them.
+//
+// The PARTY grid asks for both readouts for all six cells on every repaint, and
+// each walk crosses gTypeEffectiveness -- roughly 12,000 iterations a repaint --
+// to produce an answer that only changes when the opponent switches, or this
+// mon's species or moves do. On a screen whose frame cost is measured in whole
+// VBlanks that is worth removing.
+//
+// Keyed on exactly the inputs the walks read: the opponent (species and both
+// types, via UiMatchupOpponentKey) plus this mon's species and four move ids.
+// Reading the moves still costs its GetMonData decrypts -- the saving is the
+// table walk, which is the expensive half.
+//
+// Indexed by the mon's slot in gPlayerParty, derived from the pointer the caller
+// already passes. Anything outside that array bypasses the memo rather than
+// aliasing someone else's entry.
+#define MATCHUP_NO_SLOT (-1)
+
+static struct {
+    u32   key;
+    u16   off, risk;
+    bool8 valid;
+} sMemo[PARTY_SIZE];
+
+static s32 MemoSlot(struct Pokemon *mon)
+{
+    s32 slot = (s32)(mon - gPlayerParty);
+
+    return (slot >= 0 && slot < PARTY_SIZE) ? slot : MATCHUP_NO_SLOT;
+}
+
+static u32 MemoKey(struct Pokemon *mon)
+{
+    u32 key = UiMatchupOpponentKey() * 33u + (u32)GetMonData(mon, MON_DATA_SPECIES);
+
+    for (u32 i = 0; i < MAX_MON_MOVES; i++)
+        key = key * 33u + (u32)GetMonData(mon, MON_DATA_MOVE1 + i);
+
+    return key;
+}
+
+// Both readouts share one key, so a miss fills both and the paired call hits.
+static void MatchupBoth(struct Pokemon *mon, u16 *off, u16 *risk)
+{
+    s32 slot = MemoSlot(mon);
+    u32 key;
+
+    if (slot == MATCHUP_NO_SLOT)
+    {
+        *off  = ComputeOffence(mon);
+        *risk = ComputeRisk(mon);
+        return;
+    }
+
+    key = MemoKey(mon);
+
+    if (!sMemo[slot].valid || sMemo[slot].key != key)
+    {
+        sMemo[slot].off   = ComputeOffence(mon);
+        sMemo[slot].risk  = ComputeRisk(mon);
+        sMemo[slot].key   = key;
+        sMemo[slot].valid = TRUE;
+    }
+
+    *off  = sMemo[slot].off;
+    *risk = sMemo[slot].risk;
+}
+
+u16 UiMatchupOffence(struct Pokemon *mon)
+{
+    u16 off, risk;
+
+    MatchupBoth(mon, &off, &risk);
+    return off;
+}
+
+u16 UiMatchupRisk(struct Pokemon *mon)
+{
+    u16 off, risk;
+
+    MatchupBoth(mon, &off, &risk);
+    return risk;
 }
 
 u32 UiMatchupOpponentKey(void)

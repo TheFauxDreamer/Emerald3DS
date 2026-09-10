@@ -109,11 +109,29 @@ static uint16_t pal565fx[512] PPU_EWRAM;
 static uint16_t bevb5[32], bevb6[64];
 
 // ---- windows ----------------------------------------------------------------
+// Window bounds do NOT wrap. GBATEK:
+//
+//   "Garbage values of X2>240 or X1>X2 are interpreted as X2=240.
+//    Garbage values of Y2>160 or Y1>Y2 are interpreted as Y2=160."
+//
+// so an inverted range runs from X1/Y1 to the screen edge, and is empty when the
+// start is already past it. This used to wrap (>= start || < end), matching
+// web/app.js, and the reference was wrong the same way -- both were fixed
+// together so ppu_validate.sh stays byte-exact.
+//
+// It is not a corner case. The battle intro drives WIN0H per scanline through
+// gScanlineEffectRegBuffers and BattleIntroSlide1 writes -data[2] into a u16, so
+// data[2]=100 becomes 0xFF9C: X1=255, X2=156. Hardware draws nothing on that
+// row; wrapping filled x 0..155 with WIN0's "all BGs visible" mask instead, and
+// WINOUT is restrictive during the intro -- which is how battle terrain ended up
+// drawn over the message and controls boxes.
+//
+// This one is vertical (win0v/win1v); winrowFill below is the horizontal half.
 static bool inWindowRange(int value, uint16_t range) {
     int start = range >> 8;
     int end = range & 0xff;
-    return start <= end ? (value >= start && value < end)
-                        : (value >= start || value < end);
+    if (start > end || end > HEIGHT) end = HEIGHT;
+    return value >= start && value < end;
 }
 
 // Window mask for one scanline (only valid when F.windowsOn). Window registers
@@ -125,12 +143,11 @@ static int winrow_u;   // the row's uniform mask value, or -1 if not uniform
 static void winrowFill(uint16_t hrange, uint8_t val) {
     int start = hrange >> 8;
     int end = hrange & 0xff;
-    if (start <= end) {
-        if (start < WIDTH) memset(&winrow[start], val, (end < WIDTH ? end : WIDTH) - start);
-    } else {
-        if (end > 0) memset(&winrow[0], val, end < WIDTH ? end : WIDTH);
-        if (start < WIDTH) memset(&winrow[start], val, WIDTH - start);
-    }
+    // X1>X2, or X2>240, clamps X2 to the right edge -- never a wrap. See the
+    // note on inWindowRange.
+    if (start > end || end > WIDTH) end = WIDTH;
+    if (start >= end) return;   // X1 at or past the right edge: nothing shown
+    memset(&winrow[start], val, end - start);
 }
 
 // Returns the row's mask array, or NULL meaning "mask is 0x3f everywhere".
