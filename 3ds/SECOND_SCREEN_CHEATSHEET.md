@@ -563,7 +563,8 @@ void UiMonIcon(int x, int y, u16 species, u32 personality);   // 32x32, frame 0
 void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame);
 void UiItemIcon(int x, int y, u16 itemId);                    // 32x32
 void UiMonPic(int x, int y, u16 species);                     // 64x64, cached
-void UiPokeball(int x, int y);                                // 7x7
+void UiPokeball(int x, int y);                                // 7x7, generic
+void UiBallIcon(int x, int y, u16 itemId);                    // 16x16, cached
 void UiFootprint(int x, int y, u16 species, u16 color);       // 16x16
 void UiTypeIcon(int x, int y, u8 type);                       // 32x16
 void UiStatusIcon(int x, int y, u8 ailment);                  // 32x8, AILMENT_*

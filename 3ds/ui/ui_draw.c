@@ -8,6 +8,7 @@
 #include "data.h"                     // gMonFrontPicTable, gMonPaletteTable
 #include "battle.h"                   // struct DisableStruct, for the header below
 #include "battle_interface.h"         // GetHPBarLevel
+#include "battle_anim.h"              // ItemIdToBallId
 #include "decompress.h"
 #include "menu.h"                     // gStandardMenuPalette
 #include "option_menu.h"              // Ctr3dsLiveWindowFrameType
@@ -470,6 +471,49 @@ void UiPokeball(int x, int y)
         for (int col = 0; col < UI_BALL_W; col++)
             if (kBall[row][col])
                 UiPixel(x + col, y + row, kColors[kBall[row][col]]);
+}
+
+// A specific kind of ball, from the game's own throw sprites (graphics/balls),
+// which are the only per-ball art in the ROM at a size that fits a text row: the
+// bag icons are 24x24 and would fill a 24px window interior edge to edge.
+//
+// Each sheet is 16x48 -- three 16x16 frames, 384 bytes -- and frame 0 is the
+// closed ball, which is what sBallAnimSeq0 selects for a ball at rest
+// (src/pokeball.c). At 16px wide the tiles come out two per row, so frame 0 is
+// the first four laid out 2x2.
+//
+// Cached on the ball kind, like UiTypeIcon: the quick-throw strip repaints on
+// every hash change while it is up, and re-expanding the same sheet each time
+// would be pure waste. Both destinations are size-checked before either
+// decompress -- see the note above UiMonPic for what skipping that did once.
+void UiBallIcon(int x, int y, u16 itemId)
+{
+    static u8  tiles[384];
+    static u16 pal[16];
+    static u8  cachedBall = POKEBALL_COUNT;   // not a ball kind, so the first call loads
+
+    // Defaults to BALL_POKE for anything that is not a ball, so this cannot
+    // index the tables out of range and needs no guard of its own.
+    u8 ballId = ItemIdToBallId(itemId);
+
+    if (cachedBall != ballId)
+    {
+        const u32 *gfxLZ = gBallSpriteSheets[ballId].data;
+        const u32 *palLZ = gBallSpritePalettes[ballId].data;
+        u16 gbaPal[16];
+
+        if (GetDecompressedDataSize(gfxLZ) > sizeof(tiles)
+         || GetDecompressedDataSize(palLZ) > sizeof(gbaPal))
+            return;
+
+        LZDecompressWram(gfxLZ, tiles);
+        LZDecompressWram(palLZ, gbaPal);
+        UiLoadPal(pal, gbaPal, 16);
+        cachedBall = ballId;
+    }
+
+    for (int t = 0; t < 4; t++)
+        UiBlit4bppTile(x + (t % 2) * 8, y + (t / 2) * 8, tiles + t * 32, pal, TRUE);
 }
 
 // A species footprint: 4 tiles of 1bpp, arranged 2x2, which is what
