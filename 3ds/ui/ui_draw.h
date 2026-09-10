@@ -89,6 +89,17 @@ void UiMonPic(int x, int y, u16 species);
 
 void UiPokeball(int x, int y);
 
+// One PARTICULAR kind of ball, 16x16: the game's own throw art, so a Master Ball
+// looks like a Master Ball. Takes an ITEM_*_BALL id, NOT a BALL_* one, and
+// anything that is not a ball draws as a Poke Ball. Cached on the ball kind.
+//
+// UiPokeball above is the generic one and stays that way -- the dex marker means
+// "caught", not "caught in this". Use this wherever the ball's identity matters.
+#define UI_BALL_ICON_W 16
+#define UI_BALL_ICON_H 16
+
+void UiBallIcon(int x, int y, u16 itemId);
+
 // A species footprint: 16x16, 1bpp, drawn in `color`.
 void UiFootprint(int x, int y, u16 species, u16 color);
 

@@ -33,10 +33,10 @@
 
 // One row, everything centred in the 24px interior against its own height.
 #define QB_TEXT_Y  (QB_IN_Y + (QB_IN_H - UI_GLYPH_H) / 2)
-#define QB_BALL_Y  (QB_IN_Y + (QB_IN_H - UI_BALL_H) / 2)
+#define QB_BALL_Y  (QB_IN_Y + (QB_IN_H - UI_BALL_ICON_H) / 2)
 
 #define QB_BALL_X  (QB_IN_X + 6)
-#define QB_NAME_X  (QB_BALL_X + UI_BALL_W + 7)
+#define QB_NAME_X  (QB_BALL_X + UI_BALL_ICON_W + 7)
 
 // The button is the right-hand end of the strip. 80px is wide enough that a
 // fingertip cannot reach it by accident from the name, which matters because a
@@ -196,7 +196,9 @@ void UiQuickBallDraw(void)
 
     UiWindowFrame(UI_QB_TX, UI_QB_TY, UI_QB_TW, UI_QB_TH);
 
-    UiPokeball(QB_BALL_X, QB_BALL_Y);
+    // The ball's own art, not a generic one: this is the thing the player reads
+    // while cycling, and twelve identical Poke Balls told them nothing.
+    UiBallIcon(QB_BALL_X, QB_BALL_Y, item);
 
     name = GetItemName(item);
     nameW = UiText(QB_NAME_X, QB_TEXT_Y, name, UiThemeText(), UiThemeShadow());
