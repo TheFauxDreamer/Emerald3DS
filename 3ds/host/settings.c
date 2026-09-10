@@ -77,7 +77,13 @@
 // nothing, but it does mean the NEXT field to be added grows the struct and
 // must bring explicit padding back with it -- see the comment on the fields
 // themselves for what that padding is actually protecting against.
-#define SETTINGS_VERSION 9
+// v10 is the first version since v5 to GROW the struct: v9 took the last
+// padding byte, so there was nowhere left to claim. That makes it a SHORT-READ
+// migration (v3, v4, v7) rather than the same-size accept v6, v8 and v9 used --
+// a v9 file is exactly the leading 24 bytes of a v10 one, and the new field
+// takes its default. Note the older accepts below now compare against
+// SETTINGS_V9_SIZE rather than sizeof(s), which has moved.
+#define SETTINGS_VERSION 10
 
 // Fixed-size, with every byte spoken for, so the on-disk layout does not depend
 // on how the compiler chooses to align it.
@@ -124,6 +130,12 @@ struct CtrSettings {
     // straight back. Pad explicitly again when it does.
     uint8_t  lastBall;
     uint8_t  quickBallOff;
+    // v10, and the struct grows for it. 24 + 1 is 25, which the compiler would
+    // round up to 28 on its own and settings_write() would then put three bytes
+    // of uninitialised stack on the card -- so explicit padding comes back,
+    // exactly as v5 and v7 kept it. Stores OFF, so zero means "animate".
+    uint8_t  battleAnimOff;
+    uint8_t  pad[3];
 };
 
 // How much of the struct each older layout fills: everything up to the fields
@@ -133,6 +145,8 @@ struct CtrSettings {
 // v5 and v6 are the same shape as each other: 20 bytes, differing only in what
 // the last three mean.
 #define SETTINGS_V6_SIZE  (offsetof(struct CtrSettings, audioDbgMuted) + 3)
+// v7 through v9 are all 24 bytes: everything up to the field v10 appended.
+#define SETTINGS_V9_SIZE  offsetof(struct CtrSettings, battleAnimOff)
 
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
@@ -155,6 +169,8 @@ extern int  Ctr3dsGetPhoneCallsOff(void);
 extern void Ctr3dsApplyPhoneCallsOff(int on);
 extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
+extern int  Ctr3dsGetBattleAnimOff(void);
+extern void Ctr3dsApplyBattleAnimOff(int on);
 extern int  Ctr3dsGetLastBall(void);
 extern void Ctr3dsApplyLastBall(int item);
 
@@ -276,14 +292,13 @@ void CtrSettingsLoad(void)
         if (n != sizeof(s))
             return;
     }
-    else if (s.version == 8 || s.version == 7)
+    else if (s.version == 9 || s.version == 8 || s.version == 7)
     {
-        // 24 bytes, the same shape as v9. Each of the three gave meaning to
-        // bytes its predecessor wrote as zero padding, and every one of those
-        // fields stores the value zero already meant -- "calls happen",
-        // "nothing thrown yet", "the strip is shown" -- so all three load
-        // identically here with no conversion at all.
-        if (n != sizeof(s))
+        // All 24 bytes -- v8 and v9 only gave meaning to bytes v7 wrote as zero
+        // padding, and each of those fields stores the value zero already meant:
+        // "calls happen", "nothing thrown yet", "the strip is shown". So the
+        // three load identically, and v10 reads them as a short read.
+        if (n != SETTINGS_V9_SIZE)
             return;
     }
     else if (s.version == 6 || s.version == 5)
@@ -349,6 +364,10 @@ void CtrSettingsLoad(void)
     Ctr3dsApplyQuickBallOff(s.quickBallOff != 0);
     Ctr3dsApplyLastBall(s.lastBall);
 
+    // Zero for anything older than v10 -- the short read above left it that way
+    // -- which is "animate", the behaviour those files had.
+    Ctr3dsApplyBattleAnimOff(s.battleAnimOff != 0);
+
     // Zero for anything older than v6, which is "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
@@ -376,6 +395,7 @@ static void settings_write(void)
     s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
     s.phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
     s.quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
+    s.battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
     s.lastBall      = (uint8_t)Ctr3dsGetLastBall();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)

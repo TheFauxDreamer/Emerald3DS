@@ -721,7 +721,7 @@ static void DrawAnimatedLayer(void)
     // through the panel. UiOverlayActive() is TRUE for the strip precisely so
     // that DrawCell paints still icons into the tab instead.
     else if (!UiQuickBallActive() && sTab == UI_TAB_PARTY)
-        UiPartyRedrawIcons();
+        UiPartyRedrawAnimated();
 }
 
 // An animation step, and nothing else: a few rects put back from the snapshot
@@ -844,7 +844,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // a crash, so when in doubt a tick should ask for the full repaint.
     if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
     {
-        if (!UiPartyIconOnly())
+        if (!UiPartyAnimOnly())
         {
             sNeedsRepaint = 1;
         }

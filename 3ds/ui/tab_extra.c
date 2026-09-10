@@ -362,12 +362,13 @@ static void DrawPage2(void)
 // debug page do, and reuse page 1's grid and page 2's button columns. That is
 // the same cross-page constant sharing page 2 already does with SCL_X/SCL_W,
 // and it is what keeps three differently-populated pages aligned with each
-// other. Two rows so far; the grid holds three.
+// other. All three rows of the grid are now used.
 static void DrawPage3(void)
 {
     u8 label[40];
     int off = Ctr3dsGetPhoneCallsOff();
     int qb;
+    int anim;
 
     UiText(16, P1_ROW_Y(0), UiAscii(label, "PHONE CALLS", sizeof(label)),
            UiThemeText(), UiThemeShadow());
@@ -416,6 +417,24 @@ static void DrawPage3(void)
                !qb);
     DrawButton(WIDE_X(1), P1_BTN_Y(1), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                qb);
+
+    // The third and last row this grid holds. Bottom-screen animation during a
+    // battle -- the sliding HP bars and the cycling mon icons. Turning it off
+    // buys the top screen frames; the values shown stay correct either way,
+    // which is what the hint has to get across in the width available.
+    anim = Ctr3dsGetBattleAnimOff();
+
+    UiText(16, P1_ROW_Y(2), UiAscii(label, "BATTLE ANIM", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    UiText(P2_HINT_X, P1_ROW_Y(2),
+           UiAscii(label, "off = smoother battles", sizeof(label)),
+           UI_COL_DIM, UiThemeShadow());
+
+    DrawButton(WIDE_X(0), P1_BTN_Y(2), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+               !anim);
+    DrawButton(WIDE_X(1), P1_BTN_Y(2), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+               anim);
 }
 
 // PAGE 3: the debug menu.
@@ -774,6 +793,20 @@ static void TouchPage3(const CtrTouchState *t)
     if (UiHit(t, WIDE_X(1), P1_BTN_Y(1), WIDE_W, BTN_H))
     {
         Ctr3dsSetQuickBallOff(1);
+        UiMarkDirty();
+        return;
+    }
+
+    // Third row, same shape again. ON is the default, so it clears the flag.
+    if (UiHit(t, WIDE_X(0), P1_BTN_Y(2), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetBattleAnimOff(0);
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, WIDE_X(1), P1_BTN_Y(2), WIDE_W, BTN_H))
+    {
+        Ctr3dsSetBattleAnimOff(1);
         UiMarkDirty();
         return;
     }

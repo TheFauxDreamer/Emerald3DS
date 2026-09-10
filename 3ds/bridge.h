@@ -277,6 +277,19 @@ int  Ctr3dsGetLastBall(void);
 void Ctr3dsSetQuickBallOff(int on);
 int  Ctr3dsGetQuickBallOff(void);
 
+// Bottom-screen animation during a battle (EXTRA page 3).
+//
+// The PARTY grid's sliding HP bars and animated mon icons are the only things
+// on this screen that move on their own, and a battle is when they move most.
+// Off means: show the true values, animate nothing, and ask for no repaints
+// beyond the ones a real change already causes -- the top screen keeps its whole
+// frame budget. The display stays correct either way; only the motion goes.
+//
+// Stored NEGATED, as "off", so a zero settings byte means the animation runs --
+// the behaviour every file written before this option existed had.
+void Ctr3dsSetBattleAnimOff(int on);
+int  Ctr3dsGetBattleAnimOff(void);
+
 // Shiny test switch (EXTRA page 2).
 //
 // Arms the NEXT wild encounter to be shiny, then disarms itself. It exists

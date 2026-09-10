@@ -14,6 +14,7 @@
 #include "item.h"
 #include "data.h"
 #include "battle.h"             // struct DisableStruct, for the headers below
+#include "main.h"              // gMain.inBattle, for the battle-anim switch
 #include "battle_main.h"
 #include "party_menu.h"         // GetMonAilment
 #include "pokemon_summary_screen.h"
@@ -178,7 +179,7 @@ static u32   sShownSpecies[PARTY_SIZE];
 static u8    sIconFrame;
 static bool8 sTabVisible;
 static bool8 sIconStepped;   // the icon frame flipped this tick
-static bool8 sHpMoving;      // a bar slid this tick, so the whole cell changed
+static bool8 sHpMoving;      // a bar slid this tick
 
 // Adopt what the party actually holds, with no animation. Used on arrival at
 // the tab: a bar that slides on the frame the player switches to PARTY is
@@ -220,6 +221,24 @@ bool8 UiPartyTick(bool8 visible)
         sTabVisible = TRUE;
         SnapBars();
         // No repaint asked for: whatever made this tab visible already did.
+        return FALSE;
+    }
+
+    // The EXTRA tab's BATTLE ANIM switch, off.
+    //
+    // A battle is when this screen animates most and when the top screen can
+    // least afford it, so this hands the whole frame budget back: the bars show
+    // their true values instead of sliding, the icons stop cycling, and nothing
+    // here asks for a repaint. The display stays correct -- the shell's state
+    // hash still notices an HP change and repaints once for it, which is the
+    // repaint the player actually needs.
+    //
+    // Only in battle. Out in the field the animation is free: nothing is
+    // competing for the frame.
+    if (gMain.inBattle && Ctr3dsGetBattleAnimOff())
+    {
+        SnapBars();
+        sIconStepped = FALSE;
         return FALSE;
     }
 
@@ -267,7 +286,7 @@ bool8 UiPartyTick(bool8 visible)
             sShownHp[i] = (hp - sShownHp[i] <= step) ? hp : sShownHp[i] + step;
 
         moving = TRUE;
-        sHpMoving = TRUE;       // outside the icon rects, so this needs it all
+        sHpMoving = TRUE;
     }
 
     return moving;
@@ -276,9 +295,16 @@ bool8 UiPartyTick(bool8 visible)
 // Whether the only thing that changed this tick was the icon frame. The shell
 // uses it to choose between putting six 32x32 rects back and rebuilding the
 // whole 320x240, which measured 4.9 ms against a 5.7 ms frame budget.
-bool8 UiPartyIconOnly(void)
+bool8 UiPartyAnimOnly(void)
 {
-    return sIconStepped && !sHpMoving;
+    // The detail view's HP readout is not on the animated layer -- it is one
+    // mon on a different layout -- so a slide while it is open still needs the
+    // whole screen. That is the old behaviour, kept for the one case the grid's
+    // rects do not describe.
+    if (sDetailOpen && sHpMoving)
+        return FALSE;
+
+    return sIconStepped || sHpMoving;
 }
 
 #define ARROW_GAP 3
@@ -332,6 +358,11 @@ static void DrawMatchupArrows(int x, int y, int xLimit, struct Pokemon *mon)
 // moves up to the interior's top edge and the status badge drops onto the HP
 // bar's row, which is free because the bar starts well to its right.
 struct CellRows { int iconY, lvY, hpY, statusY; };
+
+// Defined below with DrawCell, but used above by UiPartyRedrawAnimated: the
+// animated layer draws the same HP block DrawCell would have baked.
+static int  HpLabelX(int cx, u32 maxHp);
+static void DrawCellHp(int index, int cx, int cy, const struct CellRows *rows);
 static const struct CellRows sRowsFull  = { 16, 26, 46, 48 };
 static const struct CellRows sRowsTight = {  8, 24, 40, 40 };
 
@@ -353,7 +384,7 @@ static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
 // and draw the current frame back. Everything else in the cell -- the window
 // frame, the name, the HP bar, the status badge -- is already correct in the
 // snapshot and is not touched.
-void UiPartyRedrawIcons(void)
+void UiPartyRedrawAnimated(void)
 {
     const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
 
@@ -387,6 +418,40 @@ void UiPartyRedrawIcons(void)
         UiRestoreRect(x, y, 32, 32);
         UiMonIconFrame(x, y, (u16)species,
                        GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+
+        // ...and the HP block, for EVERY slot, not just the ones sliding.
+        //
+        // Unconditional for the same reason the icons above are: this layer is
+        // what draws them at all. DrawCell leaves the block out of the snapshot,
+        // so a full repaint paints the cell and then arrives here -- skip a slot
+        // and its bar and number are simply absent. (Drawing only the moving
+        // ones was the first attempt and it erased the bars of every mon that
+        // was not taking damage.)
+        //
+        // Restoring first is still right even for a still slot: the snapshot
+        // holds the frame background here, never a stale value, so restore then
+        // draw always lands on a clean ground.
+        //
+        // Two rects rather than the whole cell, because the cell also holds the
+        // nickname, the level and the matchup arrows, none of which move: the
+        // 96x8 bar, and the label-and-number block on the Lv row.
+        //
+        // The number's rect starts at hpLabelX and never reaches left of it.
+        // That is deliberate -- the CAP tag sits at hpLabelX - 4 and is not ours
+        // to restore or redraw, so a wider rect would erase it.
+        {
+            int cx = (int)(i % COLS) * CELL_W;
+            int cy = CellTop((int)i);
+            u32 maxHp = GetMonData(mon, MON_DATA_MAX_HP);
+            int hpLabelX = HpLabelX(cx, maxHp);
+
+            UiRestoreRect(cx + CELL_TEXT_X, cy + rows->hpY,
+                          CELL_W - CELL_TEXT_X - 10, 8);
+            UiRestoreRect(hpLabelX, cy + rows->lvY,
+                          cx + CELL_W - 10 - hpLabelX + 1, UI_GLYPH_H + 1);
+
+            DrawCellHp((int)i, cx, cy, rows);
+        }
     }
 }
 
@@ -444,6 +509,37 @@ static void DrawTagStrip(void)
         x += DrawTag(x, "RND", UI_COL_ACCENT);
 }
 
+// Where the HP label starts. Measured off maxHp, which cannot move during a
+// slide, so the block's left edge is stable even as the animated number loses a
+// digit -- which is what makes one fixed restore rect correct for the whole
+// animation.
+static int HpLabelX(int cx, u32 maxHp)
+{
+    u8 label[8];
+
+    UiAscii(label, "HP", sizeof(label));
+    return cx + CELL_W - 10 - UiNumWidth((s32)maxHp) - UiTextWidth(label) - 2;
+}
+
+// The two pieces that move while a bar slides: the label-and-number block on the
+// Lv row, and the bar itself. Split out of DrawCell so the animated layer can
+// draw them over a restored snapshot rather than the shell repainting the
+// screen -- about 9,000 pixels a step instead of 76,800.
+static void DrawCellHp(int index, int cx, int cy, const struct CellRows *rows)
+{
+    struct Pokemon *mon = &gPlayerParty[index];
+    u32 maxHp = GetMonData(mon, MON_DATA_MAX_HP);
+    u32 hp = sShownHp[index];        // the animated value, not the raw one
+    int hpLabelX = HpLabelX(cx, maxHp);
+    u8 label[8];
+
+    UiAscii(label, "HP", sizeof(label));
+    UiText(hpLabelX, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
+    UiNumRight(cx + CELL_W - 10, cy + rows->lvY, (s32)hp,
+               UiThemeText(), UiThemeShadow());
+    UiHpBar(cx + CELL_TEXT_X, cy + rows->hpY, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
+}
+
 static void DrawCell(int index)
 {
     struct Pokemon *mon = &gPlayerParty[index];
@@ -451,7 +547,7 @@ static void DrawCell(int index)
     int cellH = CellH();
     int cx = (index % COLS) * CELL_W;
     int cy = CellTop(index);
-    u32 species, hp, maxHp, level;
+    u32 species, maxHp, level;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[8];
     int nameW, hpLabelX;
@@ -507,22 +603,22 @@ static void DrawCell(int index)
     UiText(cx + CELL_TEXT_X, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
     UiNum(cx + CELL_TEXT_X + 18, cy + rows->lvY, (s32)level, UiThemeText(), UiThemeShadow());
 
-    // The animated value, not the raw one: bar and number slide together.
-    hp    = sShownHp[index];
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
-    // Labelled, because beside "Lv 42" a bare number reads as a second stat
-    // rather than as health, and the bar below it says how full without ever
-    // saying of what.
-    //
-    // Placed off maxHp's width rather than the animated hp's. maxHp does not
-    // move; hp does, and a label measured from a sliding value would step
-    // sideways every time that value crossed a digit boundary.
-    UiAscii(label, "HP", sizeof(label));
-    hpLabelX = cx + CELL_W - 10 - UiNumWidth((s32)maxHp) - UiTextWidth(label) - 2;
+    // Needed here only to place the CAP tag; the label itself is drawn by
+    // DrawCellHp, measured the same way.
+    hpLabelX = HpLabelX(cx, maxHp);
 
-    UiText(hpLabelX, cy + rows->lvY, label, UI_COL_DIM, UiThemeShadow());
-    UiNumRight(cx + CELL_W - 10, cy + rows->lvY, (s32)hp, UiThemeText(), UiThemeShadow());
+    // The HP label, number and bar are deliberately NOT drawn here. They move
+    // while a bar slides, so they belong to the shell's animated layer, painted
+    // over a snapshot that must not already contain them -- exactly how the mon
+    // icon above is handled. Baking them would leave the old value behind when
+    // a step restores the rect.
+    //
+    // While an overlay is up it owns that layer, so bake a still version or the
+    // block is simply missing for as long as the panel is.
+    if (UiOverlayActive())
+        DrawCellHp(index, cx, cy, rows);
 
     // Which mon has actually hit the ceiling. The strip above says what the cap
     // is; this says who it is holding, which is the thing you want when one mon
@@ -540,7 +636,6 @@ static void DrawCell(int index)
                                                           : UI_COL_HP_MID,
                     UiThemeShadow());
 
-    UiHpBar(cx + CELL_TEXT_X, cy + rows->hpY, CELL_W - CELL_TEXT_X - 10, hp, maxHp);
 }
 
 // One move row: the game's own type icon, the name, and a highlight when this

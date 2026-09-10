@@ -112,14 +112,16 @@ void UiPartyTouch(const CtrTouchState *t);
 // than sliding for damage taken while it was hidden.
 bool8 UiPartyTick(bool8 visible);
 
-// TRUE when the only thing that moved was the mon icons' animation frame, so
-// the shell can put six 32x32 rects back instead of rebuilding the screen. A
-// sliding HP bar changes the rest of the cell and answers FALSE.
-bool8 UiPartyIconOnly(void);
+// TRUE when everything that moved lives on the animated layer -- the mon icons'
+// frame and/or a sliding HP bar -- so the shell can put a handful of rects back
+// instead of rebuilding all 76,800 pixels. FALSE only for the detail view,
+// whose HP readout is not on that layer.
+bool8 UiPartyAnimOnly(void);
 
-// Redraw just the icons over the restored snapshot. Only valid immediately
-// after UiPartyIconOnly() returned TRUE.
-void UiPartyRedrawIcons(void);
+// Redraw the moving pieces over the restored snapshot: the icons, and the HP
+// bar and number of any slot still sliding. Only valid immediately after
+// UiPartyAnimOnly() returned TRUE.
+void UiPartyRedrawAnimated(void);
 
 // Cheap identity of what the PARTY tab is showing: the live level cap behind
 // the cheat tags, plus the selected mon's EV total while the IV/EV panel is up.

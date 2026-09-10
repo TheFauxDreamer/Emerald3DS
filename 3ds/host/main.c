@@ -311,6 +311,7 @@ static uint8_t sRandomizer;
 static uint8_t sBagSort;     // CTR_BAGSORT_*
 static uint8_t sPhoneCallsOff;
 static uint8_t sQuickBallOff;
+static uint8_t sBattleAnimOff;
 
 // The last ball thrown, as a raw item id. Not range-checked here on purpose:
 // the valid range is a game constant this side may not include, so the check
@@ -434,6 +435,26 @@ void Ctr3dsSetQuickBallOff(int on)
 int Ctr3dsGetQuickBallOff(void)
 {
     return sQuickBallOff;
+}
+
+void Ctr3dsApplyBattleAnimOff(int on)
+{
+    sBattleAnimOff = on ? 1 : 0;
+}
+
+void Ctr3dsSetBattleAnimOff(int on)
+{
+    int before = sBattleAnimOff;
+
+    Ctr3dsApplyBattleAnimOff(on);
+
+    if (sBattleAnimOff != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetBattleAnimOff(void)
+{
+    return sBattleAnimOff;
 }
 
 // Unlike every other setter here this one is called from BATTLE LOGIC rather
