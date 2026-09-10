@@ -585,7 +585,11 @@ function writeS32(ptr, value) {
 }
 
 function affineTerms(xScale, yScale, rotation) {
-  const angle = rotation * Math.PI * 2 / 256;
+  // 65536 = one full turn, not 256: the BIOS takes a u16 and uses alpha >> 8 to
+  // index a 256-entry table. Callers pass multiples of 256, so the old divisor
+  // made every angle a whole number of turns -- identity matrix, no rotation
+  // ever, and no visible garbage to give it away. See rp2350/bios.c.
+  const angle = rotation * Math.PI * 2 / 65536;
   const sin = Math.sin(angle) * 256;
   const cos = Math.cos(angle) * 256;
   return {

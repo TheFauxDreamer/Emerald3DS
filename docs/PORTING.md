@@ -278,6 +278,20 @@ Collected gotchas, most of which cost hours.
   is how an `ObjAffineSet` stride bug survived — byte boundaries treated as
   halfwords, producing garbage matrices and stack corruption for every animated
   affine sprite.
+- **Diffing against `web/app.js` only finds ports that were *unfaithful*.** A
+  second `ObjAffineSet` bug lived in both for far longer, because `bios.c` copied
+  it exactly: the rotation angle was divided by 256 when a full turn is 0x10000
+  (GBATEK's "8bit = 360 degrees" means the BIOS indexes a 256-entry table with
+  `alpha >> 8`, not that the parameter is 0..255). Callers only ever pass
+  multiples of 256 — `sprite.c` does `(… + (frameCmd->rotation << 8)) & ~0xFF`,
+  `pokedex_cry_screen.c` writes `needle->rotation * 256` — so every angle came
+  out an exact whole number of turns: **sin 0, cos 1, a clean identity matrix
+  every frame.** No garbage, no crash, nothing to notice; affine *scaling* is a
+  separate term and kept working, so the Game Freak intro letters looked correct.
+  The visible cost was that no affine sprite ever rotated — the Poké Ball slid
+  sideways during a catch instead of rolling, and the cry meter needle never
+  moved. When the reference and the port agree and the result is still wrong,
+  check the reference against the hardware doc, not against the port.
 - **Some intro frames legitimately retain the previous frame's pixels** via
   `winout` with no backdrop bit. A single-snapshot diff renders those black and
   reports a false failure. Use old-vs-new A/B there.

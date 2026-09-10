@@ -136,7 +136,25 @@ void RLUnCompVram(const u32 *src, void *dest) { RlUnComp(src, dest); }
 static void AffineTerms(s16 xScale, s16 yScale, u16 rotation,
                         s32 *pa, s32 *pb, s32 *pc, s32 *pd)
 {
-    float angle = rotation * (float)(2.0 * M_PI) / 256.0f;
+    // 65536 = one full turn, NOT 256.
+    //
+    // GBATEK describes ObjAffineSet's angle as "8bit = 360 degrees", which reads
+    // like the parameter is 0..255. It is not: the field is a u16 and the BIOS
+    // indexes its 256-entry sin/cos table with alpha >> 8, so a full turn is
+    // 0x10000. web/app.js got this wrong and this file faithfully copied it.
+    //
+    // The failure mode is why it survived so long. Callers always pass multiples
+    // of 256 -- sprite.c does `(rotation + (frameCmd->rotation << 8)) & ~0xFF`,
+    // and pokedex_cry_screen.c literally writes `needle->rotation * 256` -- so
+    // dividing by 256 made every angle an exact whole number of turns. sin came
+    // out 0 and cos 1 EVERY time: a clean identity matrix, never garbage. Affine
+    // scaling still worked (that is a separate term), so the Game Freak intro
+    // letters looked right and nothing pointed at rotation.
+    //
+    // Visible effect: no affine sprite has ever rotated. The Poke Ball slid
+    // sideways during a catch instead of rolling, and the Pokedex cry meter
+    // needle never moved.
+    float angle = rotation * (float)(2.0 * M_PI) / 65536.0f;
     float s = sinf(angle) * 256.0f;
     float c = cosf(angle) * 256.0f;
     *pa = (s32)(c * xScale / 256.0f);
