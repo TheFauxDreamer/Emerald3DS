@@ -132,6 +132,12 @@ u32 UiPartyStateKey(void);
 void UiBagDraw(void);
 void UiBagTouch(const CtrTouchState *t);
 
+// TRUE while the target picker is up: the one BAG view that shows party HP and
+// status, so the shell folds the party into its repaint hash for it. The flag
+// survives a tab switch (the modal-flag bug in the cheatsheet), so ask only
+// while BAG is the tab on screen.
+bool8 UiBagPickerOpen(void);
+
 void UiMapDraw(void);
 void UiMapTouch(const CtrTouchState *t);
 

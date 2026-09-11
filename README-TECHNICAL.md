@@ -267,6 +267,15 @@ in that file is written for whoever is developing the port.
 `svcOutputDebugString` survives either way, so an emulator still shows the same
 lines.
 
+No log line and no settings write touches the card from inside a frame any more.
+Both are queued for an I/O thread (`3ds/host/io_thread.c`) that sits one priority
+below the main thread, so it only runs while the main thread waits. That matters
+more than it sounds: the profiler closes a rarely-run stage's window on its first
+sample after a quiet spell, which is exactly the repaint a battle overlay just
+caused, so its card write used to land on the one frame already over budget.
+Boot, before the thread starts, is still written synchronously, and a crash can
+lose the last frame or so of lines.
+
 ## What a bottom-screen repaint costs
 
 Worth knowing before touching `3ds/ui/`, because every plausible answer to this
@@ -285,6 +294,28 @@ A frame has 5.7 ms spare and a full repaint costs 5.6 ms of it, 87% of that
 being the paint itself rather than the upload. It fits or misses depending on
 where the rasteriser's 7 to 10 ms lands that frame, which is why the symptom was
 a wobbly 55fps rather than a clean halving.
+
+That table was measured with everything on core 0. **The rasteriser now runs on
+a second core** (core 2 on a New 3DS, core 1 otherwise; `3ds/host/video.c`), and
+the frame is ordered so the two overlap:
+
+```
+game frame + VBlankIntr               core 0
+snapshot video state, kick render     core 0   ~99 KB copy
+  bottom update + paint, audio        core 0   | rasteriser on core 2 or 1
+collect render, upload, VBlank wait   core 0
+```
+
+A repaint shorter than the rasteriser now costs the frame nothing, which is what
+fixed the battle stutter: the quick-throw strip repaints the screen at least
+twice a turn and the shiny notice on open, dismiss and expiry. The rasteriser
+reads a private copy of the video state rather than `gGbaMem`, so nothing the
+paint or a touch handler does can tear it. The profiler's `ppu.wait` says how
+long core 0 sat waiting for it, and `frame` plus the "missed VBlank" line say
+whether a frame was dropped at all. `make -C 3ds CTR_PPU_THREAD=0` builds the old
+single-core path for comparison, and the port falls back to it by itself if no
+second core is available. Everything below still holds for that path, and the
+upload cost holds for both.
 
 Two things that cost a lot of time to learn:
 
@@ -318,7 +349,7 @@ directory.
 | `3ds/build_objs.sh` | Game sources to `libpokeemerald.a` (ARM11). |
 | `3ds/Makefile`, `3ds/emerald3ds.rsf` | Host sources, link, and makerom packaging. |
 | `3ds/meta/` | Icon, banner art and banner audio for the CIA. |
-| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c`, `audio.c`, `save.c`, `settings.c`, `log.c`. |
+| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c` (including the rasteriser's worker thread), `audio.c`, `save.c`, `settings.c`, `log.c`, `io_thread.c` (the background SD writer). |
 | `3ds/ui/` | **The second screen**, game side: `bottom_screen.c` is the shell, one `tab_*.c` per tab, `view_encounters.c` and `matchup.c` are overlays, `ui_draw.c` and `ui_text.c` are the primitives. |
 | `rp2350/` | The RP2350 port this is built on. `ppu.c` and the `m4a_*.c` pair are shared. |
 | `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald sources and assets. |

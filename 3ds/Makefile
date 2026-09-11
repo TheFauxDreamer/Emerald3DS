@@ -52,7 +52,7 @@ APP_BANNER_WAV  := meta/banner.wav
 # takes the GBA region pointers at runtime via ppu_set_memory(). That is what
 # lets the same byte-exact rasteriser serve both this port and the RP2350 one.
 HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c \
-             host/log.c
+             host/log.c host/io_thread.c
 OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 
 # Must match 3ds/build_objs.sh's ARCH exactly, or the game archive and libctru
@@ -66,6 +66,13 @@ ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-reloca
 # 3ds/build_objs.sh) to bring them back for the next bring-up problem.
 # See 3ds/host/trace.h.
 CTR_BOOT_DIAG ?= 0
+
+# Run the rasteriser on a second CPU core (core 2 on a New 3DS, core 1
+# otherwise), in parallel with the bottom-screen paint. `make -C 3ds
+# CTR_PPU_THREAD=0` builds the old single-core path for an A/B comparison; the
+# port also falls back to it on its own if the thread cannot be created. See
+# 3ds/host/video.c. Host-only, so 3ds/build_objs.sh needs no matching flag.
+CTR_PPU_THREAD ?= 1
 
 # Regenerated on every make, so the boot log can never report a stale build.
 # The git description is what identifies WHICH build; the timestamp is what
@@ -83,6 +90,7 @@ BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --alwa
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections -MMD -MP \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
+            -DCTR_PPU_THREAD=$(CTR_PPU_THREAD) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map

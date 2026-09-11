@@ -185,6 +185,9 @@ AccessControlInfo:
    - news:u
    - nwm::UDS
    - ptm:u
+   # osSetSpeedupEnable, and libctru's re-apply of the New 3DS clock after
+   # every return from the HOME menu, both go through ptm:sysm.
+   - ptm:sysm
    - pxi:dev
    - soc:U
    - ssl:C

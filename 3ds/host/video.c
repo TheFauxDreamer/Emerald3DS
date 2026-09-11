@@ -102,10 +102,239 @@ static uint16_t *sTopStage;   // TOP_TEX_W x CTR_GBA_HEIGHT, linear
 static uint16_t *sBotStage;   // BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear
 
 // PPU output and its per-pixel layer scratch (see ppu.h).
+//
+// Owned by the rasteriser: in threaded mode the worker writes both and the
+// main thread reads sGbaFrame only after collecting the render. They carry
+// state across frames (window-masked pixels keep last frame's colour, and the
+// blend reads last frame's layer byte), which is why they are one pair and are
+// never double-buffered.
 static uint16_t sGbaFrame[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 
 static int sReady;
+
+// ---- the rasteriser on a second core -----------------------------------------
+//
+// This port used to do everything on core 0: the game, the rasteriser (~9 ms a
+// frame at 268 MHz) and the bottom screen's software paint (~4.9 ms per full
+// repaint), one after the other. A frame is 16.7 ms, so a repaint landing on a
+// frame fitted or missed depending on what the rasteriser had to draw. In a
+// battle, where the quick-throw strip and the shiny notice each force a
+// repaint, it missed. That was the stutter.
+//
+// Nothing about the rasteriser needs core 0. It reads four memory regions and
+// writes a picture, so it now runs on another core while the main thread
+// paints the bottom screen and feeds the audio:
+//
+//   New 3DS: core 2, the second application core. CanAccessCore2 in
+//            3ds/emerald3ds.rsf is what permits it.
+//   Old 3DS: core 1, the system core, after APT_SetAppCpuTimeLimit() lends the
+//            game a share of it. One application thread is allowed there.
+//   Neither: inline on core 0, exactly as before. Also what CTR_PPU_THREAD=0
+//            builds, for comparison.
+//
+// SAME FRAME, NOT PIPELINED. The render is started once the game's frame is
+// finished and collected before this frame's upload, so the picture on screen
+// is the one the game just produced and input latency does not change. What
+// overlaps is the rasteriser against the bottom paint and the audio.
+//
+// THE ISOLATION RULE, which is the whole of the thread-safety argument: the
+// worker reads only the snapshot below and writes only sGbaFrame and sGbaLayer.
+// It never reads gGbaMem, so nothing the main thread does while it runs can
+// tear the picture. A touch handler refreshing a battle healthbox, say, simply
+// shows up in the next frame. The worker also never calls
+// CtrProfile, CtrLogSlow or CtrLog: their tables are unlocked and main-thread
+// only, so it hands its timing back in sPpuTicks instead.
+//
+// rp2350/ppu.c itself is untouched. It already treats the regions as a static
+// snapshot for the duration of a render, which is exactly what this gives it.
+
+#ifndef CTR_PPU_THREAD
+#define CTR_PPU_THREAD 1
+#endif
+
+// What the rasteriser reads, at the extents ppu.h documents. Every register it
+// reads, BLDY at 0x54 the last of them, is in the first 0x60 bytes.
+#define SNAP_REG_SIZE   0x60
+#define SNAP_PAL_SIZE   0x400
+#define SNAP_VRAM_SIZE  0x18000
+#define SNAP_OAM_SIZE   0x400
+
+static uint8_t sSnapReg[SNAP_REG_SIZE]   __attribute__((aligned(32)));
+static uint8_t sSnapPal[SNAP_PAL_SIZE]   __attribute__((aligned(32)));
+static uint8_t sSnapVram[SNAP_VRAM_SIZE] __attribute__((aligned(32)));
+static uint8_t sSnapOam[SNAP_OAM_SIZE]   __attribute__((aligned(32)));
+
+// The live regions in gGbaMem: the copy's source when threaded, the
+// rasteriser's own input when inline.
+static const void *sLiveReg, *sLivePal, *sLiveVram, *sLiveOam;
+
+// 0x18 is the highest priority userland may ask for. On its own core the worker
+// competes with none of this port's threads, so this only matters against the
+// system's threads on core 1.
+#define PPU_THREAD_PRIO     0x18
+#define PPU_STACK_SIZE      (16 * 1024)   // the rasteriser's state is all static
+#define PPU_SYSCORE_PERCENT 80
+#define PPU_START_WAIT_MS   250           // see ppu_try_core
+
+static Thread     sPpuThread;
+static int        sPpuCore = -1;          // the worker's core, or -1 for inline
+static LightEvent sPpuKick;               // main -> worker: a snapshot is ready
+static LightEvent sPpuDone;               // worker -> main: the picture is ready
+static volatile int sPpuQuit;
+static volatile unsigned long long sPpuTicks;   // the worker's last render time
+static int        sPpuPending;            // main thread only: a render is out
+
+// The start-up handshake, one per core tried and never reused. See ppu_try_core.
+enum { PPU_START_PENDING, PPU_START_RUNNING, PPU_START_ABANDONED };
+static volatile int sPpuStart[2];
+
+static void ppu_worker(void *arg)
+{
+    volatile int *start = (volatile int *)arg;
+
+    // Claim the start before anything else. If the main thread got there first
+    // it has already given up on this thread and is rasterising without it, so
+    // leave without touching a single shared thing.
+    if (!__sync_bool_compare_and_swap(start, PPU_START_PENDING, PPU_START_RUNNING))
+        return;
+
+    for (;;) {
+        unsigned long long t;
+
+        LightEvent_Wait(&sPpuKick);
+        if (sPpuQuit)
+            break;
+
+        // Pairs with the barrier before the kick: the snapshot the main thread
+        // just wrote is what this render reads.
+        __dmb();
+
+        t = svcGetSystemTick();
+        ppu_render_rgb565(sGbaFrame, sGbaLayer);
+        sPpuTicks = svcGetSystemTick() - t;
+
+        // The picture has to be visible to the main thread before it is told.
+        __dmb();
+        LightEvent_Signal(&sPpuDone);
+    }
+}
+
+// Start a worker on `core` and make sure it actually RUNS there.
+//
+// A thread that was created but is never scheduled is the one failure here that
+// would not fail politely: the main thread would wait for its first picture
+// forever, on the first frame, with nothing in the log. Creation succeeding is
+// not proof, so the worker has to check in first.
+//
+// Exactly one side decides, through a compare-and-swap on this attempt's own
+// flag: the worker by starting, or the main thread by giving up after
+// PPU_START_WAIT_MS. A worker that starts after being given up on sees that and
+// returns without touching the events, so it can never swallow a kick meant for
+// a worker on another core. Its handle is abandoned rather than joined, because
+// joining a thread that never runs would hang right here instead.
+static int ppu_try_core(int core, volatile int *start)
+{
+    Thread t;
+
+    *start = PPU_START_PENDING;
+    t = threadCreate(ppu_worker, (void *)start, PPU_STACK_SIZE,
+                     PPU_THREAD_PRIO, core, false);
+    if (t == NULL)
+        return 0;
+
+    for (int ms = 0; ms < PPU_START_WAIT_MS && *start == PPU_START_PENDING; ms++)
+        svcSleepThread(1000000LL);
+
+    if (__sync_bool_compare_and_swap(start, PPU_START_PENDING, PPU_START_ABANDONED)) {
+        CtrLog("emerald3ds: rasteriser thread on core %d was created but "
+               "never ran\n", core);
+        return 0;
+    }
+
+    sPpuThread = t;
+    sPpuCore = core;
+    return 1;
+}
+
+// Which core the rasteriser gets, most capable first. Every outcome is logged,
+// because "rasterising on core 2" and "fell back to core 0" otherwise leave
+// the same symptoms and no trace.
+static void ppu_thread_start(void)
+{
+    bool isNew3ds = false;
+    Result rc = 0;
+
+    LightEvent_Init(&sPpuKick, RESET_ONESHOT);
+    LightEvent_Init(&sPpuDone, RESET_ONESHOT);
+    sPpuQuit = 0;
+
+    // Core 2 only where it exists. An emulator in Old 3DS mode has two cores,
+    // and asking it for a third is asking for trouble rather than an error.
+    APT_CheckNew3DS(&isNew3ds);
+    if (isNew3ds && ppu_try_core(2, &sPpuStart[0])) {
+        CtrLog("emerald3ds: rasteriser on core 2\n");
+        return;
+    }
+
+    rc = APT_SetAppCpuTimeLimit(PPU_SYSCORE_PERCENT);
+    if (R_SUCCEEDED(rc) && ppu_try_core(1, &sPpuStart[1])) {
+        CtrLog("emerald3ds: rasteriser on core 1 (%d%% of the system core)\n",
+               PPU_SYSCORE_PERCENT);
+        return;
+    }
+
+    CtrLog("emerald3ds: rasteriser inline on core 0 "
+           "(no second core; time limit rc=0x%08lX)\n", (unsigned long)rc);
+}
+
+static void ppu_thread_stop(void)
+{
+    if (sPpuCore < 0)
+        return;
+
+    if (sPpuPending) {
+        LightEvent_Wait(&sPpuDone);
+        sPpuPending = 0;
+    }
+
+    sPpuQuit = 1;
+    LightEvent_Signal(&sPpuKick);
+    threadJoin(sPpuThread, U64_MAX);
+    threadFree(sPpuThread);
+    sPpuThread = NULL;
+    sPpuCore = -1;
+}
+
+// Copy the video state out of gGbaMem and start rasterising it.
+//
+// Called from Rp2350PresentFrame() (3ds/host/main.c) on the frame that will be
+// presented, after the game's frame and VBlankIntr() have finished writing it
+// and BEFORE the bottom screen paints, which is what lets the two overlap. The
+// copy is about 99 KB, a fraction of a millisecond, and is what makes the
+// isolation rule above hold without any rule about what the paint may touch.
+//
+// A no-op when inline: CtrVideoPresent() then rasterises gGbaMem directly.
+void CtrVideoRenderBegin(void)
+{
+    unsigned long long t;
+
+    if (!sReady || sPpuCore < 0 || sPpuPending)
+        return;
+
+    t = CtrTicksNow();
+
+    memcpy(sSnapReg,  sLiveReg,  SNAP_REG_SIZE);
+    memcpy(sSnapPal,  sLivePal,  SNAP_PAL_SIZE);
+    memcpy(sSnapVram, sLiveVram, SNAP_VRAM_SIZE);
+    memcpy(sSnapOam,  sLiveOam,  SNAP_OAM_SIZE);
+
+    CtrProfile("ppu.snap", t);
+
+    sPpuPending = 1;
+    __dmb();
+    LightEvent_Signal(&sPpuKick);
+}
 
 // Nearest only where nearest is actually correct.
 //
@@ -195,11 +424,26 @@ int CtrVideoInit(void)
     memset(sTopStage, 0, TOP_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
     memset(sBotStage, 0, BOT_TEX_W * CTR_BOTTOM_HEIGHT * sizeof(uint16_t));
 
-    // Point the PPU at the game's memory regions. Must happen after
-    // Ctr3dsInitGbaMemory().
+    // Point the PPU at its input. Must happen after Ctr3dsInitGbaMemory().
+    //
+    // Once, and for good: the snapshot when a second core rasterises, the
+    // game's own memory when the main thread does. See CtrVideoRenderBegin.
     const void *reg, *pal, *vram, *oam;
     CtrGetGbaRegions(&reg, &pal, &vram, &oam);
-    ppu_set_memory(reg, pal, vram, oam);
+    sLiveReg = reg;
+    sLivePal = pal;
+    sLiveVram = vram;
+    sLiveOam = oam;
+
+    if (CTR_PPU_THREAD)
+        ppu_thread_start();
+    else
+        CtrLog("emerald3ds: rasteriser inline on core 0 (CTR_PPU_THREAD=0)\n");
+
+    if (sPpuCore >= 0)
+        ppu_set_memory(sSnapReg, sSnapPal, sSnapVram, sSnapOam);
+    else
+        ppu_set_memory(reg, pal, vram, oam);
 #if CTR_BOOT_DIAG
     sRegBase = (const uint8_t *)reg;
 #endif
@@ -218,6 +462,9 @@ void CtrVideoExit(void)
 {
     if (!sReady)
         return;
+
+    // First: the worker may still be drawing into sGbaFrame.
+    ppu_thread_stop();
 
     linearFree(sTopStage);
     linearFree(sBotStage);
@@ -376,6 +623,45 @@ static void upload_bottom_slice(void)
     sBotRow += rows;
 }
 
+// Dropped frames, counted rather than inferred.
+//
+// Every stage above says what something costs; none of them says whether the
+// frame made it. `framebegin` only hints at it, and a missed VBlank inflates
+// that stage's mean rather than showing up as a miss. So this times the
+// displayed frame itself, sync point to sync point: `frame` reports the mean and
+// worst period, and every 600 frames a line says how many were late, which is
+// the number a stutter fix has to bring to zero.
+//
+// Late means over 25 ms, a frame and a half: a 33 ms period is one VBlank
+// missed, and a period that is merely jittery is not. A trip to the HOME menu
+// counts as one late frame, which is fine.
+#define FRAME_LATE_TICKS    ((unsigned long long)SYSCLOCK_ARM11 / 40)
+#define FRAME_REPORT_EVERY  600
+
+static void note_frame_period(void)
+{
+    static unsigned long long sLast;
+    static unsigned sFrames, sLate;
+
+    unsigned long long now = CtrTicksNow();
+
+    if (sLast != 0) {
+        CtrProfile("frame", sLast);
+        if (now - sLast > FRAME_LATE_TICKS)
+            sLate++;
+    }
+    sLast = now;
+
+    if (++sFrames >= FRAME_REPORT_EVERY) {
+        // Silence means none late, so a healthy log stays short.
+        if (sLate > 0)
+            CtrLog("emerald3ds: %u of the last %u frames missed VBlank\n",
+                   sLate, sFrames);
+        sFrames = 0;
+        sLate = 0;
+    }
+}
+
 void CtrVideoPresent(void)
 {
     // Timed in pieces, because "presenting is slow" is not a finding. The top
@@ -389,9 +675,31 @@ void CtrVideoPresent(void)
     if (!sReady)
         return;
 
-    // Rasterise the frame the game just finished writing.
+    // The frame the game just finished writing: collect it from the worker, or
+    // rasterise it here when there is no worker.
     t0 = CtrTimeNowMs();
-    {
+    if (sPpuCore >= 0) {
+        unsigned long long tw;
+
+        // Defensive only. Rp2350PresentFrame() starts the render on exactly
+        // the frames it presents, so this finds one in flight every time.
+        if (!sPpuPending)
+            CtrVideoRenderBegin();
+
+        // ppu.wait is how long the main thread was left with nothing to do.
+        // Near zero means the paint and audio took as long as the rasteriser;
+        // close to `ppu` means the second core bought nearly all of it back.
+        tw = CtrTicksNow();
+        LightEvent_Wait(&sPpuDone);
+        __dmb();
+        sPpuPending = 0;
+        CtrProfile("ppu.wait", tw);
+
+        // The worker's own measurement, reported from here because CtrProfile
+        // is main-thread only. Same stage name as the inline path, so the two
+        // builds' logs compare directly.
+        CtrProfile("ppu", CtrTicksNow() - sPpuTicks);
+    } else {
         unsigned long long tp = CtrTicksNow();
         ppu_render_rgb565(sGbaFrame, sGbaLayer);
         CtrProfile("ppu", tp);
@@ -455,6 +763,7 @@ void CtrVideoPresent(void)
         unsigned long long tb = CtrTicksNow();
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         CtrProfile("framebegin", tb);
+        note_frame_period();
     }
 
 #if CTR_BOOT_DIAG

@@ -24,26 +24,41 @@ file, drawn with rectangles and blits at hand-measured coordinates.
 ## 2. Frame path
 
 ```
-Rp2350PresentFrame()                 3ds/host/main.c:551   (end of every game frame)
+Rp2350PresentFrame()                 3ds/host/main.c       (end of every game frame)
   if (sSubFrame == 0)                                      once per DISPLAYED frame
-     hidScanInput()
-     sample_touch(&touch)            3ds/host/main.c:85
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:436
+     hidScanInput(), set_speed()
+  presenting = (sSubFrame + 1 >= sSpeed)                   decided once
+  if (presenting)
+     CtrVideoRenderBegin()           3ds/host/video.c     snapshot video state,
+                                                           start rasteriser on core 2/1
+  if (sSubFrame == 0)
+     sample_touch(&touch)            3ds/host/main.c:84
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:775   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
                                        UiStateHash()      poll for change
                                        Redraw() if needed -> paints sFb
-  if (++sSubFrame >= sSpeed)
+  if (presenting)
      CtrVideoPresent()               3ds/host/video.c
+        wait for the rasteriser                           `ppu.wait`
         upload(top)                                       WHOLE, every frame
         if (idle && CtrBottomIsDirty())
            snapshot_bottom(); CtrBottomClearDirty()        320x240 -> stage
         if (mid-run)
            upload_bottom_slice()                           48 ROWS, 5 frames
      CtrSaveFlush(0)                 3ds/host/save.c      the save image
-     CtrSettingsFlush(0)             3ds/host/settings.c  settings.bin
+     CtrSettingsFlush(0)             3ds/host/settings.c  hands settings.bin to
+                                                           the I/O thread
 ```
+
+The rasteriser runs on a second core (core 2 on a New 3DS, core 1 otherwise)
+while `CtrBottomUpdate` paints, which is why a full repaint no longer costs a
+frame. It reads a private copy of VRAM, palette, OAM and the registers taken
+just before the paint, so **anything a touch handler changes in video memory
+shows up one frame later**, never half-drawn. If no second core can be had, or
+the build is `CTR_PPU_THREAD=0`, it rasterises inline inside
+`CtrVideoPresent()`, which is the old single-core path.
 
 The bottom screen is uploaded **a slice per frame, not whole**. The top screen
 has to hold 60fps and the bottom is allowed to arrive late, so a repaint reaches
@@ -51,10 +66,11 @@ the panel five frames after it was painted. See `BOT_CHUNK_ROWS` in
 [video.c](../host/video.c) for why 48 rows, and section 7 for what it cost
 before.
 
-The two flushes are at the bottom for a reason: this is the only point in the
-frame where blocking on the SD card is affordable, because `CtrVideoPresent()`
-has already waited for VBlank. Nothing on the touch path may write to the card
-itself -- see section 13.
+The two flushes are at the bottom for a reason: this is after the frame has been
+presented. The save flush still writes there. The settings flush only hands a
+snapshot to the I/O thread (`3ds/host/io_thread.c`), which does the card write
+while the main thread waits, and the log does the same. Nothing on the touch
+path may write to the card itself -- see section 13.
 
 Key consequences:
 
@@ -63,7 +79,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:675](host/main.c#L675),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:818](host/main.c#L818),
   after audio init and before `AgbMain()`.
 
 ---
@@ -101,7 +117,8 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
-every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload),
+every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
+and the rasteriser's worker thread that runs alongside the paint),
 [host/settings.c](host/settings.c) (persistence).
 
 ---
@@ -127,7 +144,7 @@ An overlay is drawn over whichever tab just painted, and claims its rect of
 touches before any tab sees them. There are two, and they are worth reading as a
 pair because they answer the same question differently:
 
-- The **shiny notice** ([bottom_screen.c:135](ui/bottom_screen.c#L135)) is the
+- The **shiny notice** ([bottom_screen.c:136](ui/bottom_screen.c#L136)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -194,10 +211,10 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 
 1. Add to `enum UiTab` in [ui_shell.h:19](ui/ui_shell.h#L19), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:57](ui/bottom_screen.c#L57):
+3. Add a row to `sTabs[]` at [bottom_screen.c:58](ui/bottom_screen.c#L58):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:396](ui/bottom_screen.c#L396))
-   and to the one in `CtrBottomUpdate()` ([:476](ui/bottom_screen.c#L476)).
+4. Add a `case` to the `switch` in `Redraw()` ([:681](ui/bottom_screen.c#L681))
+   and to the one in `CtrBottomUpdate()` ([:847](ui/bottom_screen.c#L847)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
    section 12.**
@@ -221,7 +238,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:427](ui/bottom_screen.c#L427)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:806](ui/bottom_screen.c#L806)),
 in order:
 
 - An **active overlay** claims its whole rect first. The shiny panel takes every
@@ -341,7 +358,7 @@ Do not conflate them. Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:271](ui/bottom_screen.c#L271)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:519](ui/bottom_screen.c#L519)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -356,7 +373,13 @@ in Options, being handed the Pokedex.
 | `top[3]` | `UiMatchupOpponentKey()` |
 | `top[4]` | the active tab's own key, dispatched by `sTab` |
 | `top[5]` | whether the shiny notice is up |
-| then | 6 party mons x 5 fields (species, HP, max HP, level, status) |
+| `top[6]` | `UiQuickBallStateKey()`, zero while the quick-throw strip is down |
+| then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
+
+The party fields used to be folded on every tab, so in a battle each hit
+repainted BAG, MAP, DEX and EXTRA as well, for screens that show none of it.
+MAP's fly row is the one other thing that depends on the party, and
+`UiMapStateKey` folds exactly that itself.
 
 ### Rules for writing a state key
 
@@ -468,6 +491,31 @@ Then the missing stages were added and the answer fell out:
 **A frame has 5.7 ms spare and a full repaint costs 5.6 ms of it**, 87% of that
 being `paint`. It fits or misses depending on how the PPU's 7-10 ms lands that
 frame, which is why the symptom was 55fps rather than 30.
+
+### And then the rasteriser moved to another core
+
+Everything above was measured with the rasteriser and the paint taking turns on
+core 0. The rasteriser now runs on a second core, started just before
+`CtrBottomUpdate` and collected after it (section 2), so the two overlap. **A
+repaint shorter than the rasteriser now costs the frame nothing.** That is what
+finally fixed the battle stutter, where the quick-throw strip repaints at least
+twice a turn and the shiny notice repaints on open, dismiss and expiry.
+
+Read these instead of `framebegin` alone:
+
+| Stage | What it says |
+|---|---|
+| `ppu` | the rasteriser's own time, measured on its core |
+| `ppu.wait` | how long core 0 then sat waiting for it. Close to `ppu` on a frame with no repaint, near zero when the paint took as long as the rasteriser |
+| `ppu.snap` | the ~99 KB copy of the video state the rasteriser reads |
+| `frame` | the displayed frame's period, sync point to sync point. The worst over 20 ms means a dropped frame |
+
+Every 600 frames the log also says how many frames missed VBlank, if any did.
+
+The rules below still stand, for two reasons. Every repaint is still an upload.
+And the single-core path is still live: the port falls back to it when no second
+core is available, and `make -C 3ds CTR_PPU_THREAD=0` builds it deliberately, so
+the formula above still describes that build exactly.
 
 ### So the screen does not repaint to animate
 
@@ -660,7 +708,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:84
+static bool8 SaveDataLive(void);   // bottom_screen.c:85
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -740,9 +788,12 @@ through -- the d-pad bag, the touch BAG tab and the strip all arrive as
 
 Two things about that are worth copying. It calls a setter from **battle logic**
 rather than from `CtrBottomUpdate()`, which is safe only because
-`CtrSettingsMarkDirty()` queues and `CtrSettingsFlush()` does the writing from
-the frame loop -- see section 13, and the header of `host/settings.c` for what
-happened when a setter wrote synchronously. And the value crosses the seam as a
+`CtrSettingsMarkDirty()` queues and `CtrSettingsFlush()` hands the write to the
+I/O thread from the frame loop -- see section 13, and the header of
+`host/settings.c` for what happened when a setter wrote synchronously. This one
+is also why the write had to leave the frame altogether: a new kind of ball
+thrown is a settings change, so its write used to land about a second after the
+throw, in the middle of the catch animation. And the value crosses the seam as a
 raw number that the host does **not** range-check, because the valid range is
 `FIRST_BALL..LAST_BALL` in a game header the host may not include; the check
 lives in `UiQuickBallItem()` where those constants are. That is the exception to
@@ -839,19 +890,21 @@ value without writing the file back out during the load that produced it.
    int  Ctr3dsGetFoo(void)    { return sFoo; }
    ```
 
-   `CtrSettingsMarkDirty()` queues; it does not write. The write happens in
-   `CtrSettingsFlush()`, called from `Rp2350PresentFrame()` beside
-   `CtrSaveFlush()`. Setters run from `CtrBottomUpdate()`, i.e. from the middle
-   of a game frame, and the write is seven-plus blocking FS round trips however
-   few bytes it carries -- on a console the player sees that. Never call the
-   writer from a setter.
+   `CtrSettingsMarkDirty()` queues; it does not write. `CtrSettingsFlush()`,
+   called from `Rp2350PresentFrame()` beside `CtrSaveFlush()`, waits for a
+   second of quiet, snapshots every setting, and hands the snapshot to the I/O
+   thread (`3ds/host/io_thread.c`), which does the card write while the main
+   thread waits for VBlank. Only the closing path writes synchronously. Setters
+   run from `CtrBottomUpdate()`, i.e. from the middle of a game frame, and a
+   card write is a blocking FS round trip however few bytes it carries -- on a
+   console the player sees that. Never call the writer from a setter.
 
    Range-check inside `Apply`, never trust the caller: a corrupt settings byte
    must leave the default standing.
 3. **`3ds/host/settings.c`**: append a `uint8_t` to `struct CtrSettings`, bump
    `SETTINGS_VERSION`, add a `SETTINGS_Vn_SIZE` short-read migration, add the
    `extern` and the load/save lines. Keep the struct's every byte spoken for
-   with explicit `pad`, or `settings_write()` writes uninitialised stack to the
+   with explicit `pad`, or `settings_put()` writes uninitialised stack to the
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
    `UiExtraStateKey()` ([:544](ui/tab_extra.c#L544)) in a bit range nothing else
@@ -881,7 +934,7 @@ from v5 on has grown by claiming bytes its predecessor wrote as explicit zero
 padding, which is why v6, v8 and v9 needed no migration at all -- same size, and
 each new field means at zero exactly what that file already meant. That padding
 existed to stop the compiler rounding the struct up to its 4-byte alignment and
-`settings_write()` then putting uninitialised stack on the card. There is none
+`settings_put()` then putting uninitialised stack on the card. There is none
 left, so **the next field added grows the struct to 25 and must bring explicit
 padding back with it.**
 
@@ -889,7 +942,7 @@ padding back with it.**
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:322](host/main.c#L322)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:329](host/main.c#L329)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
@@ -982,7 +1035,10 @@ appears.
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
-| The frame rate drops while something on the bottom screen is animating | Expected, and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.copy/flush/xfer` the host's three upload stages, and `frameend` is the VBlank wait, so a `frameend` near zero means the frame had no slack left. |
+| The frame rate drops while something on the bottom screen is animating | First check the boot log says `rasteriser on core 2` (or core 1). On the single-core path it is expected and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). With the rasteriser on its own core a repaint should cost nothing, so read `ppu.wait` and `frame`. Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.copy/flush/xfer` the host's three upload stages, and `framebegin` is the VBlank wait, so a `framebegin` near zero means the frame had no slack left. |
+| Profiler numbers that make no sense, or a crash inside `CtrProfile` | Called from a thread other than the main one. `CtrProfile` and `CtrLogSlow` keep unlocked static tables. The rasteriser's worker and the I/O thread measure themselves and let the main thread report. |
+| The top screen shows garbage or a torn picture for a frame | Something made the rasteriser read live memory while the game or the paint was writing it. In threaded mode `ppu_set_memory()` must point at the snapshot `CtrVideoRenderBegin()` fills, never at `gGbaMem` ([host/video.c](host/video.c)). |
+| The last lines before a crash are missing from `log.txt` | Expected now, within about a frame: lines are queued for the I/O thread rather than flushed on the spot. Boot is still written synchronously. |
 | A symptom with no cause anywhere in the source | A stale host object. `make -C 3ds clean` and rebuild before reading any more code. |
 
 ---
