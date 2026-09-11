@@ -526,6 +526,11 @@ void UiBagDraw(void)
     DrawDetails();
 }
 
+bool8 UiBagPickerOpen(void)
+{
+    return sView == VIEW_PICK_MON;
+}
+
 // --------------------------------------------------------------- input -----
 
 static void UseTapped(void)

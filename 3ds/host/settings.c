@@ -15,6 +15,10 @@
 // game stop for it. So the setters mark dirty and the frame loop flushes,
 // exactly as save.c does, and a burst of taps costs one write.
 //
+// Since then the flush itself moved off the frame as well: the frame loop only
+// hands the snapshot to the I/O thread (3ds/host/io_thread.c), which does the
+// card write while the main thread waits for VBlank. See CtrSettingsFlush.
+//
 // It does NOT borrow save.c's write-to-temp-then-rename discipline, and that is
 // the second thing measurement changed. That dance exists so an interrupted
 // write cannot leave a half-written file, which is worth six FS round trips for
@@ -32,6 +36,7 @@
 #include <sys/stat.h>
 
 #include "../bridge.h"
+#include "io_thread.h"
 #include "trace.h"                    // CtrLog
 
 #define SETTINGS_DIR  "sdmc:/3ds/emerald3ds"
@@ -106,7 +111,7 @@ struct CtrSettings {
     uint8_t  ffAudio;                  // CTR_FFAUDIO_*
     // v6, in the three bytes v5 reserved as explicit padding. They exist at all
     // because without them the compiler would round the struct to its 4-byte
-    // alignment itself and settings_write() would write uninitialised stack to
+    // alignment itself and settings_put() would write uninitialised stack to
     // the card; v5 said they were somewhere for v6 to go, and this is v6.
     //
     // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
@@ -124,14 +129,14 @@ struct CtrSettings {
     //
     // These were the last of the explicit padding, which existed because
     // without it the compiler would round the struct up to its 4-byte alignment
-    // itself and settings_write() would write uninitialised stack to the card.
+    // itself and settings_put() would write uninitialised stack to the card.
     // 22 + 2 is 24, which is already aligned, so nothing implicit is added --
     // but a v10 field would take the struct to 25 and that hazard comes
     // straight back. Pad explicitly again when it does.
     uint8_t  lastBall;
     uint8_t  quickBallOff;
     // v10, and the struct grows for it. 24 + 1 is 25, which the compiler would
-    // round up to 28 on its own and settings_write() would then put three bytes
+    // round up to 28 on its own and settings_put() would then put three bytes
     // of uninitialised stack on the card -- so explicit padding comes back,
     // exactly as v5 and v7 kept it. Stores OFF, so zero means "animate".
     uint8_t  battleAnimOff;
@@ -373,33 +378,44 @@ void CtrSettingsLoad(void)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 }
 
-static void settings_write(void)
+// The snapshot of every setting, taken on the main thread because that is where
+// all of the values live. Nothing here touches the card.
+static void settings_build(struct CtrSettings *s)
 {
-    struct CtrSettings s;
-    unsigned int t0;
-
     // Zeroed first so the padding above is written as zero rather than as
     // whatever the stack held.
-    memset(&s, 0, sizeof(s));
+    memset(s, 0, sizeof(*s));
 
-    s.magic    = SETTINGS_MAGIC;
-    s.version  = SETTINGS_VERSION;
-    s.topScale = (uint8_t)Ctr3dsGetTopScale();
-    s.showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
+    s->magic    = SETTINGS_MAGIC;
+    s->version  = SETTINGS_VERSION;
+    s->topScale = (uint8_t)Ctr3dsGetTopScale();
+    s->showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
-        s.turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
-    s.expAll     = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
-    s.levelCap   = (uint8_t)Ctr3dsGetLevelCap();
-    s.randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
-    s.bagSort    = (uint8_t)Ctr3dsGetBagSort();
-    s.ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
-    s.phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
-    s.quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
-    s.battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
-    s.lastBall      = (uint8_t)Ctr3dsGetLastBall();
+        s->turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
+    s->expAll     = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
+    s->levelCap   = (uint8_t)Ctr3dsGetLevelCap();
+    s->randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
+    s->bagSort    = (uint8_t)Ctr3dsGetBagSort();
+    s->ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
+    s->phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
+    s->quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
+    s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
+    s->lastBall      = (uint8_t)Ctr3dsGetLastBall();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
-        s.audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
+        s->audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
+}
+
+// The card half. Runs on the I/O thread in play and on the main thread only when
+// there is no I/O thread or the game is closing, always under sFileLock.
+//
+// It reports a slow write with a plain CtrLog rather than CtrLogSlow, because
+// CtrLogSlow's table is main-thread only (3ds/host/log.c). settings_open()'s own
+// CtrLogSlow calls are safe here: they run only on its first call, which is
+// CtrSettingsLoad() at boot.
+static void settings_put(const struct CtrSettings *s)
+{
+    unsigned int t0, elapsed;
 
     FILE *f = settings_open();
     if (f == NULL)
@@ -412,22 +428,69 @@ static void settings_write(void)
     // older file is simply extended and a longer newer one could only come from
     // a downgrade, where the version check rejects it before the tail matters.
     if (fseek(f, 0, SEEK_SET) == 0) {
-        size_t n = fwrite(&s, 1, sizeof(s), f);
+        size_t n = fwrite(s, 1, sizeof(*s), f);
 
         // fflush, not fclose: the handle outlives this call. This is the same
         // thing log.c relies on to get a line onto the card before a crash.
-        if (n != sizeof(s) || fflush(f) != 0)
+        if (n != sizeof(*s) || fflush(f) != 0)
             CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
-                   (unsigned)n, (unsigned)sizeof(s));
+                   (unsigned)n, (unsigned)sizeof(*s));
     }
 
-    CtrLogSlow("settings.write", t0);
+    elapsed = CtrTimeNowMs() - t0;
+    if (elapsed >= 50)
+        CtrLog("emerald3ds: slow settings.write %u ms\n", elapsed);
+}
+
+// The write waiting for the I/O thread, and the two locks around it.
+//
+// Two locks, because they protect against different things. sPendingLock is
+// only ever held for a struct copy, so the main thread can hand over a write
+// without ever waiting on the card. sFileLock is held across the whole write,
+// taking the pending struct included, which is what keeps the order right: a
+// forced write on the closing path waits for a background write already in
+// flight, then writes the newest settings, and an older struct can never land
+// on top of a newer one.
+//
+// Both are initialised statically to 1, which is what LightLock_Init() writes.
+static LightLock          sPendingLock = 1;
+static LightLock          sFileLock = 1;
+static struct CtrSettings sPending;
+static int                sHavePending;
+
+void CtrSettingsDrain(void)
+{
+    struct CtrSettings s;
+    int have;
+
+    LightLock_Lock(&sFileLock);
+
+    LightLock_Lock(&sPendingLock);
+    have = sHavePending;
+    if (have) {
+        s = sPending;
+        sHavePending = 0;
+    }
+    LightLock_Unlock(&sPendingLock);
+
+    if (have)
+        settings_put(&s);
+
+    LightLock_Unlock(&sFileLock);
 }
 
 // Write the queued change out, if the player has stopped changing things.
 //
-// Called from Rp2350PresentFrame() beside CtrSaveFlush(), which is the frame's
-// designated point for touching the card, and with force from the close path.
+// Called from Rp2350PresentFrame() beside CtrSaveFlush(), and with force from
+// the close path.
+//
+// In play this no longer writes anything itself. It snapshots the settings and
+// hands them to the I/O thread (3ds/host/io_thread.c), because this call sits
+// in the frame loop and a settings write lands at the worst moment there is:
+// the last ball thrown is a setting, so it fell about a second after the throw,
+// in the middle of the catch animation. The close path is the exception, since
+// the process may be gone before a background write happens, so a forced flush
+// writes here and now.
 //
 // sDirty is cleared whether or not the write succeeded, which is the one place
 // this deliberately differs from save.c. Losing a save is worth retrying every
@@ -437,15 +500,29 @@ static void settings_write(void)
 void CtrSettingsFlush(int force)
 {
     unsigned int t0;
+    int queued = 0;
 
-    if (!sDirty)
-        return;
-    if (!force && osGetTime() - sLastChangeMs < CTR_SETTINGS_QUIET_MS)
-        return;
+    if (sDirty && (force || osGetTime() - sLastChangeMs >= CTR_SETTINGS_QUIET_MS)) {
+        struct CtrSettings s;
 
-    sDirty = 0;
+        sDirty = 0;
+        settings_build(&s);
 
-    t0 = CtrTimeNowMs();
-    settings_write();
-    CtrLogSlow("settings", t0);
+        LightLock_Lock(&sPendingLock);
+        sPending = s;
+        sHavePending = 1;
+        LightLock_Unlock(&sPendingLock);
+
+        queued = 1;
+    }
+
+    // Checked even when nothing new was queued: a forced flush must also land a
+    // write the I/O thread was handed and has not reached yet.
+    if (force || !CtrIoRunning()) {
+        t0 = CtrTimeNowMs();
+        CtrSettingsDrain();
+        CtrLogSlow("settings", t0);
+    } else if (queued) {
+        CtrIoWake();
+    }
 }

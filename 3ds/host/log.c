@@ -14,9 +14,16 @@
 //
 // Three properties matter more than anything else here:
 //
-//   Flushed per line. The interesting log is the one written immediately
-//   before a crash, and a data abort takes the process out with no chance to
-//   close the file. Buffered output would lose precisely the line worth having.
+//   Flushed per line, but not on the frame. The interesting log is the one
+//   written immediately before a crash, and a data abort takes the process
+//   out with no chance to close the file, so every line is still flushed on
+//   its own. What changed is WHO flushes it. A flush is a blocking round trip
+//   to the FS process, and the profiler's lines landed on exactly the frames
+//   that were already over budget (see 3ds/host/io_thread.c). So once the I/O
+//   thread is up, a line is queued in RAM and that thread writes it, a frame
+//   later at most. The price is that a crash can lose the last frame's worth
+//   of lines. Boot, before the thread exists, is still written synchronously,
+//   and a boot hang is where the log matters most.
 //
 //   Truncated per boot. A log that answers "what happened this run" is worth
 //   reading; an append-only one that has to be dated and scrolled is not.
@@ -45,9 +52,11 @@
 #include <3ds.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "../bridge.h"
+#include "io_thread.h"
 #include "trace.h"
 
 #if CTR_DEBUG_MENU
@@ -59,9 +68,25 @@
 // could matter to an SD card if a caller ever logs from a frame loop.
 #define LOG_MAX_LINES 512
 
+// Lines waiting for the I/O thread. Linear rather than a ring: each pass takes
+// the whole of it, so there is never a tail to wrap. 8 KB is thirty-odd of the
+// longest lines, far more than one frame produces even when every profiler
+// stage reports at once.
+#define LOG_QUEUE_SIZE 8192
+
 static FILE *sFile;
 static int   sOpened;
 static int   sLines;
+
+// Guards the queue and the line count, and is never held across an FS call.
+// Initialised statically to 1, which is what LightLock_Init() writes, because
+// the first line is logged before anything could call it.
+static LightLock sQueueLock = 1;
+static char      sQueue[LOG_QUEUE_SIZE];
+static int       sQueueLen;
+static unsigned  sDropped;
+
+static const char kTruncated[] = "emerald3ds: log truncated (line limit reached)\n";
 
 static void log_open(void)
 {
@@ -77,21 +102,13 @@ static void log_open(void)
     sFile = fopen(LOG_PATH, "w");
 }
 
-static void log_to_file(const char *buf, int n)
+// The only two callers are the main thread while the I/O thread is not running,
+// and the I/O thread's pass, so the file is never written from two threads.
+static void log_write(const char *buf, int n)
 {
     log_open();
     if (sFile == NULL)
         return;
-
-    if (sLines >= LOG_MAX_LINES)
-        return;
-
-    sLines++;
-    if (sLines == LOG_MAX_LINES) {
-        fputs("emerald3ds: log truncated (line limit reached)\n", sFile);
-        fflush(sFile);
-        return;
-    }
 
     fwrite(buf, 1, (size_t)n, sFile);
     // The line matters most when the next thing that happens is a data abort,
@@ -99,9 +116,78 @@ static void log_to_file(const char *buf, int n)
     fflush(sFile);
 }
 
+static void log_to_file(const char *buf, int n)
+{
+    // The line limit is decided here, at the moment of logging, whichever path
+    // the line then takes. Counting at write time instead would let a burst
+    // queued faster than it drains overshoot the cap.
+    LightLock_Lock(&sQueueLock);
+
+    if (sLines >= LOG_MAX_LINES) {
+        LightLock_Unlock(&sQueueLock);
+        return;
+    }
+
+    sLines++;
+    if (sLines == LOG_MAX_LINES) {
+        buf = kTruncated;
+        n = (int)sizeof(kTruncated) - 1;
+    }
+
+    if (!CtrIoRunning()) {
+        LightLock_Unlock(&sQueueLock);
+        log_write(buf, n);
+        return;
+    }
+
+    // Dropped rather than waited for: a caller on the frame must never block on
+    // the card, which is the whole reason for the queue. The count is written
+    // out with the next pass, so a gap is never silent.
+    if (sQueueLen + n > LOG_QUEUE_SIZE) {
+        sDropped++;
+    } else {
+        memcpy(sQueue + sQueueLen, buf, (size_t)n);
+        sQueueLen += n;
+    }
+
+    LightLock_Unlock(&sQueueLock);
+    CtrIoWake();
+}
+
+void CtrLogDrain(void)
+{
+    // Static rather than on the writer's stack. Only the I/O thread calls this
+    // while it runs, and the exit path calls it only after joining it.
+    static char chunk[LOG_QUEUE_SIZE];
+    int n;
+    unsigned dropped;
+
+    LightLock_Lock(&sQueueLock);
+    n = sQueueLen;
+    memcpy(chunk, sQueue, (size_t)n);
+    sQueueLen = 0;
+    dropped = sDropped;
+    sDropped = 0;
+    LightLock_Unlock(&sQueueLock);
+
+    if (n == 0 && dropped == 0)
+        return;
+
+    log_open();
+    if (sFile == NULL)
+        return;
+
+    if (n > 0)
+        fwrite(chunk, 1, (size_t)n, sFile);
+    if (dropped > 0)
+        fprintf(sFile, "emerald3ds: %u log lines dropped (queue full)\n", dropped);
+    fflush(sFile);
+}
+
 #else   // !CTR_DEBUG_MENU: shipping build, nothing reaches the card
 
 static void log_to_file(const char *buf, int n) { (void)buf; (void)n; }
+void CtrLogDrain(void) {}
 
 #endif
 
@@ -171,7 +257,11 @@ unsigned int CtrTimeNowMs(void)
 // frame: one line per stage per ten seconds keeps the report inside
 // LOG_MAX_LINES while still averaging over enough samples to resolve a stage
 // far below the clock's own granularity.
-#define PROFILE_STAGES  16
+//
+// MAIN THREAD ONLY, and so is CtrLogSlow below: both keep unlocked static
+// tables. The rasteriser worker and the I/O thread measure their own time and
+// leave the reporting to the main thread (see ppu.wait in 3ds/host/video.c).
+#define PROFILE_STAGES  24
 #define PROFILE_PERIOD  600
 // ...or this long, whichever comes first. 600 samples is ten seconds for a
 // stage that runs every frame and TWO MINUTES for one that runs five times a

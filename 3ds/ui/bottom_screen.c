@@ -221,6 +221,12 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 // frame rate is set by HOW OFTEN this screen repaints and barely at all by what
 // it draws.
 //
+// That was measured with the rasteriser on the same core as this paint. It now
+// runs on a second core while this paints (3ds/host/video.c), so a repaint
+// shorter than the rasteriser costs the frame nothing. The formula still holds
+// for the single-core fallback, and every repaint is still an upload, so the
+// budget below stands.
+//
 // Every animation asks for its repaint through the same sNeedsRepaint flag, so
 // two of them coalesce into one repaint only when they land on the SAME frames.
 // On separate periods a shiny panel over an animating party grid would ask
@@ -576,21 +582,35 @@ static u32 UiStateHash(void)
         hash *= 16777619u;
     }
 
-    for (u32 i = 0; i < PARTY_SIZE; i++)
+    // The party, but only where it is drawn: the PARTY tab, and BAG's target
+    // picker. This used to be folded in on every tab, so in a battle each hit,
+    // status change and level-up repainted BAG, MAP, DEX and EXTRA as well: a
+    // full repaint apiece for a screen that shows none of it. It is also 30
+    // GetMonData calls a frame, six of them decrypting, that the other tabs no
+    // longer pay.
+    //
+    // Nothing else goes stale for it. MAP's fly row does depend on the party,
+    // and UiMapStateKey folds exactly that itself. Switching to PARTY or
+    // opening the picker repaints on its own, and UiPartyTick adopts the real
+    // HP on the frame the tab comes back.
+    if (sTab == UI_TAB_PARTY || (sTab == UI_TAB_BAG && UiBagPickerOpen()))
     {
-        struct Pokemon *mon = &gPlayerParty[i];
-        u32 fields[5];
-
-        fields[0] = GetMonData(mon, MON_DATA_SPECIES);
-        fields[1] = GetMonData(mon, MON_DATA_HP);
-        fields[2] = GetMonData(mon, MON_DATA_MAX_HP);
-        fields[3] = GetMonData(mon, MON_DATA_LEVEL);
-        fields[4] = GetMonData(mon, MON_DATA_STATUS);
-
-        for (u32 f = 0; f < ARRAY_COUNT(fields); f++)
+        for (u32 i = 0; i < PARTY_SIZE; i++)
         {
-            hash ^= fields[f];
-            hash *= 16777619u;
+            struct Pokemon *mon = &gPlayerParty[i];
+            u32 fields[5];
+
+            fields[0] = GetMonData(mon, MON_DATA_SPECIES);
+            fields[1] = GetMonData(mon, MON_DATA_HP);
+            fields[2] = GetMonData(mon, MON_DATA_MAX_HP);
+            fields[3] = GetMonData(mon, MON_DATA_LEVEL);
+            fields[4] = GetMonData(mon, MON_DATA_STATUS);
+
+            for (u32 f = 0; f < ARRAY_COUNT(fields); f++)
+            {
+                hash ^= fields[f];
+                hash *= 16777619u;
+            }
         }
     }
 

@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "../bridge.h"
+#include "io_thread.h"
 #include "trace.h"
 
 // Normally passed by 3ds/Makefile. Defaulted here so this file still builds
@@ -28,6 +29,7 @@
 
 int  CtrVideoInit(void);
 void CtrVideoExit(void);
+void CtrVideoRenderBegin(void);
 void CtrVideoPresent(void);
 void CtrAudioInit(void);
 void CtrAudioExit(void);
@@ -678,6 +680,8 @@ void Rp2350PresentFrame(void)
     // Holding the value across the group is also what makes fast-forward feel
     // right: one real press becomes one JOY_NEW followed by held frames.
     static uint16_t keys;
+    int presenting;
+
     if (sSubFrame == 0) {
         hidScanInput();
         keys = sample_keys();
@@ -685,7 +689,27 @@ void Rp2350PresentFrame(void)
         // Turbo is resolved here, with the rest of the input, because this is
         // the only point in the group where the button state is fresh.
         set_speed(effective_speed(hidKeysHeld()));
+    }
 
+    // Whether this game frame is the one that gets displayed. Decided ONCE, after
+    // set_speed() (which can restart the group) and before anything else, and
+    // used for both the render kick and the present below. Computing it twice
+    // would let a touch on the EXTRA tab's speed buttons, in between, start a
+    // render that nothing then waits for.
+    presenting = (sSubFrame + 1 >= sSpeed);
+
+    // Start rasterising this frame on the other core NOW, before the bottom
+    // screen paints, so the two run at the same time. The rasteriser takes a
+    // copy of the video state first, so nothing the touch handlers below do can
+    // tear it; see CtrVideoRenderBegin in 3ds/host/video.c.
+    //
+    // This is what the battle stutter was: a full bottom repaint and the
+    // rasteriser used to run one after the other on core 0, and together they
+    // did not fit in a frame.
+    if (presenting)
+        CtrVideoRenderBegin();
+
+    if (sSubFrame == 0) {
         CtrTouchState touch;
         sample_touch(&touch);
         CtrBottomUpdate(&touch);
@@ -700,22 +724,24 @@ void Rp2350PresentFrame(void)
     if (Ctr3dsIsAudioFrame())
         CtrAudioFrame();
 
-    if (++sSubFrame >= sSpeed) {
+    if (presenting) {
         sSubFrame = 0;
 
-        // Rasterise + present. C3D_FrameEnd blocks on VBlank, which is what
-        // paces the game to 60 Hz. Skipping this call is the whole mechanism:
-        // it drops the software rasterise (the expensive part) and the pacing
-        // together, so the intermediate frames cost only game logic.
+        // Collect the render, upload, present. C3D_FrameBegin blocks on VBlank,
+        // which is what paces the game to 60 Hz. Skipping this call is the whole
+        // fast-forward mechanism: it drops the rasterise (the expensive part)
+        // and the pacing together, so the intermediate frames cost only game
+        // logic.
         CtrVideoPresent();
 
         // Writes the save image out once the burst of sector writes has stopped,
-        // and the settings once the player has stopped changing them. Both here
-        // rather than at the point of change: this is after CtrVideoPresent()
-        // has already blocked on VBlank, so the frame's remaining budget is the
-        // cheapest place in it to sit in a blocking FS call.
+        // and hands the settings to the I/O thread once the player has stopped
+        // changing them. Both here rather than at the point of change, after
+        // CtrVideoPresent() has presented the frame.
         CtrSaveFlush(0);
         CtrSettingsFlush(0);
+    } else {
+        sSubFrame++;
     }
 }
 
@@ -754,13 +780,41 @@ int main(int argc, char **argv)
         return 1;
     }
     CtrTrace("emerald3ds: video ready\n");
+
     // New 3DS: 804 MHz + L2 cache; no-op on Old 3DS. Done after the graphics
     // services are up, since it goes through PTM.
+    //
+    // Through ptm:sysm specifically, which 3ds/emerald3ds.rsf has to grant, and
+    // libctru goes back through the same service to re-apply the boost every
+    // time the game returns from the HOME menu. osSetSpeedupEnable() reports
+    // nothing either way, so ask for the service once and log the answer: a
+    // failure here is the difference between the boost surviving the HOME menu
+    // and the game quietly dropping to 268 MHz the first time it is suspended.
+    // The exheader's CpuSpeed still sets 804 MHz at launch regardless.
+    {
+        bool isNew3ds = false;
+        Result rc = ptmSysmInit();
+
+        APT_CheckNew3DS(&isNew3ds);
+        CtrLog("emerald3ds: %s, ptm:sysm %s (rc=0x%08lX)\n",
+               isNew3ds ? "New 3DS" : "Old 3DS",
+               R_SUCCEEDED(rc) ? "available" : "UNAVAILABLE",
+               (unsigned long)rc);
+
+        if (R_SUCCEEDED(rc))
+            ptmSysmExit();
+    }
     osSetSpeedupEnable(true);
 
     // Says for itself whether audio came up, and why not when it did not: a
     // missing sdmc:/3ds/dspfirm.cdc is the usual answer and is not fatal.
     CtrAudioInit();
+
+    // After CtrAudioInit(), which settles the main thread's priority: the
+    // writer is created one step below it. Everything logged up to here went
+    // to the card synchronously, which is what a boot log wants.
+    CtrIoInit();
+
     CtrBottomInit();
     CtrTrace("emerald3ds: bottom screen ready\n");
 
@@ -783,6 +837,9 @@ int main(int argc, char **argv)
     // line of defence for writes that arrived outside a save.
     CtrSaveFlush(1);
     CtrSettingsFlush(1);
+    // Before the other exits, so their own lines are written synchronously
+    // rather than queued for a writer that is about to stop.
+    CtrIoExit();
     CtrAudioExit();
     CtrVideoExit();
     return 0;

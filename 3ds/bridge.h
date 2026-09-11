@@ -88,9 +88,9 @@ void     CtrSaveCommit(void);
 // Rp2350PresentFrame() call; this sets how many of those happen per DISPLAYED
 // frame, so 2 means the game advances twice as fast.
 //
-// It works because CtrVideoPresent() is both the software rasteriser and the
-// VBlank wait: skipping it on the intermediate frames drops the cost and the
-// 60 Hz pacing together. Clamped to CTR_SPEED_MIN..CTR_SPEED_MAX.
+// It works because the software rasterise and the VBlank wait both happen only
+// on the frame that is presented: skipping the intermediate frames drops the
+// cost and the 60 Hz pacing together. Clamped to CTR_SPEED_MIN..CTR_SPEED_MAX.
 //
 // This is a request, not a guarantee. If the console cannot keep up the game
 // simply runs slower than asked, which is a slowdown, not a fault.
@@ -441,6 +441,11 @@ void CtrLogSlow(const char *stage, unsigned int startMs);
 //
 // `unsigned long long` crosses the seam safely, like the `unsigned int` above:
 // bridge.h is included by game-side code that must never see <3ds.h>.
+//
+// CtrProfile and CtrLogSlow are MAIN THREAD ONLY: both keep unlocked static
+// tables. The rasteriser's worker thread (3ds/host/video.c) and the I/O thread
+// (3ds/host/io_thread.c) measure themselves and leave the reporting to the main
+// thread. CtrTicksNow is safe from any thread.
 unsigned long long CtrTicksNow(void);
 void CtrProfile(const char *stage, unsigned long long startTicks);
 
