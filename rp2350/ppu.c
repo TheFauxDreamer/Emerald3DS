@@ -119,12 +119,16 @@ static uint16_t bevb5[32], bevb6[64];
 // web/app.js, and the reference was wrong the same way -- both were fixed
 // together so ppu_validate.sh stays byte-exact.
 //
-// It is not a corner case. The battle intro drives WIN0H per scanline through
-// gScanlineEffectRegBuffers and BattleIntroSlide1 writes -data[2] into a u16, so
-// data[2]=100 becomes 0xFF9C: X1=255, X2=156. Hardware draws nothing on that
-// row; wrapping filled x 0..155 with WIN0's "all BGs visible" mask instead, and
-// WINOUT is restrictive during the intro -- which is how battle terrain ended up
-// drawn over the message and controls boxes.
+// Code that builds window bounds from task data can produce an inverted range --
+// battle_anim_dark.c and battle_anim_effects_2.c both assemble gBattle_WIN0H
+// that way -- and wrapping drew those rows where hardware draws nothing.
+//
+// This was once credited with the battle-intro bug where the entry grass drew
+// over the textbox. It was not that. The intro's per-scanline writes look like
+// window values but go to REG_BG3HOFS (sIntroScanlineParams16Bit in
+// src/battle_main.c), so they are BG3 scroll offsets, and the grass bug was the
+// equal-priority BG draw order in renderFrame below. This clamp is still right;
+// it just fixed something else.
 //
 // This one is vertical (win0v/win1v); winrowFill below is the horizontal half.
 static bool inWindowRange(int value, uint16_t range) {
@@ -1001,8 +1005,23 @@ static void renderFrame(void) {
         } else {
             backdropLine(y);
             PSLOT(2);
+            // Painter's order: back (priority 3) to front (0), last write wins.
+            //
+            // Within one priority the BGs are walked HIGHEST number first. On
+            // the GBA a tie goes to the lower-numbered BG, so it has to be the
+            // one painted last. g_bg[] is filled in ascending BG number, hence
+            // the descending index.
+            //
+            // This used to walk ascending, which put BG1 in front of BG0 at
+            // equal priority -- the battle's own layout (both are priority 0 in
+            // gBattleBgTemplates), so the intro's entry grass on BG1 slid across
+            // the textbox on BG0 instead of behind it. web/app.js had the same
+            // order and was fixed with this, so ppu_validate.sh stays exact.
+            //
+            // Sprites stay AFTER the BG loop: a sprite sits in front of every BG
+            // of its own priority.
             for (int priority = 3; priority >= 0; priority--) {
-                for (int i = 0; i < g_nbg; i++) {
+                for (int i = g_nbg - 1; i >= 0; i--) {
                     if (g_bg[i].priority == priority) {
                         if (g_bg[i].affine) { affineBgLine(&g_bg[i], y); PSLOT(4); }
                         else { textBgLine(&g_bg[i], y); PSLOT(3); }
