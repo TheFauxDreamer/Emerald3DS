@@ -292,6 +292,20 @@ Collected gotchas, most of which cost hours.
   sideways during a catch instead of rolling, and the cry meter needle never
   moved. When the reference and the port agree and the result is still wrong,
   check the reference against the hardware doc, not against the port.
+- **Two more came out of `web/app.js` the same way.** Window bounds wrapped
+  (`>= start || < end`) where GBATEK clamps an inverted range to the screen
+  edge. And within one BG priority both drew BGs in *ascending* order with last
+  write winning, which puts BG1 in front of BG0 — the GBA gives a tie to the
+  lower-numbered BG. Battles put BG0 (textbox) and BG1 (entry grass) both at
+  priority 0, so the intro's grass slid across the textbox instead of behind
+  it. Only four `BgTemplate` sets in the game share a priority: battle, contest,
+  contest results and the slot machine.
+  That makes three reference-inherited defects, and none of them could ever show
+  up in `ppu_validate.sh`, because it measures agreement with the reference.
+  **Byte-exact is not correct.** The first fix for the grass went to the window
+  clamp, because the intro's per-scanline writes look like window values; they
+  actually target `REG_BG3HOFS` (`sIntroScanlineParams16Bit`). Check which
+  register a scanline effect drives before reasoning about its values.
 - **Some intro frames legitimately retain the previous frame's pixels** via
   `winout` with no backdrop bit. A single-snapshot diff renders those black and
   reports a false failure. Use old-vs-new A/B there.

@@ -422,9 +422,13 @@ function renderBgLayer(bg, type) {
   }
 }
 
+// Back to front, last write wins. A priority tie goes to the LOWER-numbered BG
+// on the GBA, so it must be drawn last: hence the bg tie-break. The sort is
+// stable, so without it ties kept ascending order and BG1 landed on top of BG0.
+// Kept in step with renderFrame in rp2350/ppu.c.
 function renderBgs(dispcnt) {
   clearScreen();
-  for (const { bg, type } of bgLayersForMode(dispcnt).sort((a, b) => b.priority - a.priority)) {
+  for (const { bg, type } of bgLayersForMode(dispcnt).sort((a, b) => b.priority - a.priority || b.bg - a.bg)) {
     renderBgLayer(bg, type);
   }
 }
@@ -499,7 +503,10 @@ function renderSprites(dispcnt, priority = null) {
 
 function renderTiled(dispcnt) {
   clearScreen();
-  const layers = bgLayersForMode(dispcnt);
+  // Highest BG number first within a priority, so the lower-numbered BG -- the
+  // one the GBA puts in front on a tie -- is painted last. bgLayersForMode
+  // returns 0..3, hence the reverse. Same order as renderFrame in rp2350/ppu.c.
+  const layers = bgLayersForMode(dispcnt).reverse();
   for (let priority = 3; priority >= 0; priority--) {
     for (const { bg, type } of layers) {
       if ((u16[(REG + 8 + bg * 2) >> 1] & 3) === priority) renderBgLayer(bg, type);
