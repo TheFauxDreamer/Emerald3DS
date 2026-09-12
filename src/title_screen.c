@@ -449,6 +449,47 @@ static void CreateCopyrightBanner(s16 x, s16 y)
     }
 }
 
+#if PLATFORM_3DS
+// Whether the bottom screen should be showing TOUCH TO START, and which half of
+// the blink it is in. Read from the banner's own sprites rather than from a
+// count kept on the bottom screen, so that the two screens blink together.
+//
+// The callback test matters as much as the task test. Once START is taken, or
+// the music runs out and the title heads back to the intro, the task is still
+// allocated but MainCB2 no longer runs it, and the prompt has to go at once.
+u8 Ctr3dsTitlePromptState(void)
+{
+    u32 i;
+
+    if (gMain.callback2 != MainCB2 || !FuncIsActiveTask(Task_TitleScreenPhase3))
+        return CTR3DS_TITLE_PROMPT_NONE;
+
+    // The five PRESS START pieces were created on the same frame and blink in
+    // step, so the first one found speaks for all of them. sAnimate is what
+    // tells them apart from the copyright line, which shares the callback.
+    for (i = 0; i < MAX_SPRITES; i++)
+    {
+        struct Sprite *sprite = &gSprites[i];
+
+        if (sprite->inUse
+         && sprite->callback == SpriteCB_PressStartCopyrightBanner
+         && sprite->sAnimate == TRUE)
+            return sprite->invisible ? CTR3DS_TITLE_PROMPT_DARK : CTR3DS_TITLE_PROMPT_LIT;
+    }
+
+    return CTR3DS_TITLE_PROMPT_NONE;
+}
+
+// Set by the bottom screen at the end of a frame, and taken by
+// Task_TitleScreenPhase3 at the start of the next.
+static bool8 sTouchedStart;
+
+void Ctr3dsTitleTouchStart(void)
+{
+    sTouchedStart = TRUE;
+}
+#endif
+
 #undef sAnimate
 #undef sTimer
 
@@ -779,7 +820,18 @@ static void Task_TitleScreenPhase2(u8 taskId)
 // Show Rayquaza silhouette and process main title screen input
 static void Task_TitleScreenPhase3(u8 taskId)
 {
+#if PLATFORM_3DS
+    // A tap on the bottom screen's TOUCH TO START is a press of START. The flag
+    // is taken on every run, not only when it is acted on, so a tap that lands
+    // on the same frame as a button press cannot stay pending until the next
+    // time the title comes up (B on the main menu comes back here).
+    bool8 touchedStart = sTouchedStart;
+
+    sTouchedStart = FALSE;
+    if (JOY_NEW(A_BUTTON) || JOY_NEW(START_BUTTON) || touchedStart)
+#else
     if (JOY_NEW(A_BUTTON) || JOY_NEW(START_BUTTON))
+#endif
     {
         FadeOutBGM(4);
         BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_WHITEALPHA);

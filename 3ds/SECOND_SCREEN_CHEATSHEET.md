@@ -33,7 +33,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)
      sample_touch(&touch)            3ds/host/main.c:84
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:775   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:787   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
@@ -104,7 +104,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 911 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 947 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 164 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
@@ -115,6 +115,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
+| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 100 / 34 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering and blinking with it, and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
@@ -144,7 +145,7 @@ An overlay is drawn over whichever tab just painted, and claims its rect of
 touches before any tab sees them. There are two, and they are worth reading as a
 pair because they answer the same question differently:
 
-- The **shiny notice** ([bottom_screen.c:136](ui/bottom_screen.c#L136)) is the
+- The **shiny notice** ([bottom_screen.c:137](ui/bottom_screen.c#L137)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -210,10 +211,10 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 
 1. Add to `enum UiTab` in [ui_shell.h:19](ui/ui_shell.h#L19), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:58](ui/bottom_screen.c#L58):
+3. Add a row to `sTabs[]` at [bottom_screen.c:59](ui/bottom_screen.c#L59):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:681](ui/bottom_screen.c#L681))
-   and to the one in `CtrBottomUpdate()` ([:847](ui/bottom_screen.c#L847)).
+4. Add a `case` to the `switch` in `Redraw()` ([:693](ui/bottom_screen.c#L693))
+   and to the one in `CtrBottomUpdate()` ([:863](ui/bottom_screen.c#L863)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
    section 12.**
@@ -237,9 +238,15 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:806](ui/bottom_screen.c#L806)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:822](ui/bottom_screen.c#L822)),
 in order:
 
+- **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
+  exception is the title screen: while PRESS START is up, a release anywhere
+  goes to `UiTitleTouch` ([ui_title.c](ui/ui_title.c)) and counts as START.
+  It starts nothing itself. It raises a flag that `Task_TitleScreenPhase3`
+  (`src/title_screen.c`) reads beside its own START test, so the transition is
+  the title screen's own code.
 - An **active overlay** claims its whole rect first. The shiny panel takes every
   touch inside its 240x112 centre rect, release or not, so a press that never
   becomes a release, or a drag begun on the panel, cannot carry through into the
@@ -357,7 +364,7 @@ Do not conflate them. Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:519](ui/bottom_screen.c#L519)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:520](ui/bottom_screen.c#L520)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -373,6 +380,7 @@ in Options, being handed the Pokedex.
 | `top[4]` | the active tab's own key, dispatched by `sTab` |
 | `top[5]` | whether the shiny notice is up |
 | `top[6]` | `UiQuickBallStateKey()`, zero while the quick-throw strip is down |
+| `top[7]` | `UiTitleStateKey()`: whether the title's PRESS START is lit, dark or not up, **only while `!sInGame`**. Read from the banner's own sprites, which is what keeps TOUCH TO START blinking with it |
 | then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
 
 The party fields used to be folded on every tab, so in a battle each hit
@@ -736,7 +744,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:85
+static bool8 SaveDataLive(void);   // bottom_screen.c:86
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching

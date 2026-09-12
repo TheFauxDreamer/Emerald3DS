@@ -28,6 +28,7 @@
 #include "ui_shell.h"
 #include "matchup.h"
 #include "ui_quickball.h"
+#include "ui_title.h"
 
 // Two distinct flags: sNeedsRepaint means the framebuffer contents are stale,
 // sDirty means the host has not uploaded the current contents yet. Conflating
@@ -499,10 +500,10 @@ static void DrawNotice(u16 species, u32 personality)
 
 // ------------------------------------------------------------- lifecycle ---
 //
-// The screen must stay blank on the title screen and through the intro, but
-// stay up during battles and menus once the game proper is running. A live
-// "are we in the overworld" test would blink it out on every battle, so latch
-// on having reached the overworld once instead.
+// The screen must stay blank through the intro, show nothing but TOUCH TO START
+// on the title screen (ui_title.c), and stay up during battles and menus once
+// the game proper is running. A live "are we in the overworld" test would blink
+// it out on every battle, so latch on having reached the overworld once instead.
 static void UpdateInGameLatch(void)
 {
     if (gMain.callback2 == CB2_Overworld)
@@ -520,7 +521,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[7];
+    u32 top[8];
     top[0] = UiFrameId();
     top[1] = sInGame;
     // The override is host-side and always safe to read; the three flags are
@@ -575,6 +576,14 @@ static u32 UiStateHash(void)
     // which is exactly when the strip appears and disappears, so without this
     // it would never be drawn at all. Zero while it is down.
     top[6] = UiQuickBallStateKey();
+
+    // The title screen's TOUCH TO START, which blinks with the PRESS START
+    // banner. A slot of its own for the same reason as the two above, and just
+    // as necessary: nothing else here moves when the banner blinks, so without
+    // it the prompt would never appear. Zero once the game is running. Safe
+    // before there is a save block, because it reads only gMain, the tasks and
+    // the sprites.
+    top[7] = sInGame ? 0 : UiTitleStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
@@ -662,10 +671,13 @@ static void Redraw(void)
     unsigned long long tp = CtrTicksNow();
 
     // Before the game proper is running there is nothing meaningful to show,
-    // and a menu floating under the title screen looks broken.
+    // and a menu floating under the title screen looks broken. The one thing
+    // drawn here is the title's TOUCH TO START, and only while PRESS START is
+    // lit on the top screen.
     if (!sInGame)
     {
         UiClear(0);
+        UiTitleDraw();
         sNeedsRepaint = 0;
         sDirty = 1;
         CtrLogSlow("redraw", t0);
@@ -791,9 +803,13 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     if (sAnimStepped)
         sAnimSub = 0;
 
-    // Nothing is interactive before the game starts.
+    // Nothing is interactive before the game starts, except that a tap anywhere
+    // on the title screen counts as START (ui_title.c).
     if (!sInGame)
+    {
+        UiTitleTouch(touch);
         touch = NULL;
+    }
 
     // The panel is modal, so it takes every touch inside its rect before the
     // tabs see it -- a press that never becomes a release included, or a drag
