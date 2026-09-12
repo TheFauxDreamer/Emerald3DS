@@ -300,15 +300,20 @@ a second core** (core 2 on a New 3DS, core 1 otherwise; `3ds/host/video.c`), and
 the frame is ordered so the two overlap:
 
 ```
-game frame + VBlankIntr               core 0
-snapshot video state, kick render     core 0   ~99 KB copy
-  bottom update + paint, audio        core 0   | rasteriser on core 2 or 1
-collect render, upload, VBlank wait   core 0
+game frame + VBlankIntr                   core 0
+snapshot video state, kick render         core 0   ~99 KB copy
+  bottom update + paint, audio            core 0   | rasteriser on core 2 or 1
+  bottom upload, if it repainted          core 0   |
+collect render, top upload, VBlank wait   core 0
 ```
 
 A repaint shorter than the rasteriser now costs the frame nothing, which is what
 fixed the battle stutter: the quick-throw strip repaints the screen at least
-twice a turn and the shiny notice on open, dismiss and expiry. The rasteriser
+twice a turn and the shiny notice on open, dismiss and expiry. On this path the
+bottom screen is uploaded whole, before the render is collected, so its upload
+is overlapped as well and a repaint reaches the panel on the frame it was
+painted; that is what let the bottom screen's animations go back to the pace
+they were first written at. The rasteriser
 reads a private copy of the video state rather than `gGbaMem`, so nothing the
 paint or a touch handler does can tear it. The profiler's `ppu.wait` says how
 long core 0 sat waiting for it, and `frame` plus the "missed VBlank" line say

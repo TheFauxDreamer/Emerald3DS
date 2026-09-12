@@ -294,9 +294,12 @@ bool8 UiPartyTick(bool8 visible)
     return moving;
 }
 
-// Whether the only thing that changed this tick was the icon frame. The shell
-// uses it to choose between putting six 32x32 rects back and rebuilding the
-// whole 320x240, which measured 4.9 ms against a 5.7 ms frame budget.
+// Whether everything that changed this tick lives on the animated layer: the
+// icon frame, a sliding bar, or both. The shell uses it to choose between
+// putting a few rects back and rebuilding the whole 320x240. On the single-core
+// path that rebuild measured 4.9 ms against a 5.7 ms frame budget; with the
+// rasteriser on its own core it is 2.4 to 3.9 ms on a New 3DS XL and mostly
+// hidden behind the render, but the rects are still the cheaper way.
 bool8 UiPartyAnimOnly(void)
 {
     // The detail view's HP readout is not on the animated layer -- it is one

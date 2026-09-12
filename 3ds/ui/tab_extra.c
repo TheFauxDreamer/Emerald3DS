@@ -419,16 +419,21 @@ static void DrawPage3(void)
                qb);
 
     // The third and last row this grid holds. Bottom-screen animation during a
-    // battle -- the sliding HP bars and the cycling mon icons. Turning it off
-    // buys the top screen frames; the values shown stay correct either way,
-    // which is what the hint has to get across in the width available.
+    // battle -- the sliding HP bars and the cycling mon icons. The values shown
+    // stay correct either way, so the hint says what OFF actually buys, and
+    // that depends on the path. On one core it buys the top screen frames,
+    // because every repaint there costs a VBlank. With the rasteriser on its
+    // own core the animation costs the frame nothing, so all it buys is a
+    // still screen, for a player who would rather have one.
     anim = Ctr3dsGetBattleAnimOff();
 
     UiText(16, P1_ROW_Y(2), UiAscii(label, "BATTLE ANIM", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     UiText(P2_HINT_X, P1_ROW_Y(2),
-           UiAscii(label, "off = smoother battles", sizeof(label)),
+           UiAscii(label, Ctr3dsRasteriserOnOwnCore() ? "off = still in battle"
+                                                      : "off = smoother battles",
+                   sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
     DrawButton(WIDE_X(0), P1_BTN_Y(2), WIDE_W, UiAscii(label, "ON", sizeof(label)),

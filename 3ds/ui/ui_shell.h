@@ -73,20 +73,27 @@ enum UiTab
 // only re-uploads the 320x240 texture when the screen is dirty.
 void UiMarkDirty(void);
 
-// TRUE on the frames animations are allowed to advance on, roughly five times a
-// second. Every animated thing on this screen asks this rather than counting
-// frames itself, so that two of them moving at once still cost one repaint per
-// step instead of two -- and on this screen a repaint costs a whole VBlank, so
-// that is the difference between about 55fps and about 51. See the note above
-// UI_ANIM_STEP_FRAMES in bottom_screen.c.
+// TRUE on the frames animations are allowed to advance on: every sixth frame
+// with the rasteriser on its own core, every twelfth without one.
+//
+// On the single-core path every animated thing on this screen asks this rather
+// than counting frames itself, so that two of them moving at once still cost
+// one repaint per step instead of two -- and there a repaint costs a whole
+// VBlank, so that is the difference between about 55fps and about 51. With a
+// second core a repaint costs the frame nothing, so the party's icons use this
+// at the game's own pace and the shiny notice counts frames of its own. See
+// the note above UI_ANIM_STEP_FRAMES in bottom_screen.c.
 bool8 UiAnimStepped(void);
 
-// TRUE while a modal overlay (currently only the shiny notice) is covering the
-// tab. A tab that defers part of its drawing to the shell's animated layer must
-// draw a STILL version of that part itself while this is TRUE: the overlay owns
-// that layer while it is up, so the deferred piece is otherwise not drawn at
-// all -- and it cannot simply be drawn there anyway, because the animated layer
-// paints over a snapshot that already contains the panel.
+// TRUE while a modal overlay (the shiny notice or the quick-throw strip) is
+// covering the tab. A tab that defers part of its drawing to the shell's
+// animated layer must draw that part into its own paint while this is TRUE:
+// the overlay owns that layer while it is up, so the deferred piece is
+// otherwise not drawn at all -- and it cannot simply be drawn there anyway,
+// because the animated layer paints over a snapshot that already contains the
+// panel. On the second-core path the shell repaints fully for every step
+// while an overlay is up, so what the tab draws there may move; on the
+// single-core path it does not, so draw a still.
 bool8 UiOverlayActive(void);
 
 // The party slot the BAG tab will act on. Set by the party grid.
@@ -100,8 +107,8 @@ void UiPartyTouch(const CtrTouchState *t);
 // Advances this tab's animations by one frame: the sliding HP bars and the mon
 // icons' two-frame cycle. Returns TRUE on the frames the picture actually
 // changed, which the shell turns into a repaint request -- the icons change
-// once every six frames, so an idle party grid asks for ten repaints a second
-// rather than sixty.
+// only on UiAnimStepped() frames, so an idle party grid asks for ten repaints a
+// second (five on the single-core path) rather than sixty.
 //
 // Must be called once per frame, not once per redraw, or the animation stalls
 // whenever the screen happens not to be repainting.
@@ -118,9 +125,11 @@ bool8 UiPartyTick(bool8 visible);
 // whose HP readout is not on that layer.
 bool8 UiPartyAnimOnly(void);
 
-// Redraw the moving pieces over the restored snapshot: the icons, and the HP
-// bar and number of any slot still sliding. Only valid immediately after
-// UiPartyAnimOnly() returned TRUE.
+// Redraw the moving pieces over the restored snapshot: on the grid, every
+// slot's icon, HP bar and HP number, sliding or not, since a full paint leaves
+// all of them out of the snapshot; in the detail view, its one icon. Only
+// valid immediately after UiPartyAnimOnly() returned TRUE, or as the last step
+// of a full paint.
 void UiPartyRedrawAnimated(void);
 
 // Cheap identity of what the PARTY tab is showing: the live level cap behind

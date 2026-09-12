@@ -104,7 +104,8 @@ static u16   sSpecies[UI_ENC_MAX];
 static u8    sCount;
 
 // What sSpecies was built for, so a repaint costs a comparison rather than a
-// 124-header scan. A repaint is already ~4.9ms of a ~5.7ms budget.
+// 124-header scan. On the single-core path a repaint is already ~4.9ms of a
+// ~5.7ms budget.
 static bool8 sBuilt;
 static u8    sBuiltSrc;
 static u8    sBuiltGroup, sBuiltNum;

@@ -33,7 +33,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)
      sample_touch(&touch)            3ds/host/main.c:84
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:787   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:922   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
@@ -41,12 +41,15 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                        Redraw() if needed -> paints sFb
   if (presenting)
      CtrVideoPresent()               3ds/host/video.c
+        if (second core && CtrBottomIsDirty())             still OVERLAPS it
+           upload(bottom); CtrBottomClearDirty()           WHOLE, 320x240
         wait for the rasteriser                           `ppu.wait`
         upload(top)                                       WHOLE, every frame
-        if (idle && CtrBottomIsDirty())
-           snapshot_bottom(); CtrBottomClearDirty()        320x240 -> stage
-        if (mid-run)
-           upload_bottom_slice()                           48 ROWS, 5 frames
+        if (inline)                                        single-core path only
+           if (idle && CtrBottomIsDirty())
+              snapshot_bottom(); CtrBottomClearDirty()     320x240 -> stage
+           if (mid-run)
+              upload_bottom_slice()                        48 ROWS, 5 frames
      CtrSaveFlush(0)                 3ds/host/save.c      the save image
      CtrSettingsFlush(0)             3ds/host/settings.c  hands settings.bin to
                                                            the I/O thread
@@ -60,11 +63,19 @@ shows up one frame later**, never half-drawn. If no second core can be had, or
 the build is `CTR_PPU_THREAD=0`, it rasterises inline inside
 `CtrVideoPresent()`, which is the old single-core path.
 
-The bottom screen is uploaded **a slice per frame, not whole**. The top screen
-has to hold 60fps and the bottom is allowed to arrive late, so a repaint reaches
-the panel five frames after it was painted. See `BOT_CHUNK_ROWS` in
-[video.c](../host/video.c) for why 48 rows, and section 7 for what it cost
-before.
+With a second core, the bottom screen is uploaded **whole, before the join**.
+`CtrVideoPresent()` sends it while the rasteriser is still running, which is
+safe because the rasteriser never touches the UI's framebuffer or the bottom
+texture, so its ~2 ms comes out of what would otherwise be `ppu.wait`, and a
+repaint reaches the panel on the frame it was painted.
+`Ctr3dsRasteriserOnOwnCore()` ([bridge.h](bridge.h)) is how the game side
+knows which path it is on.
+
+On the inline path the bottom screen is uploaded **a slice per frame, not
+whole**. The top screen has to hold 60fps and there is no idle time to hide the
+upload in, so a repaint reaches the panel five frames after it was painted. See
+`upload` and `BOT_CHUNK_ROWS` in [video.c](host/video.c) for why 48 rows, and
+section 7 for what it cost before.
 
 The two flushes are at the bottom for a reason: this is after the frame has been
 presented. The save flush still writes there. The settings flush only hands a
@@ -191,13 +202,26 @@ the sharper version of this: nothing else in that hash moves when action
 selection opens or closes, so without `top[6]` it would never be drawn at all.
 
 Finally, `UiOverlayActive()` is not bookkeeping. A tab that defers drawing to
-the shell's animated layer paints a STILL version while it is TRUE, and the
-reason is that the layer paints over a snapshot which now contains the overlay
--- so the party grid's bottom row of mon icons, which sits under the strip,
-would otherwise be redrawn straight through it on every animation step. Since
-that layer then has nothing to draw for the party, `CtrBottomUpdate` also skips
-asking for the cheap animated redraw while the strip is up, or the host would
-upload an unchanged screen five times a second.
+the shell's animated layer paints those pieces into its own paint while it is
+TRUE, and the reason is that the layer paints over a snapshot which now
+contains the overlay. The party grid's bottom row of mon icons sits under the
+strip, and would otherwise be redrawn straight through it on every animation
+step. The overlay is painted after the tab, so nothing the tab paints
+can show through it. What happens next depends on the path:
+
+- **Second core:** `CtrBottomUpdate` asks for a **full** repaint on every frame
+  `UiPartyTick` moves anything while an overlay is up. `DrawCell` bakes the
+  icons at the live frame and the HP block at its sliding value, so the grid
+  keeps animating under the panel. The snapshot still holds nothing that moves
+  on the cheap path: while an overlay is up, the party's moving parts are only
+  ever in a full paint.
+- **Single core:** the icons are baked at frame 0 and the HP block at whatever
+  value the last full paint caught, and nothing repaints for them. The layer
+  has nothing to draw for the party, so `CtrBottomUpdate` also skips asking for
+  the cheap animated redraw while the strip is up, or the host would upload an
+  unchanged screen five times a second. A bar that starts sliding under an
+  overlay therefore stalls near its old value on this path until something
+  else forces a repaint.
 
 **Do not size a panel in pixels and hope.** `UiWindowFrame` takes 8px TILES, so
 pick tile counts that centre exactly: 30x14 tiles is 240x112, and (320-240)/2
@@ -213,8 +237,8 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
 3. Add a row to `sTabs[]` at [bottom_screen.c:59](ui/bottom_screen.c#L59):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:693](ui/bottom_screen.c#L693))
-   and to the one in `CtrBottomUpdate()` ([:863](ui/bottom_screen.c#L863)).
+4. Add a `case` to the `switch` in `Redraw()` ([:825](ui/bottom_screen.c#L825))
+   and to the one in `CtrBottomUpdate()` ([:998](ui/bottom_screen.c#L998)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
    section 12.**
@@ -238,7 +262,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:822](ui/bottom_screen.c#L822)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:957](ui/bottom_screen.c#L957)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -364,7 +388,7 @@ Do not conflate them. Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:520](ui/bottom_screen.c#L520)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:652](ui/bottom_screen.c#L652)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -401,7 +425,7 @@ MAP's fly row is the one other thing that depends on the party, and
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:774](ui/tab_party.c#L774)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1032](ui/tab_party.c#L1032)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
@@ -423,10 +447,15 @@ frames, which the shell turns into `sNeedsRepaint`:
 | `UiPartyTick(visible)` ([tab_party.c](ui/tab_party.c)) | the PARTY tab is up: mon icons cycle their two frames, HP bars slide |
 | `NoticeTick()` ([bottom_screen.c](ui/bottom_screen.c)) | the shiny panel is up |
 
-Both advance on `UiAnimStepped()`, the shared step clock, rather than on their
-own frame counts.
+`UiPartyTick` flips its icons on `UiAnimStepped()`, the shared step clock:
+every 6 frames with a second core, every 12 without. Its HP bars slide every
+frame. `NoticeTick` depends on the path. On the single-core path it steps on
+the same clock. With a second core it counts frames of its own and runs the
+animation as first written, a 64-frame twinkle and a glint across the panel as
+it opens, returning TRUE only on the glint's frames and on the 24 frames in 64
+where some corner changes size.
 
-Three rules, and the third is the one that keeps this affordable:
+Four rules, and the third is the one that keeps this affordable:
 
 1. **Once per frame, not once per redraw.** A tick called from `Redraw` stalls
    exactly when it is the thing that ought to be causing the redraw.
@@ -436,12 +465,17 @@ Three rules, and the third is the one that keeps this affordable:
    ([ui_draw.h](ui/ui_draw.h)) and both ticks all do this.
 3. **Return FALSE the moment the thing being animated is off screen.** A
    repaint is 76,800 pixels of software fill plus a blocking texture upload on
-   the host ([video.c](../host/video.c)), so a tick that returns TRUE
+   the host ([video.c](host/video.c)), so a tick that returns TRUE
    unconditionally is a decision to pay that on every frame of the game.
    `NoticeTick` returns FALSE whenever the panel is down, which is why it costs
    nothing on the frames it is not running.
-4. **Advance on `UiAnimStepped()`, never on your own frame counter.** See below:
-   a private period is a private repaint budget, and they add up.
+4. **On the single-core path, advance on `UiAnimStepped()`, never on your own
+   frame counter.** See below: there, a private period is a private repaint
+   budget, and they add up. With a second core a repaint costs the frame
+   nothing, so a tick may count its own frames, as `NoticeTick` does there, as
+   long as it still returns TRUE only on frames where the picture changes.
+   Branch on `Ctr3dsRasteriserOnOwnCore()` and keep the stepped version for the
+   other path.
 
 `UiPartyTick` takes its tab's visibility as an argument rather than reading
 `sTab` itself, which is rule 3 made hard to skip: the shell has to say whether
@@ -513,7 +547,7 @@ Read these instead of `framebegin` alone:
 | Stage | What it says |
 |---|---|
 | `ppu` | the rasteriser's own time, measured on its core |
-| `ppu.wait` | how long core 0 then sat waiting for it. Close to `ppu` on a frame with no repaint, near zero when the paint took as long as the rasteriser |
+| `ppu.wait` | how long core 0 then sat waiting for it. Close to `ppu` on a frame with no repaint, near zero when the paint and the bottom upload took as long as the rasteriser |
 | `ppu.snap` | the ~99 KB copy of the video state the rasteriser reads |
 | `frame` | the displayed frame's period, sync point to sync point. The worst over 20 ms means a dropped frame |
 
@@ -548,10 +582,27 @@ because Azahar rewrites its config on exit.
 at 300%. It is the one piece of the rasteriser's cost still on core 0, so it is
 the first thing to trim if core 0 ever needs time back.
 
-The rules below still stand, for two reasons. Every repaint is still an upload.
-And the single-core path is still live: the port falls back to it when no second
-core is available, and `make -C 3ds CTR_PPU_THREAD=0` builds it deliberately, so
-the formula above still describes that build exactly.
+#### What a repaint costs on the second-core path
+
+Since then the bottom upload has moved inside the overlap too: whole-screen,
+before the join (section 2), where it used to be sliced and after it. That
+gave the bottom screen its animations back
+([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)). Core 0's
+share of the overlap is now paint plus upload. Estimated from the New 3DS XL
+figures above (animation step 0.9 to 1.2 ms, bottom copy 0.8 ms, flush plus
+transfer about 0.25 ms per 48 rows), to be replaced by a console log:
+
+| Case | Core 0 inside the overlap | Frame |
+|---|---|---|
+| An animation step (icons, twinkle, HP slide) | ~1 ms paint + ~2 ms upload | hidden behind the rasteriser |
+| A full repaint (glint frame, overlay change, a step under an overlay) | 2.4 to 3.9 ms paint + ~2 ms upload | up to ~1.75 ms past the join, about 11 ms worst against 16.7 |
+
+The rules below are the **single-core path's**, and that path is still live:
+the port falls back to it when no second core is available, and
+`make -C 3ds CTR_PPU_THREAD=0` builds it deliberately, so the formula above
+still describes that build exactly. Where the second-core path does something
+different, the rule says so. The game side asks `Ctr3dsRasteriserOnOwnCore()`
+which path it is on.
 
 ### So the screen does not repaint to animate
 
@@ -571,33 +622,55 @@ holes in the new one. That is why `DrawCell` no longer draws its icon and
 `DrawNotice` no longer draws its sparkles -- both moved into the animated layer.
 
 An animation whose change is not confined to rects it can name must ask for a
-full repaint instead. `UiPartyTick` does exactly that: a sliding HP bar changes
-the rest of the cell, so `UiPartyIconOnly()` answers FALSE and the shell
-rebuilds.
+full repaint instead. `UiPartyAnimOnly()` is how `UiPartyTick` tells the shell
+which. On the grid an icon flip and a sliding HP bar both live on the animated
+layer (the HP block has two restore rects of its own), so it answers TRUE and
+the shell takes the cheap path. The detail view's HP readout is not on that
+layer, so a slide there answers FALSE and the shell rebuilds, and so does
+anything that moves under an overlay on the second-core path (section 5).
+
+The notice's glint is the same rule from the other side. It crosses the text,
+so it cannot be a restore rect: `DrawNotice` paints it into the panel, and
+`NoticeTick` asks for a full repaint on each of its 24 frames and on one more
+after the last, so the band is out of the snapshot before the cheap sparkle
+steps resume.
 
 - **Measure, do not reason, about the drawing primitives either.** `UiFillRect`
   pairing pixels into 32-bit stores is **2.14x**; the identical change to
   `UiClear` is **0.93x**, because one long store loop is something the compiler
   already emits well. Both were "obviously" faster.
-- **Keep the step period longer than a slice run.** Five frames to upload, so a
-  step every twelve leaves seven idle.
+- **On the single-core path, keep the step period longer than a slice run.**
+  Five frames to upload, so a step every twelve leaves seven idle. With a
+  second core the upload is whole and lands on the frame it was painted, so
+  there is no run to stay clear of, and the step is six frames.
 
-**So there is one clock, `UI_ANIM_STEP_FRAMES`, and everything shares it.**
-Repaints coalesce through a single `sNeedsRepaint`, but only when they land on
-the same frames. Two animations on private periods ask on different frames and
-cost close to double; on the shared clock, a shiny panel over an animating party
-grid still costs 5 repaints a second, not 10. That makes the frame rate a
-property of this screen rather than of how many things happen to be moving.
+**So on the single-core path there is one clock, `UI_ANIM_STEP_FRAMES`, and
+everything shares it.** Repaints coalesce through a single `sNeedsRepaint`, but
+only when they land on the same frames. Two animations on private periods ask
+on different frames and cost close to double; on the shared clock, a shiny
+panel over an animating party grid still costs 5 repaints a second, not 10.
+That makes the frame rate a property of this screen rather than of how many
+things happen to be moving.
+
+With a second core the clock is six frames, the pace of Emerald's own party
+menu, and only the party's icons use it. The notice counts frames of its own:
+repaints on different frames cost nothing there, so there is nothing for it
+to coalesce into.
 
 Corollaries worth keeping:
 
-- **A moving thing needs a rate its motion survives.** The notice's opening
-  glint was a 4px band crossing 224px; at 5 steps a second it would have taken
-  eleven seconds to cross, so it was replaced by a burst. Continuous motion and
-  a low repaint budget are incompatible -- prefer state changes.
-- A `u16` step counter wraps after about an hour. If a cycle length divides
-  65536 the wrap lands on a boundary and nothing is visible; `NOTICE_CYCLE` is 8
-  for that reason. Pick a power of two.
+- **A moving thing needs a rate its motion survives.** On the single-core path
+  the notice's opening glint, a 4px band crossing 224px, would take eleven
+  seconds to cross at 5 steps a second, so that path opens with a burst
+  instead. Continuous motion and a low repaint budget are incompatible, so
+  prefer state changes there. With a second core the glint is back, at one
+  full repaint per frame for its 24 frames.
+- A `u16` counter wraps: after about eighteen minutes counting frames, or three
+  and a half hours counting 12-frame steps. If a cycle length divides 65536 the
+  wrap lands on a boundary and the twinkle does not jump; `NOTICE_FRAME_CYCLE`
+  (64) and `NOTICE_STEP_CYCLE` (8) are powers of two for that reason. Pick a
+  power of two. On the frame path the wrap also replays the glint, which is
+  harmless.
 
 ---
 
@@ -1069,7 +1142,7 @@ appears.
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
-| Mon icons punch through an overlay every few frames | The tab redrew them on the shell's animated layer, which paints over a snapshot that already contains the overlay. Fold the overlay into `UiOverlayActive()` so the tab paints still icons instead. |
+| Mon icons punch through an overlay every few frames | The tab redrew them on the shell's animated layer, which paints over a snapshot that already contains the overlay. Fold the overlay into `UiOverlayActive()` so the tab paints the icons into its own paint instead (live on the second-core path, which then repaints fully for each step; still on the single-core path). |
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
@@ -1112,5 +1185,6 @@ appears.
   function-pointer tables and helpers, so the list is never as short as it
   looks, and a per-reader guard is what left the naming screen still crashing.
 - On hardware, not only in an emulator (`AGENTS.md`). The boot log and the frame
-  600 audio health report stay clean, and repaint frequency has not visibly
-  risen.
+  600 audio health report stay clean. On the single-core path repaint frequency
+  has not visibly risen; on the second-core path `ppu.wait` stays well above
+  zero on most frames and no "missed VBlank" line appears.

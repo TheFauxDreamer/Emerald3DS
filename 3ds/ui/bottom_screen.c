@@ -891,10 +891,13 @@ static void DrawAnimatedLayer(void)
 // An animation step, and nothing else: a few rects put back from the snapshot
 // and the moving pieces drawn again over them.
 //
-// This exists because of one measurement. A full repaint is 4.9 ms and the
-// frame has 5.7 ms of slack, so rebuilding the screen five times a second to
-// step some icons spends nearly all of it and the game drops to 55fps. The
-// same step through here is a few thousand pixels.
+// This exists because of one measurement, taken on the single-core path, where
+// it still holds: a full repaint was 4.9 ms and the frame had 5.7 ms of slack,
+// so rebuilding the screen five times a second to step some icons spent nearly
+// all of it and the game dropped to 55fps. The same step through here is a few
+// thousand pixels. On the second-core path a full repaint is mostly hidden
+// behind the rasteriser, but a step through here still leaves core 0 more of
+// that overlap for the whole-screen upload that follows it.
 static void RedrawAnimated(void)
 {
     unsigned long long tp = CtrTicksNow();

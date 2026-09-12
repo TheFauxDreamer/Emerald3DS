@@ -141,6 +141,12 @@ five-frame sliced upload fits inside the 16-frame toggle. Because slices upload
 top down and the prompt sits in the third slice, the bottom trails the top by
 about 3 frames.
 
+Since [SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md), that
+trail is gone wherever the rasteriser has its own core: the bottom screen is
+uploaded whole, on the frame it was painted, so TOUCH TO START lights on the
+same frame as PRESS START. The sliced upload, and the 3-frame trail with it,
+remain only on the single-core path.
+
 ### 4. Docs: `3ds/SECOND_SCREEN_CHEATSHEET.md`
 
 - Section 4 file map: a row for `ui/ui_title.c`.
