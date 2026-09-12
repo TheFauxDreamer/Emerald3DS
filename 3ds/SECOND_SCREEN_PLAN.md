@@ -1,7 +1,7 @@
 # Second-screen feature expansion
 
-Design record. Sits alongside `3ds/UI_SKIN_PLAN.md` (which reskins what already
-exists) and `3ds/ROADMAP.md`.
+Design record. Sits alongside `3ds/UI_SKIN_PLAN.md` (which reskins and
+re-lays-out what already exists) and `3ds/ROADMAP.md`.
 
 **Status.** The structural work in Parts 2 and 3 is not started; assume steps 0
 to 9 are all outstanding. One catalogue item has shipped ahead of it, out of
@@ -140,7 +140,7 @@ Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots
 
 ### Deliberately not built yet
 
-Two-level tab bar (costs 48px of 192; `UI_CONTENT_H` is declared load-bearing by `UI_SKIN_PLAN.md`). Dirty-rectangle or partial redraw (the hash gate already makes repaints rare; invalidation bookkeeping would infect every widget; per `AGENTS.md`, measure on hardware before optimising). Heap-allocated views, a scene graph, or transition animations (the whole UI layer is deliberately heap-free). A generic pixel-scrolling viewport (row-granular is enough; the type chart pages by attacking type rather than scrolling). Press feedback and long-press, which belong to `UI_SKIN_PLAN.md` step 4 and would confound measurement of steps 0-2. Persisted per-view state, which `tab_extra.c:146` already argues against for its own page number.
+Two-level tab bar (costs 48px of 192; every tab, the encounters view and both overlays are fitted to `UI_CONTENT_H`). Dirty-rectangle or partial redraw (the hash gate already makes repaints rare; invalidation bookkeeping would infect every widget; per `AGENTS.md`, measure on hardware before optimising). Heap-allocated views, a scene graph, or transition animations (the whole UI layer is deliberately heap-free). A generic pixel-scrolling viewport (row-granular is enough; the type chart pages by attacking type rather than scrolling). Press feedback and long-press, which belong to `UI_SKIN_PLAN.md` step 5 and would confound measurement of steps 0-2. Persisted per-view state, which `tab_extra.c:146` already argues against for its own page number.
 
 ---
 
@@ -148,13 +148,13 @@ Two-level tab bar (costs 48px of 192; `UI_CONTENT_H` is declared load-bearing by
 
 Recommendation is structure first, skin second. The skin is a deliberately small diff ("two functions change, ~98 call sites do not") and doing the structure first makes it smaller, not larger.
 
-1. `DrawButtonH` moves out of `tab_extra.c` into `UiButton`. The skin plan names `tab_extra.c:140` as its button chokepoint; retarget it to `ui_widgets.c` and it covers the map's buttons and every future view's buttons for the same edit.
+1. `DrawButtonH` moves out of `tab_extra.c` into `UiButton`. The skin plan's step 5 defines `UiButton` and folds in both local helpers, `DrawButtonH` (`tab_extra.c:188`) and `DrawBtn` (`tab_map.c:476`), plus about a dozen inline outlines; whichever plan lands first owns it, and if `ui_widgets.c` exists by then it lives there, so it covers every future view's buttons for the same edit.
 2. `tabbar.png` is specced at 64x96 (cell idle, cell active, bar ground). A title bar also needs a back chevron and a title ground. **Decide before the art is drawn** or it gets authored twice. Suggest 64x160.
 3. **Highest-risk item:** the skin plan says `ui_gfx.c`'s entry points clamp against `0..UI_W/UI_H` "the way `UiFillRect` already does". After step 1 `UiFillRect` clamps against the *clip*. `UiBlitPart`, `UiTileFill` and `UiNineSlice` must do the same, or a nine-slice panel inside a clipped list row paints over its neighbours and looks like a layout bug rather than a blitter bug.
 4. Both plans edit `UiStateHash`: the skin drops `top[0] = UiFrameId()`, this drops the party loop and rewrites `top[4]`. Different lines, mergeable, but do them in one sitting.
 5. Create `ui_skin.h` in step 2 even as a pure re-export, so the skin's colour move is one `#include` change.
 
-No conflict on the thing the skin plan declares load-bearing: `UI_TABBAR_H 48` and `UI_CONTENT_H 192` are unchanged throughout. The title bar reuses the tab bar's exact 320x48 band, and the launcher's 4x3 grid of 80x64 fills 320x192 exactly on whole tiles.
+One ordering constraint. This plan leaves `UI_TABBAR_H 48` and `UI_CONTENT_H 192` alone, but the skin plan no longer freezes them: its `shell.png` wireframe may move both. The title bar reuses whatever band the tab bar ends up with, and the launcher's 4x3 grid of 80x64 fills 320x192 exactly on whole tiles only at today's values. So settle `shell.png` before sizing the launcher and the title bar, and derive both from `UI_CONTENT_H` / `UI_TABBAR_H` rather than from 192 and 48.
 
 ---
 

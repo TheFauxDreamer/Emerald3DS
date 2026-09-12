@@ -3,8 +3,8 @@
 Working reference for changing the 3DS bottom screen. Read this before touching
 anything under `3ds/ui/`. Companion documents: the root `README-TECHNICAL.md` (why
 the port is built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
-catalogue, **not implemented**), `3ds/UI_SKIN_PLAN.md` (a proposed visual
-reskin, **not implemented**). This file describes the code as it actually is.
+catalogue, **not implemented**), `3ds/UI_SKIN_PLAN.md` (a proposed reskin and
+re-layout, **not implemented**). This file describes the code as it actually is.
 
 ---
 
@@ -166,16 +166,15 @@ moment the player answers. If a third overlay cannot find a bracket that tight,
 that is an argument against the overlay, not for a bigger one.
 
 It is an overlay rather than a band the tabs make room for because every tab's
-layout is hand-fitted to a 192px content area, which `UI_SKIN_PLAN.md` declares
-load bearing. Reserving space would mean re-fitting five tabs for a state that
-occurs once in 8192 encounters. `UiWindowFrame`'s centre tiles are opaque, so a
+layout is hand-fitted to a 192px content area. Reserving space would mean
+re-fitting five tabs for a state that occurs once in 8192 encounters. `UiWindowFrame`'s centre tiles are opaque, so a
 panel genuinely covers what is behind it rather than floating over readable
 content.
 
 Four rules, all of them learned the hard way on this one:
 
 1. **Paint last**, after the tab's `Draw` and before the tab bar.
-2. **Take touches first**, on the whole rect, `justReleased` or not — otherwise
+2. **Take touches first**, on the whole rect, `justReleased` or not. Otherwise
    a press that never becomes a release, or a drag begun on the panel, carries
    through into what it is covering. Absorb everything; act only on the control.
 3. **Give it a real control.** "Tap anywhere to dismiss" throws the panel away
@@ -674,7 +673,7 @@ whole 256-entry BG palette, not a 16-colour bank.
 ## 9. Text
 
 **There is one font and one size.** `gFontNormalLatinGlyphs` at `UI_GLYPH_H` 15
-is all the ROM has — the game never needed another on a 240px screen. For a
+is all the ROM has; the game never needed another on a 240px screen. For a
 headline that must be read rather than looked for, `UiTextBig` scales those same
 glyphs 2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four
 times the fill per glyph, so it is not a general-purpose call. Pair it with
@@ -1006,8 +1005,10 @@ UI_CONTENT_H       192        // 24 tiles, everything above the bar
 UI_W / UI_H        320 / 240  // ui_draw.h
 ```
 
-`UI_TABBAR_H` and `UI_CONTENT_H` are declared load bearing by
-`UI_SKIN_PLAN.md`. Do not change them casually.
+`UI_TABBAR_H` and `UI_CONTENT_H` are load bearing: the five tabs, the
+encounters view and both overlays below are all fitted to them.
+`UI_SKIN_PLAN.md` moves them only while re-fitting every one of those against
+wireframes. Do not change them casually.
 
 The two overlays divide that 192px content area between them, and their numbers
 are load bearing against **each other**:
@@ -1045,9 +1046,9 @@ appears.
 | Symptom | Cause |
 |---|---|
 | Data abort at boot, address near 0x1300 | Reading `gSaveBlock1Ptr` before a file is loaded. Gate on `SaveDataLive()`. |
-| A **dangling** pointer (freed but not nulled, or a buffer still registered with `SetBgTilemapBuffer`) | **Cannot crash this port.** `gHeap` is `EWRAM_DATA u8 gHeap[HEAP_SIZE]` (`src/malloc.c`) and EWRAM is the static `gGbaMem` array, so freed memory stays mapped forever. A dangling read returns stale bytes and draws garbage; it never aborts. `CleanupOverworldWindowsAndTilemaps()` leaves BG1/2/3 registered on freed buffers for exactly this reason and is fine. Only **NULL** faults, because 0 is the one unmapped address — so hunt `FREE_AND_SET_NULL`, not `Free`. |
-| An `Alloc` that returns **NULL** under heap pressure | The other way to get a null deref, and the reason the fly leak was fatal: 89 file-scope allocations in `src/` are used with no null check, which is vanilla and fine while the heap holds. Heap is `0x1C000`, unchanged by the port. The fix for this class is never "add 89 checks", it is "find the leak" — every allocation that escapes its free. |
-| Data abort with a **small or struct-sized FAR**, Read — *is it actually a bug?* | Freeing a struct while its sprites still live is only fatal if an `AnimateSprites()` runs **before** something calls `ResetSpriteData()`. Vanilla's universal idiom is "free, then hand off to a *setup* CB2 that resets sprites first", and that is safe — a sweep of every `FREE_AND_SET_NULL` of a state pointer in `src/` found this holds nearly everywhere. Only two shapes break it: (a) the free repeats across several frames while the scene's own loop keeps running (the battle-teardown bug), and (b) the free hands control back to an **already-running** main loop instead of a setup CB2 (the naming screen, which is the *only* `DoNamingScreen` caller passing `BattleMainCB2`; every other in-battle menu returns through `ReshowBattleScreenAfterMenu`). Check which shape you have before changing any teardown — most candidates are false positives, and editing a working one is the bigger risk. |
+| A **dangling** pointer (freed but not nulled, or a buffer still registered with `SetBgTilemapBuffer`) | **Cannot crash this port.** `gHeap` is `EWRAM_DATA u8 gHeap[HEAP_SIZE]` (`src/malloc.c`) and EWRAM is the static `gGbaMem` array, so freed memory stays mapped forever. A dangling read returns stale bytes and draws garbage; it never aborts. `CleanupOverworldWindowsAndTilemaps()` leaves BG1/2/3 registered on freed buffers for exactly this reason and is fine. Only **NULL** faults, because 0 is the one unmapped address, so hunt `FREE_AND_SET_NULL`, not `Free`. |
+| An `Alloc` that returns **NULL** under heap pressure | The other way to get a null deref, and the reason the fly leak was fatal: 89 file-scope allocations in `src/` are used with no null check, which is vanilla and fine while the heap holds. Heap is `0x1C000`, unchanged by the port. The fix for this class is never "add 89 checks", it is "find the leak": every allocation that escapes its free. |
+| Data abort with a **small or struct-sized FAR**, Read: *is it actually a bug?* | Freeing a struct while its sprites still live is only fatal if an `AnimateSprites()` runs **before** something calls `ResetSpriteData()`. Vanilla's universal idiom is "free, then hand off to a *setup* CB2 that resets sprites first", and that is safe: a sweep of every `FREE_AND_SET_NULL` of a state pointer in `src/` found this holds nearly everywhere. Only two shapes break it: (a) the free repeats across several frames while the scene's own loop keeps running (the battle-teardown bug), and (b) the free hands control back to an **already-running** main loop instead of a setup CB2 (the naming screen, which is the *only* `DoNamingScreen` caller passing `BattleMainCB2`; every other in-battle menu returns through `ReshowBattleScreenAfterMenu`). Check which shape you have before changing any teardown. Most candidates are false positives, and editing a working one is the bigger risk. |
 | Data abort with a **small or struct-sized FAR**, Read | A null pointer plus a field offset -- FAR *is* the offset, so it is 0 only when the field is the struct's first member. `offsetof` the FAR against every struct the code frees and it names the pointer outright. The naming screen was one: `MainState_Exit` frees `sNamingScreen` while the sprites and helper tasks it created are still running, and `SpriteCB_Cursor` reads `currentPage` at offset **0x1E22** every frame, which was the reported FAR exactly. Note the trap: that screen ALREADY had a `VBLANK_REQUIRE(sNamingScreen)` guard, which fixed the VBlank reader and left the `AnimateSprites()` one. Guarding readers one at a time is how these survive. |
 | Data abort with **FAR exactly 00000000**, Read | A null pointer dereferenced at offset 0. On a GBA this is free -- no MMU, address 0 is the BIOS, the read returns junk nobody looks at -- so vanilla code does it in places and gets away with it. On the ARM11 it is fatal. `FreeResetData_ReturnToOvOrDoEvolutions` (`src/battle_main.c`) was one: it freed the battle sprite data on every frame of the end-of-battle fade while those sprites were still animating, and `SpriteCB_EnemyShadow` read `gBattleSpritesDataPtr->battlerData` (first member, so offset 0) straight through the NULL. It presented as "running from a wild battle sometimes crashes" -- only outcomes that leave the opponent standing, and only the 61 species with a non-zero `gEnemyMonElevation`. |
 | Every tab's border changes colour after viewing a dex entry | Decompress overrun into neighbouring statics. Size-check first. |
