@@ -213,8 +213,9 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 
 // -------------------------------------------------------- animation clock --
 //
-// One clock for every animation on this screen. Which path the port is on
-// (Ctr3dsRasteriserOnOwnCore) picks its period, because the two have different
+// The step clock the party grid's icons advance on, and on the single-core path
+// the one clock for every animation on this screen. Which path the port is on
+// (Ctr3dsRasteriserOnOwnCore) picks the period, because the two have different
 // budgets.
 //
 // ON ONE CORE (no second core could be had, or a CTR_PPU_THREAD=0 build), a
@@ -244,7 +245,8 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 // uploads the whole screen inside that same overlap, before it collects the
 // render. A step then costs the frame nothing and reaches the panel on the
 // frame it was painted, so there is nothing for a slow clock to save. It runs
-// at 6, which is Emerald's own party menu pace (sAnim_0, src/pokemon_icon.c).
+// at 6, which is Emerald's own party menu pace (sAnim_0, src/pokemon_icon.c),
+// and the shiny notice leaves it for a frame count of its own (NoticeTick).
 #define UI_ANIM_STEP_FRAMES (Ctr3dsRasteriserOnOwnCore() ? 6 : 12)
 
 static u8    sAnimSub;
@@ -288,19 +290,40 @@ bool8 UiOverlayActive(void)
 // milliseconds, which is the same idiom UiHold uses -- CtrBottomUpdate runs
 // once per DISPLAYED frame, so a call is a 60th of a second even under
 // fast-forward, and the twinkle does not speed up with the game.
-
-// Counted in animation STEPS now, not frames: one step is UI_ANIM_STEP_FRAMES
-// displayed frames, so an 8-step cycle is 96 frames, about 1.6 seconds.
 //
-// A power of two on purpose. sNoticeStep is a u16 and wraps after an hour of an
-// undismissed panel; 65536 divides by 8 exactly, so the wrap lands on a cycle
-// boundary instead of jumping the twinkle mid-step.
-#define NOTICE_CYCLE      8
-#define NOTICE_CORNERS    4
+// Two tunings, and Ctr3dsRasteriserOnOwnCore() picks between them:
+//
+//   With a second core, the animation as it was first written. The counter
+//   counts frames, the corners twinkle on a 64-frame cycle, and a slanted gold
+//   glint crosses the panel as it opens. A repaint costs the frame nothing on
+//   that path, so there is nothing to be saved by waiting for a step.
+//
+//   On one core, what that path can afford. The counter counts steps of the
+//   shared clock (UI_ANIM_STEP_FRAMES), the twinkle is 8 steps long, and a
+//   two-step burst stands in for the glint.
 
-// The opening flourish: every corner at the largest frame at once, before the
-// staggered twinkle takes over.
-#define NOTICE_BURST      2
+// The twinkle's length on each path, in whatever the counter counts: 64 frames
+// is about 1.1 seconds, and 8 steps of 12 frames is 96 frames, about 1.6.
+//
+// Powers of two on purpose. sNoticeTime is a u16, and wraps after eighteen
+// minutes of an undismissed panel counting frames, or three and a half hours
+// counting steps. 65536 divides by both, so the wrap lands on a cycle boundary
+// instead of jumping the twinkle mid-cycle. On the frame path it also plays
+// the glint again, which is harmless.
+#define NOTICE_FRAME_CYCLE  64
+#define NOTICE_STEP_CYCLE   8
+#define NOTICE_CORNERS      4
+
+// The opening glint on the second-core path: NOTICE_SWEEP_END frames to cross
+// the panel, as a SWEEP_W band slanted SWEEP_SLANT pixels over the interior's
+// height. See DrawSweep.
+#define NOTICE_SWEEP_END    24
+#define SWEEP_W             4
+#define SWEEP_SLANT         24
+
+// The opening flourish on the single-core path, in steps: every corner at the
+// largest frame at once, before the staggered twinkle takes over.
+#define NOTICE_BURST        2
 
 // How far in from the interior edge a corner sparkle is CENTRED. The big frame
 // reaches 8px left and right of its axis, so 12 clears the 2px gold rule.
@@ -308,10 +331,60 @@ bool8 UiOverlayActive(void)
 #define NOTICE_SPK_IN_T   10
 #define NOTICE_SPK_IN_B   12
 
-static u16   sNoticeStep;     // animation steps this panel has been up
-static u32   sNoticeAnimId;   // the encounter those steps belong to
+static u16   sNoticeTime;     // frames (own core) or steps (one core) it has been up
+static u32   sNoticeAnimId;   // the encounter that count belongs to
 static bool8 sNoticeAnimSet;
-static bool8 sNoticeOpened;   // this tick was the panel APPEARING, not stepping
+static bool8 sNoticeFull;     // this tick needs the panel painted, not just its sparkles
+
+// Which frame of the art a corner shows at `phase`, or -1 for nothing. One table
+// per path.
+//
+// Thresholds rather than arithmetic because the three frames are 3, 6 and 16px
+// wide: an even hold on each reads as a jump into the big one, so the holds are
+// tuned against that.
+//
+// The frame table holds the sizes for 4, 4, 6, 4 and 4 frames, then goes dark
+// for the other 42. Dark for most of the cycle, which is what makes this a
+// twinkle rather than a pulse.
+static int TwinkleSizeFrames(u16 phase)
+{
+    if (phase < 4)  return 0;
+    if (phase < 8)  return 1;
+    if (phase < 14) return 2;
+    if (phase < 18) return 1;
+    if (phase < 22) return 0;
+
+    return -1;
+}
+
+// The step table has one step per size, so each corner is lit for five steps
+// of the eight and dark for three. The stagger round the panel is what keeps
+// that reading as a twinkle at this rate.
+static int TwinkleSizeSteps(u16 phase)
+{
+    if (phase < 1) return 0;
+    if (phase < 2) return 1;
+    if (phase < 3) return 2;
+    if (phase < 4) return 1;
+    if (phase < 5) return 0;
+
+    return -1;
+}
+
+// What corner `i` shows at count `t`, on whichever path this is, or -1 for
+// nothing. Each corner is a quarter cycle behind the last.
+static int CornerSize(u32 i, u16 t)
+{
+    if (Ctr3dsRasteriserOnOwnCore())
+        return TwinkleSizeFrames((u16)((t + i * (NOTICE_FRAME_CYCLE / NOTICE_CORNERS))
+                                       % NOTICE_FRAME_CYCLE));
+
+    if (t < NOTICE_BURST)
+        return UI_SPARKLE_SIZES - 1;
+
+    return TwinkleSizeSteps((u16)((t + i * (NOTICE_STEP_CYCLE / NOTICE_CORNERS))
+                                  % NOTICE_STEP_CYCLE));
+}
 
 static bool8 NoticeTick(void)
 {
@@ -325,57 +398,107 @@ static bool8 NoticeTick(void)
 
     // A different encounter is a different panel. Restarting on the same
     // identity the dismiss logic keys on means the second shiny of a session
-    // gets its own opening burst instead of inheriting the first one's phase.
+    // gets its own opening glint or burst instead of inheriting the first one's
+    // phase.
     if (!sNoticeAnimSet || id != sNoticeAnimId)
     {
         sNoticeAnimId = id;
         sNoticeAnimSet = TRUE;
-        sNoticeStep = 0;
-        sNoticeOpened = TRUE;   // the panel itself has to be painted, not just
+        sNoticeTime = 0;
+        sNoticeFull = TRUE;     // the panel itself has to be painted, not just
         return TRUE;            // its sparkles
     }
 
-    sNoticeOpened = FALSE;
+    sNoticeFull = FALSE;
 
-    // Otherwise only on a step frame. Returning TRUE on the other eleven would
-    // repaint the screen to draw exactly what is already on it, which is the
-    // whole of what took the game to 30fps.
+    if (Ctr3dsRasteriserOnOwnCore())
+    {
+        sNoticeTime++;
+
+        // The glint is drawn into the panel itself (DrawNotice), so every one
+        // of its frames is a full repaint. So is the frame after its last,
+        // which paints the panel without it: skip that one and the band's last
+        // position stays in the snapshot, where every sparkle step after it
+        // would put it back.
+        if (sNoticeTime <= NOTICE_SWEEP_END)
+        {
+            sNoticeFull = TRUE;
+            return TRUE;
+        }
+
+        // After that only on a frame where some corner actually changes size,
+        // which is 24 of the 64 in a cycle. The other 40 would restore and
+        // redraw exactly what is already there, and upload an unchanged screen.
+        for (u32 i = 0; i < NOTICE_CORNERS; i++)
+            if (CornerSize(i, sNoticeTime) != CornerSize(i, (u16)(sNoticeTime - 1)))
+                return TRUE;
+
+        return FALSE;
+    }
+
+    // On one core, only on a step frame. Returning TRUE on the other eleven
+    // would repaint the screen to draw exactly what is already on it, which is
+    // the whole of what took the game to 30fps.
     if (!UiAnimStepped())
         return FALSE;
 
-    sNoticeStep++;
+    sNoticeTime++;
 
     return TRUE;
 }
 
-// Which frame of the art a corner shows at `phase`, or -1 for nothing.
+// The glint that crosses the panel as it opens, once, on the second-core path.
+// Drawn on the bare ground before the rule and the text, so it passes BEHIND
+// the headline the way light crosses glass rather than washing over the words.
 //
-// Thresholds rather than arithmetic because the three frames are 3, 6 and 16px
-// wide: an even hold on each reads as a jump into the big one, so the holds are
-// tuned against that. Dark for most of the cycle, which is what makes this a
-// twinkle rather than a pulse.
-static int TwinkleSize(u16 phase)
+// There is no alpha anywhere in this drawing layer -- UiFillRect writes solid
+// colour -- so a soft glow is not on offer. A narrow hard band moving quickly
+// is, and carrying the orange edge either side of the gold core is the same
+// trick the headline uses to keep a flat fill from reading as a flat bar.
+//
+// Not on the single-core path. There it could only move on the step clock, and
+// a 4px band crossing 224px needs roughly a position every 4px to read as
+// movement, which at five steps a second would take eleven seconds. Five
+// positions is not a sweep, it is four gold bars flashing in sequence, so that
+// path opens with the burst instead (CornerSize): a state CHANGE rather than
+// motion, which reads the same at any rate that clock can be set to.
+static void DrawSweep(u16 phase)
 {
-    if (phase < 1) return 0;
-    if (phase < 2) return 1;
-    if (phase < 3) return 2;
-    if (phase < 4) return 1;
-    if (phase < 5) return 0;
+    // The leading edge travels the interior plus the slant plus its own width,
+    // so the band starts fully off the left and finishes fully off the right
+    // rather than appearing and vanishing inside the panel.
+    int travel = NOTICE_IN_W + SWEEP_SLANT + SWEEP_W;
+    int lead = -(SWEEP_SLANT + SWEEP_W) + (int)phase * travel / NOTICE_SWEEP_END;
 
-    return -1;
+    for (int r = 0; r < NOTICE_IN_H; r++)
+    {
+        // Lower rows lag, which is the whole of the tilt.
+        int x = NOTICE_IN_X + lead
+              + (NOTICE_IN_H - 1 - r) * SWEEP_SLANT / NOTICE_IN_H;
+        int w = SWEEP_W;
+
+        // UiFillRect clamps to the SCREEN, and this layer has no clip
+        // rectangle at all, so the band has to be cut to the interior by hand
+        // or it paints straight out over the window frame.
+        if (x < NOTICE_IN_X)
+        {
+            w += x - NOTICE_IN_X;
+            x = NOTICE_IN_X;
+        }
+        if (x + w > NOTICE_IN_X + NOTICE_IN_W)
+            w = NOTICE_IN_X + NOTICE_IN_W - x;
+        if (w <= 0)
+            continue;
+
+        UiFillRect(x, NOTICE_IN_Y + r, w, 1, UI_COL_SHINY_EDGE);
+        if (w > 2)
+            UiFillRect(x + 1, NOTICE_IN_Y + r, w - 2, 1, UI_COL_SHINY);
+    }
 }
 
 // One sparkle per interior corner, each a quarter cycle behind the last and
 // ordered around the panel rather than in reading order, so the twinkle travels
 // round it instead of hopping across it.
-//
-// The first NOTICE_BURST steps light every corner at the largest frame at once.
-// That replaces the glint that used to cross the panel on opening, and the
-// reason is the step rate rather than taste: a 4px band crossing 224px needs
-// roughly a position every 4px to read as movement, which at five steps a
-// second would take eleven seconds. Five positions is not a sweep, it is four
-// gold bars flashing in sequence. A burst is a state CHANGE rather than motion,
-// so it reads the same at any rate this clock can be set to.
 //
 // All four corners are bare ground to draw on: the headline block, the species
 // line and the 100px DISMISS button are every one of them centred, which leaves
@@ -404,11 +527,7 @@ static void DrawCornerSparkles(void)
 {
     for (u32 i = 0; i < NOTICE_CORNERS; i++)
     {
-        u16 phase = (u16)((sNoticeStep + i * (NOTICE_CYCLE / NOTICE_CORNERS))
-                          % NOTICE_CYCLE);
-        int size = (sNoticeStep < NOTICE_BURST)
-                 ? UI_SPARKLE_SIZES - 1
-                 : TwinkleSize(phase);
+        int size = CornerSize(i, sNoticeTime);
 
         if (size >= 0)
             UiSparkle(NOTICE_IN_X + sCorners[i].dx,
@@ -418,8 +537,8 @@ static void DrawCornerSparkles(void)
 
 // The same four sparkles, over the snapshot rather than over a fresh panel.
 // This is the whole of an animation step's drawing when the notice is up: four
-// 16x14 restores and four glyphs, against the 4.9 ms it costs to rebuild the
-// screen for them.
+// 16x14 restores and four glyphs, against a rebuild of the whole screen for
+// them, which was 4.9 ms on the single-core path.
 static void RedrawNoticeSparkles(void)
 {
     for (u32 i = 0; i < NOTICE_CORNERS; i++)
@@ -447,6 +566,14 @@ static void DrawNotice(u16 species, u32 personality)
     // fix. A dark ground makes it read identically on all 20. The frame still
     // draws the border, so the panel is still visibly the player's.
     UiFillRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHADOW);
+
+    // On the bare ground and under everything else, so the opening glint passes
+    // behind the headline rather than over it. Second-core path only, and once
+    // per encounter: NoticeTick restarts the count for each new shiny, and asks
+    // for a full repaint on every glint frame plus one after, which is what
+    // takes the band back out of the snapshot the sparkles restore from.
+    if (Ctr3dsRasteriserOnOwnCore() && sNoticeTime < NOTICE_SWEEP_END)
+        DrawSweep(sNoticeTime);
 
     // Gold rule just inside the frame, two passes for a 2px line -- the same
     // idiom the selected move row and the EXTRA toggles use for emphasis.
@@ -929,8 +1056,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // to be causing the repaint.
     if (sInGame && NoticeTick())
     {
-        if (sNoticeOpened)
-            sNeedsRepaint = 1;   // the panel itself, not just its sparkles
+        // The panel appearing, or a frame of its glint: the panel itself, not
+        // just its sparkles.
+        if (sNoticeFull)
+            sNeedsRepaint = 1;
         else
             animNotice = 1;
     }
