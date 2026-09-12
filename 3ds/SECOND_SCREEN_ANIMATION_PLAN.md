@@ -1,8 +1,34 @@
 # Give the bottom screen its animations back
 
-**Status: proposed, not started.** Written 2026-09-12 against `ea832a8`, and
-re-checked against `893409a`, after TOUCH TO START. Every line reference below
-was read against that tree; re-check them before starting.
+**Status: implemented, all four stages; not yet measured on the console.**
+Written 2026-09-12 against `ea832a8`, and re-checked against `893409a`, after
+TOUCH TO START. Every line reference below was read against that tree, before
+the change; the function names are the stable anchors. This file is now the
+design record. The console logs under [Verification](#verification) are still
+to be taken, and its stop condition still applies: if the stage 1 numbers are
+bad, stages 2 and 3 are the ones to back out.
+
+**How it landed, where that differs from the text below:**
+
+- One commit per stage, subjects "second screen stage 1" to "stage 4", so each
+  can be built and measured on its own. Stage 2 without stage 3 runs the old
+  step-based twinkle on the new 6-frame clock, so the shiny panel twinkles at
+  twice its old speed on the second-core path until stage 3 replaces it.
+- The step-path names were split rather than kept: `NOTICE_CYCLE` became
+  `NOTICE_STEP_CYCLE` (8) beside `NOTICE_FRAME_CYCLE` (64), `TwinkleSize`
+  became `TwinkleSizeSteps` beside `TwinkleSizeFrames`, and `sNoticeStep`
+  became `sNoticeTime`, since it counts frames on one path and steps on the
+  other. `sNoticeOpened` became `sNoticeFull`, because glint frames set it too.
+  `CornerSize()` picks the table and the burst, and `OverlayIconFrame()` in
+  `tab_party.c` picks the baked icon frame, each from the guard.
+- `CtrVideoPresent()` uploads the bottom screen before its defensive
+  `CtrVideoRenderBegin()` call as well as before the wait, and the inline
+  path's slicing is gated on `sPpuCore < 0` explicitly rather than relying on
+  the dirty flag already being clear.
+- The single-core path still has the stalled-bar bug from row 5 of
+  [What was cut](#what-was-cut): only the second-core path repaints for a slide
+  under an overlay, as stage 2 specifies. One full repaint when a slide under
+  an overlay finishes would fix it there for the cost of one repaint.
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (the code as it actually is; read section 7 first),
 [UI_SKIN_PLAN.md](UI_SKIN_PLAN.md) (a reskin that shares the repaint path, see

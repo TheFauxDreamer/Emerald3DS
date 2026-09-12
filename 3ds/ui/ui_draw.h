@@ -154,9 +154,11 @@ void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp);
 
 // ---- partial repaint ------------------------------------------------------
 //
-// A full repaint is 4.9 ms, measured on hardware, and a frame has 5.7 ms of
-// slack (`framebegin`). Rebuilding all 320x240 to step two 32x32 mon icons is
-// what spends it, and the game loses a frame every time.
+// On the single-core path a full repaint is 4.9 ms, measured on hardware, and a
+// frame has 5.7 ms of slack (`framebegin`). Rebuilding all 320x240 to step two
+// 32x32 mon icons is what spends it, and the game loses a frame every time.
+// With the rasteriser on its own core a full repaint mostly hides behind the
+// render instead, but it is still the expensive way to move a few pixels.
 //
 // So: keep a copy of the last full paint, and let an animation put back the
 // piece it is about to redraw instead of the screen rebuilding itself. The
