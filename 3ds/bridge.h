@@ -68,6 +68,12 @@ const uint16_t *CtrBottomFramebuffer(void);
 // audio, and paces the game to the GBA frame rate.
 void Rp2350PresentFrame(void);
 
+// TRUE when the GBA rasteriser runs on its own core (core 2 on a New 3DS,
+// core 1 otherwise). Fixed at start-up, before CtrBottomInit(). When FALSE the
+// bottom screen keeps its single-core tuning: every repaint still costs a
+// VBlank on that path, see 3ds/SECOND_SCREEN_ANIMATION_PLAN.md.
+int Ctr3dsRasteriserOnOwnCore(void);
+
 // Save flash write hooks, called from src/agb_flash*.c. Reads go straight
 // through FLASH_BASE (gCtrSaveFlash); only writes come through here.
 // Return 0 on success, 0x80FF on failure.
