@@ -374,6 +374,9 @@ Working documents live beside the code they describe, all under `3ds/`:
 - [SECOND_SCREEN_ANIMATION_PLAN.md](3ds/SECOND_SCREEN_ANIMATION_PLAN.md), giving
   the bottom screen back the animation it gave up for frame rate, now that the
   rasteriser has its own core. Proposed, not started.
+- [ACHIEVEMENTS_PLAN.md](3ds/ACHIEVEMENTS_PLAN.md), built-in achievements on a
+  sixth bottom-screen tab with an unlock toast over any tab, plus why real
+  RetroAchievements is not the first step. Proposed, not started.
 
 The RP2350 and WASM targets still build (`make wasm`, and see
 [docs/BUILD.md](docs/BUILD.md)). The WASM build is deliberately kept:
