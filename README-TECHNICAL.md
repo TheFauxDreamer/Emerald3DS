@@ -371,6 +371,9 @@ Working documents live beside the code they describe, all under `3ds/`:
 - [SECOND_SCREEN_PLAN.md](3ds/SECOND_SCREEN_PLAN.md),
   [UI_SKIN_PLAN.md](3ds/UI_SKIN_PLAN.md) and
   [ICON_AND_BANNER_PLAN.md](3ds/ICON_AND_BANNER_PLAN.md), design records.
+- [SECOND_SCREEN_ANIMATION_PLAN.md](3ds/SECOND_SCREEN_ANIMATION_PLAN.md), giving
+  the bottom screen back the animation it gave up for frame rate, now that the
+  rasteriser has its own core. Proposed, not started.
 
 The RP2350 and WASM targets still build (`make wasm`, and see
 [docs/BUILD.md](docs/BUILD.md)). The WASM build is deliberately kept:

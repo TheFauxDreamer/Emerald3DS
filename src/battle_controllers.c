@@ -1380,6 +1380,25 @@ void BtlController_EmitTwoReturnValues(u8 bufferId, u8 ret8, u16 ret16)
 void BtlController_EmitChosenMonReturnValue(u8 bufferId, u8 partyId, u8 *battlePartyOrder)
 {
     s32 i;
+#if PLATFORM_3DS
+    u8 noPartyOrder[ARRAY_COUNT(gBattlePartyCurrentOrder)] = {0};
+
+    // Vanilla passes a literal NULL here from six places: the opponent, the
+    // in-game partner, both recorded controllers, and the player backing out of
+    // the party menu (plus PlayerHandleChosenMonReturnValue). The loop below
+    // then reads three bytes from address 0. On a GBA that is the BIOS and the
+    // read is free. On the ARM11 address 0 is unmapped, so it is a data abort,
+    // "Translation - Section", FAR 00000000. It fired as soon as a trainer sent
+    // out its second Pokemon (OpponentHandleChoosePokemon), and it only shows
+    // on hardware because Azahar lets an unmapped read through.
+    //
+    // Zeros are safe because no NULL path's bytes 2-4 are ever read. They are
+    // consumed only for link multi battles (UpdateBattlerPartyOrdersOnSwitch,
+    // Cmd_switchhandleorder), whose senders always pass a real order, and this
+    // port has no link.
+    if (battlePartyOrder == NULL)
+        battlePartyOrder = noPartyOrder;
+#endif
 
     sBattleBuffersTransferData[0] = CONTROLLER_CHOSENMONRETURNVALUE;
     sBattleBuffersTransferData[1] = partyId;
