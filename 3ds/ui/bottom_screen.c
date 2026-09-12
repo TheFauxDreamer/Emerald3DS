@@ -213,20 +213,17 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 
 // -------------------------------------------------------- animation clock --
 //
-// One clock for every animation on this screen, and the reason there is only
-// one is arithmetic rather than tidiness.
+// One clock for every animation on this screen. Which path the port is on
+// (Ctr3dsRasteriserOnOwnCore) picks its period, because the two have different
+// budgets.
 //
-// A repaint costs the game an entire extra VBlank -- measured, not assumed: at
-// 60 repaints a second the game ran at 30fps and at 10 it ran at 53, which is
+// ON ONE CORE (no second core could be had, or a CTR_PPU_THREAD=0 build), a
+// repaint costs the game an entire extra VBlank. Measured, not assumed: at 60
+// repaints a second the game ran at 30fps and at 10 it ran at 53, which is
 // fps = 3600 / (60 + repaints per second) to within the reading error. So the
 // frame rate is set by HOW OFTEN this screen repaints and barely at all by what
-// it draws.
-//
-// That was measured with the rasteriser on the same core as this paint. It now
-// runs on a second core while this paints (3ds/host/video.c), so a repaint
-// shorter than the rasteriser costs the frame nothing. The formula still holds
-// for the single-core fallback, and every repaint is still an upload, so the
-// budget below stands.
+// it draws, and the reason there is only one clock there is arithmetic rather
+// than tidiness.
 //
 // Every animation asks for its repaint through the same sNeedsRepaint flag, so
 // two of them coalesce into one repaint only when they land on the SAME frames.
@@ -235,14 +232,20 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 // rate a property of this screen rather than of how many things happen to be
 // moving on it.
 //
-// 12 frames is 5 steps a second. It also has to stay clear of the host's
-// upload: 3ds/host/video.c hands a repaint to the GPU 48 rows at a time, five
-// frames per repaint, so that the top screen keeps its 60fps. A step period
-// shorter than five frames would ask for the next picture before the last one
-// had finished arriving, and the bottom screen would be uploading on every
-// frame -- which is the cost this is all avoiding. 12 leaves seven idle frames
-// between runs.
-#define UI_ANIM_STEP_FRAMES 12
+// 12 frames is 5 steps a second. On that path it also has to stay clear of the
+// host's upload: 3ds/host/video.c hands a repaint to the GPU 48 rows at a time,
+// five frames per repaint, so that the top screen keeps its 60fps. A step
+// period shorter than five frames would ask for the next picture before the
+// last one had finished arriving, and the bottom screen would be uploading on
+// every frame -- which is the cost this is all avoiding. 12 leaves seven idle
+// frames between runs.
+//
+// WITH A SECOND CORE the rasteriser runs there while this paints, and the host
+// uploads the whole screen inside that same overlap, before it collects the
+// render. A step then costs the frame nothing and reaches the panel on the
+// frame it was painted, so there is nothing for a slow clock to save. It runs
+// at 6, which is Emerald's own party menu pace (sAnim_0, src/pokemon_icon.c).
+#define UI_ANIM_STEP_FRAMES (Ctr3dsRasteriserOnOwnCore() ? 6 : 12)
 
 static u8    sAnimSub;
 static bool8 sAnimStepped;
@@ -260,9 +263,11 @@ bool8 UiAnimStepped(void)
 // frame, because the overlay has that layer to itself -- anything drawn there
 // while the panel is up would land ON TOP of the panel, the overlay being part
 // of the snapshot the layer paints over. A tab with a piece deferred to that
-// layer has to draw a still version of it into its own paint instead, or the
-// piece is simply missing for as long as the panel is up. See DrawCell in
-// tab_party.c, which is the case that found this.
+// layer has to draw it into its own paint instead, or the piece is simply
+// missing for as long as the panel is up. See DrawCell in tab_party.c, which is
+// the case that found this. On the second-core path the shell then asks for a
+// full repaint on every frame that piece moves (CtrBottomUpdate), so it keeps
+// moving under the panel; on the single-core path it is drawn still.
 bool8 UiOverlayActive(void)
 {
     return NoticeActive(NULL, NULL) || UiQuickBallActive();
@@ -740,8 +745,8 @@ static void Redraw(void)
 // That is why it is an else rather than both. What it does NOT mean is that the
 // tab's deferred pieces stop existing -- the panel is 240x112 in the middle of a
 // 320x192 area, and only one of the party's six icons is fully behind it. A tab
-// with a piece deferred to this layer draws a still version of it into its own
-// paint while UiOverlayActive(), which is where the other five come from.
+// with a piece deferred to this layer draws it into its own paint while
+// UiOverlayActive(), which is where the other five come from.
 static void DrawAnimatedLayer(void)
 {
     if (NoticeActive(NULL, NULL))
@@ -751,7 +756,7 @@ static void DrawAnimatedLayer(void)
     // paints over now CONTAINS the strip, and the party grid's bottom row of
     // icons sits under it, so redrawing them here would punch them straight
     // through the panel. UiOverlayActive() is TRUE for the strip precisely so
-    // that DrawCell paints still icons into the tab instead.
+    // that DrawCell paints the icons into the tab instead.
     else if (!UiQuickBallActive() && sTab == UI_TAB_PARTY)
         UiPartyRedrawAnimated();
 }
@@ -796,9 +801,9 @@ void CtrBottomUpdate(const CtrTouchState *touch)
 
     UpdateInGameLatch();
 
-    // One clock for every animation, advanced before any tick reads it. See
-    // UI_ANIM_STEP_FRAMES: this is what stops two animations costing twice the
-    // frame rate of one.
+    // The step clock, advanced before any tick reads it. See
+    // UI_ANIM_STEP_FRAMES: on the single-core path this is what stops two
+    // animations costing twice the frame rate of one.
     sAnimStepped = (++sAnimSub >= UI_ANIM_STEP_FRAMES);
     if (sAnimStepped)
         sAnimSub = 0;
@@ -884,13 +889,28 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         {
             sNeedsRepaint = 1;
         }
-        // ...but not while the quick-throw strip is up. DrawAnimatedLayer has
-        // nothing to draw for the party then -- the icons are frozen into the
-        // tab's own paint, which is what UiOverlayActive() asked it for -- so
-        // the cheap path would put back four rects that already hold what they
-        // held and then make the host upload an unchanged screen. The tick
-        // itself still runs, so the phase carries on underneath and the icons
-        // pick up where they were when the strip goes down.
+        // An overlay has the animated layer to itself, so while one is up the
+        // party's moving parts (the icons and the sliding HP block) are
+        // painted into the tab by DrawCell instead. On the second-core path
+        // every step is therefore a full repaint, which costs the frame nothing
+        // there, and the grid keeps moving under the panel. The cheap path
+        // cannot do it: it does not redraw the party at all while an overlay is
+        // up, so a bar that starts sliding under one stalls at whatever the
+        // last full paint baked, which is what the single-core path below
+        // still does.
+        else if (UiOverlayActive() && Ctr3dsRasteriserOnOwnCore())
+        {
+            sNeedsRepaint = 1;
+        }
+        // The single-core path, where the party is frozen under an overlay to
+        // save the repaints: no cheap redraw while the quick-throw strip is up.
+        // DrawAnimatedLayer has nothing to draw for the party then -- the icons
+        // are frozen into the tab's own paint, which is what UiOverlayActive()
+        // asked it for -- so the cheap path would put back four rects that
+        // already hold what they held and then make the host upload an
+        // unchanged screen. The tick itself still runs, so the phase carries on
+        // underneath and the icons pick up where they were when the strip goes
+        // down.
         else if (!UiQuickBallActive())
         {
             animParty = 1;

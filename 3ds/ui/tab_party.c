@@ -168,11 +168,13 @@ static s8 sMoveSel = -1;
 // file's own counter and not the game's.
 //
 // Emerald's own party menu swaps these every six frames, ten times a second,
-// and that is what this did first. It cost 7fps: a repaint on this screen costs
-// an entire VBlank, so ten of them a second is fps = 3600/(60+10) = 51, and 53
-// is what the hardware actually showed. Five steps a second is about 55fps.
-// Half the game's pace is the price of those four frames, and the icons are
-// visibly slower than the ones in the game's own party menu because of it.
+// and that is what this did first. On the single-core path it cost 7fps: a
+// repaint there costs an entire VBlank, so ten of them a second is
+// fps = 3600/(60+10) = 51, and 53 is what the hardware actually showed. So on
+// that path the clock steps every twelve frames, five times a second, which is
+// about 55fps, and the icons are visibly slower than the game's own party menu
+// because of it. With the rasteriser on its own core a step costs the frame
+// nothing, and the clock is back at six: the game's pace.
 static u32   sShownHp[PARTY_SIZE];
 static u32   sShownMax[PARTY_SIZE];
 static u32   sShownSpecies[PARTY_SIZE];
@@ -305,6 +307,19 @@ bool8 UiPartyAnimOnly(void)
         return FALSE;
 
     return sIconStepped || sHpMoving;
+}
+
+// The frame DrawCell and DrawDetail bake a mon icon at while an overlay has the
+// animated layer.
+//
+// On the second-core path, the live one. The shell repaints the whole screen
+// for every step while an overlay is up (CtrBottomUpdate), so the icons keep
+// cycling under it at the same pace as anywhere else. On the single-core path,
+// frame 0: nothing repaints for a step there, so the icon is a still, and a
+// still icon is what frame 0 is for.
+static u8 OverlayIconFrame(void)
+{
+    return Ctr3dsRasteriserOnOwnCore() ? sIconFrame : 0;
 }
 
 #define ARROW_GAP 3
@@ -566,24 +581,23 @@ static void DrawCell(int index)
 
     // The icon is NOT normally drawn here. It is the animated layer, painted
     // after the shell takes its snapshot, so the snapshot holds the still
-    // background beneath it -- see UiPartyRedrawIcons. Drawing it here too would
-    // bake a frame into that background, and since a mon icon blits with index 0
-    // transparent, the baked frame would show through the next one.
+    // background beneath it -- see UiPartyRedrawAnimated. Drawing it here too
+    // would bake a frame into that background, and since a mon icon blits with
+    // index 0 transparent, the baked frame would show through the next one.
     //
     // The exception is a modal overlay. While one is up it owns the animated
-    // layer, so UiPartyRedrawIcons is not called and the icons are not drawn at
-    // all -- and they cannot just be added to that layer, because it paints over
-    // a snapshot that already contains the panel and they would land on top of
-    // it. So they go into the still paint here instead, and the panel covers the
-    // one of the six it actually overlaps.
+    // layer, so UiPartyRedrawAnimated is not called and the icons are not drawn
+    // at all -- and they cannot just be added to that layer, because it paints
+    // over a snapshot that already contains the panel and they would land on
+    // top of it. So they go into the paint here instead, and the panel covers
+    // the one of the six it actually overlaps.
     //
-    // Frame 0 rather than sIconFrame: this is a still icon, which is exactly
-    // what UiMonIcon is for. There is no ghosting risk in baking it, because the
-    // restore-and-redraw that would show through it is the very thing not
-    // running while the overlay is up.
+    // There is no ghosting risk in baking one, because the restore-and-redraw
+    // that would show through it is the very thing not running while the
+    // overlay is up. See OverlayIconFrame for which frame.
     if (UiOverlayActive())
-        UiMonIcon(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
-                  GetMonData(mon, MON_DATA_PERSONALITY));
+        UiMonIconFrame(cx + CELL_ICON_X, cy + rows->iconY, (u16)species,
+                       GetMonData(mon, MON_DATA_PERSONALITY), OverlayIconFrame());
 
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
@@ -615,8 +629,11 @@ static void DrawCell(int index)
     // icon above is handled. Baking them would leave the old value behind when
     // a step restores the rect.
     //
-    // While an overlay is up it owns that layer, so bake a still version or the
-    // block is simply missing for as long as the panel is.
+    // While an overlay is up it owns that layer, so bake the block here or it
+    // is simply missing for as long as the panel is. It draws the sliding
+    // value, so on the second-core path, where the shell repaints for every
+    // step under an overlay, the bar keeps sliding. On the single-core path it
+    // holds whatever value the last full paint caught.
     if (UiOverlayActive())
         DrawCellHp(index, cx, cy, rows);
 
@@ -884,10 +901,11 @@ static void DrawDetail(void)
     }
 
     // Likewise not drawn here: the detail view's icon is animated too, and
-    // UiPartyRedrawIcons paints it after the snapshot. And likewise the overlay
-    // exception -- see the longer note in DrawCell.
+    // UiPartyRedrawAnimated paints it after the snapshot. And likewise the
+    // overlay exception -- see the longer note in DrawCell.
     if (UiOverlayActive())
-        UiMonIcon(12, 12, (u16)species, GetMonData(mon, MON_DATA_PERSONALITY));
+        UiMonIconFrame(12, 12, (u16)species,
+                       GetMonData(mon, MON_DATA_PERSONALITY), OverlayIconFrame());
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(52, 12, name, UiThemeText(), UiThemeShadow());
