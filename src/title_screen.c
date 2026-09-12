@@ -450,19 +450,20 @@ static void CreateCopyrightBanner(s16 x, s16 y)
 }
 
 #if PLATFORM_3DS
-// Whether the bottom screen should be showing TOUCH TO START, and which half of
-// the blink it is in. Read from the banner's own sprites rather than from a
-// count kept on the bottom screen, so that the two screens blink together.
+// The PRESS START banner's own frame count, which the bottom screen's TOUCH TO
+// START blinks by, or -1 when the banner is not up. Read from the banner's
+// sprites rather than counted on the bottom screen, so the two blinks keep a
+// fixed phase against each other.
 //
 // The callback test matters as much as the task test. Once START is taken, or
 // the music runs out and the title heads back to the intro, the task is still
 // allocated but MainCB2 no longer runs it, and the prompt has to go at once.
-u8 Ctr3dsTitlePromptState(void)
+s32 Ctr3dsTitlePromptClock(void)
 {
     u32 i;
 
     if (gMain.callback2 != MainCB2 || !FuncIsActiveTask(Task_TitleScreenPhase3))
-        return CTR3DS_TITLE_PROMPT_NONE;
+        return -1;
 
     // The five PRESS START pieces were created on the same frame and blink in
     // step, so the first one found speaks for all of them. sAnimate is what
@@ -474,10 +475,10 @@ u8 Ctr3dsTitlePromptState(void)
         if (sprite->inUse
          && sprite->callback == SpriteCB_PressStartCopyrightBanner
          && sprite->sAnimate == TRUE)
-            return sprite->invisible ? CTR3DS_TITLE_PROMPT_DARK : CTR3DS_TITLE_PROMPT_LIT;
+            return (u16)sprite->sTimer;
     }
 
-    return CTR3DS_TITLE_PROMPT_NONE;
+    return -1;
 }
 
 // Set by the bottom screen at the end of a frame, and taken by

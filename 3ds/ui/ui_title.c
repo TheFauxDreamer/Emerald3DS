@@ -53,9 +53,37 @@ static const char sArt[TITLE_ART_H][TITLE_ART_W + 1] =
 static u16   sPal[TITLE_PAL_COUNT];
 static bool8 sPalLoaded;
 
+// The banner's own blink, from SpriteCB_PressStartCopyrightBanner: it is lit
+// while bit 4 of its frame count is set, so 16 frames lit and 16 dark.
+#define BANNER_BLINK_FRAMES  16
+
+// This one blinks at half that rate, 32 lit and 32 dark. The banner's pace
+// suits its size up there, but the prompt here is bigger and read closer to,
+// where the same pace looks busy. It is timed off the banner's frame count, not
+// a count kept here, and a power of two, because what is tested is one bit of
+// that count.
+//
+// The offset makes it light on a frame the banner lights on, every time. The
+// banner first lights at count 16, and without the offset this would not light
+// until 32, so the bottom would come up half a second after the top did.
+#define TITLE_BLINK_FRAMES   32
+#define TITLE_BLINK_OFFSET   (TITLE_BLINK_FRAMES - BANNER_BLINK_FRAMES)
+
+enum { PROMPT_NONE, PROMPT_LIT, PROMPT_DARK };
+
+static u32 PromptState(void)
+{
+    s32 clock = Ctr3dsTitlePromptClock();
+
+    if (clock < 0)
+        return PROMPT_NONE;
+
+    return ((clock + TITLE_BLINK_OFFSET) & TITLE_BLINK_FRAMES) ? PROMPT_LIT : PROMPT_DARK;
+}
+
 void UiTitleDraw(void)
 {
-    if (Ctr3dsTitlePromptState() != CTR3DS_TITLE_PROMPT_LIT)
+    if (PromptState() != PROMPT_LIT)
         return;
 
     if (!sPalLoaded)
@@ -64,7 +92,7 @@ void UiTitleDraw(void)
         sPalLoaded = TRUE;
     }
 
-    // 622 pixels at 2x2, once every 16 frames and only on the title screen.
+    // 622 pixels at 2x2, once every 32 frames and only on the title screen.
     // TITLE_X is even, so every one of these is a single paired store per row.
     for (int row = 0; row < TITLE_ART_H; row++)
     {
@@ -90,11 +118,11 @@ void UiTitleTouch(const CtrTouchState *t)
     if (t == NULL || !t->justReleased)
         return;
 
-    if (Ctr3dsTitlePromptState() != CTR3DS_TITLE_PROMPT_NONE)
+    if (PromptState() != PROMPT_NONE)
         Ctr3dsTitleTouchStart();
 }
 
 u32 UiTitleStateKey(void)
 {
-    return Ctr3dsTitlePromptState();
+    return PromptState();
 }
