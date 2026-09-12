@@ -317,6 +317,13 @@ single-core path for comparison, and the port falls back to it by itself if no
 second core is available. Everything below still holds for that path, and the
 upload cost holds for both.
 
+Measured on a New 3DS XL, the rasteriser took about 4.5 ms a frame and 8.6 ms at
+worst, core 0 had about 10 ms to spare, and the longest frame in five minutes of
+play, repaints included, was 16.76 ms, which is one VBlank. Azahar's numbers are
+off in either direction depending on its CPU clock setting;
+[the cheatsheet](3ds/SECOND_SCREEN_CHEATSHEET.md#measured-after-the-move) puts
+the three side by side.
+
 Two things that cost a lot of time to learn:
 
 - **`C3D_FrameEnd` is not the VBlank wait.** `C3D_FRAME_SYNCDRAW` waits at
