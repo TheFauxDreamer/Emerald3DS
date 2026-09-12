@@ -134,9 +134,10 @@ static int sReady;
 //            builds, for comparison.
 //
 // SAME FRAME, NOT PIPELINED. The render is started once the game's frame is
-// finished and collected before this frame's upload, so the picture on screen
-// is the one the game just produced and input latency does not change. What
-// overlaps is the rasteriser against the bottom paint and the audio.
+// finished and collected before this frame's top upload, so the picture on
+// screen is the one the game just produced and input latency does not change.
+// What overlaps is the rasteriser against the bottom paint, the bottom upload
+// and the audio.
 //
 // THE ISOLATION RULE, which is the whole of the thread-safety argument: the
 // worker reads only the snapshot below and writes only sGbaFrame and sGbaLayer.
@@ -304,6 +305,14 @@ static void ppu_thread_stop(void)
     threadFree(sPpuThread);
     sPpuThread = NULL;
     sPpuCore = -1;
+}
+
+// Settled once, by ppu_thread_start() inside CtrVideoInit(), which main() runs
+// before CtrBottomInit(). The bottom screen reads it to pick its tuning, so it
+// is constant for everything that asks.
+int Ctr3dsRasteriserOnOwnCore(void)
+{
+    return sPpuCore >= 0;
 }
 
 // Copy the video state out of gGbaMem and start rasterising it.
@@ -520,10 +529,18 @@ static const char *const kProfBot[3] = {
 // Copy a linear w x h RGB565 image into a wider staging buffer, then let the
 // transfer engine tile it into the texture.
 //
-// The TOP screen's path, and now only that. It stays whole-image because it has
-// to be: the game's frame is new every frame and there is nowhere to spread the
-// cost to. At 256x160 it moves 81,920 bytes, which fits. The bottom screen is
-// three times that and got its own sliced path below.
+// The TOP screen's path on every frame, and the BOTTOM screen's whenever a
+// second core is rasterising.
+//
+// The top stays whole-image because it has to be: the game's frame is new every
+// frame and there is nowhere to spread the cost to. At 256x160 it moves 81,920
+// bytes, which fits.
+//
+// The bottom is three times that, about 2 ms with the copy, and whether that
+// fits depends on where it runs. With a second core it runs before the join in
+// CtrVideoPresent, inside the time core 0 would otherwise spend waiting for the
+// rasteriser, so the whole picture lands on the frame it was painted. Without
+// one there is no such time, and the inline path slices it instead (below).
 static void upload(uint16_t *stage, int stageW, const uint16_t *src,
                    int w, int h, C3D_Tex *tex, const char *const *prof)
 {
@@ -550,22 +567,27 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
     CtrProfile(prof[2], t);
 }
 
-// The bottom screen's upload, pushed a slice at a time.
+// The bottom screen's upload on the INLINE path, pushed a slice at a time. With
+// a second core rasterising none of this runs: upload() above sends the whole
+// picture, overlapped with the rasteriser, and a slice would only make every
+// repaint land up to five frames late for no saving.
 //
 // The asymmetry here is the whole design: the TOP screen has to hold 60fps, and
 // the bottom is allowed to arrive late. Before this, it was not allowed to --
 // a full bottom upload happened inside one frame, and it cost the game a whole
 // VBlank every time the UI repainted. Measured through the animations that
 // caused it: repainting 60 times a second ran the game at 30fps, 10 times a
-// second at 53, which is fps = 3600 / (60 + repaints per second).
+// second at 53, which is fps = 3600 / (60 + repaints per second). That was
+// with the rasteriser, the paint and this upload all taking turns on core 0,
+// which is still exactly the inline path.
 //
 // A full bottom upload moves 245,760 bytes -- THREE TIMES the top screen's,
 // because the stage is 512 wide for a 320-wide image -- through a blocking
 // transfer. So the frame budget picks the slice, not the picture: 48 rows is
 // 49,152 bytes, under two thirds of what the top screen already uploads every
 // frame without trouble. A repaint takes five frames to reach the panel instead
-// of one, and on a screen whose animations step five times a second that is
-// invisible.
+// of one, and on this path the screen's animations step five times a second,
+// so that is invisible.
 //
 // 48 because it is a multiple of 8. A tiled texture stores eight rows to a
 // strip and strips run in order, so any 8-row-aligned band is a contiguous run
@@ -675,6 +697,19 @@ void CtrVideoPresent(void)
     if (!sReady)
         return;
 
+    // The bottom screen, whole, BEFORE the join, when a second core is
+    // rasterising. It reads only the UI's own framebuffer, which is final once
+    // CtrBottomUpdate() has returned, and the rasteriser never touches that or
+    // the bottom texture, so this can run while the render is still going: its
+    // ~2 ms comes out of what `ppu.wait` would otherwise have spent idle.
+    if (sPpuCore >= 0 && CtrBottomIsDirty()) {
+        t0 = CtrTimeNowMs();
+        upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
+               CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex, kProfBot);
+        CtrBottomClearDirty();
+        CtrLogSlow("upload.bot", t0);
+    }
+
     // The frame the game just finished writing: collect it from the worker, or
     // rasterise it here when there is no worker.
     t0 = CtrTimeNowMs();
@@ -687,8 +722,9 @@ void CtrVideoPresent(void)
             CtrVideoRenderBegin();
 
         // ppu.wait is how long the main thread was left with nothing to do.
-        // Near zero means the paint and audio took as long as the rasteriser;
-        // close to `ppu` means the second core bought nearly all of it back.
+        // Near zero means the paint, the bottom upload and the audio took as
+        // long as the rasteriser; close to `ppu` means the second core bought
+        // nearly all of it back.
         tw = CtrTicksNow();
         LightEvent_Wait(&sPpuDone);
         __dmb();
@@ -731,23 +767,27 @@ void CtrVideoPresent(void)
            &sTopTex, kProfTop);
     CtrLogSlow("upload.top", t0);
 
-    // The bottom screen is mostly static, so only re-tile it when the UI says
-    // something actually changed -- and then hand it over a slice per frame
-    // rather than all at once, so no single frame loses its budget to it.
+    // The inline path's bottom upload. The bottom screen is mostly static, so
+    // only re-tile it when the UI says something actually changed -- and then
+    // hand it over a slice per frame rather than all at once, because on this
+    // path there is no idle time to hide it in, and no single frame should lose
+    // its budget to it. The second-core path uploaded above.
     //
     // Cleared as soon as the snapshot is taken, not when the run finishes: a
     // repaint arriving mid-run is a NEW picture, and it gets its own run after
     // this one rather than being lost or tearing into it.
-    if (sBotRow >= CTR_BOTTOM_HEIGHT && CtrBottomIsDirty()) {
-        snapshot_bottom();
-        CtrBottomClearDirty();
-        sBotRow = 0;
-    }
+    if (sPpuCore < 0) {
+        if (sBotRow >= CTR_BOTTOM_HEIGHT && CtrBottomIsDirty()) {
+            snapshot_bottom();
+            CtrBottomClearDirty();
+            sBotRow = 0;
+        }
 
-    if (sBotRow < CTR_BOTTOM_HEIGHT) {
-        t0 = CtrTimeNowMs();
-        upload_bottom_slice();
-        CtrLogSlow("upload.bot", t0);
+        if (sBotRow < CTR_BOTTOM_HEIGHT) {
+            t0 = CtrTimeNowMs();
+            upload_bottom_slice();
+            CtrLogSlow("upload.bot", t0);
+        }
     }
 
     // THE frame's sync point, and the one number that says whether this port has
