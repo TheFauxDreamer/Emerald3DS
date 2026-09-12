@@ -512,6 +512,35 @@ Read these instead of `framebegin` alone:
 
 Every 600 frames the log also says how many frames missed VBlank, if any did.
 
+#### Measured after the move
+
+The same build (`7db93d4`) in three places, from logs that each included battle
+repaints: about 80 seconds in each Azahar run, five minutes on the console.
+
+| Stage | Azahar, 100% clock | Azahar, 300% clock | New 3DS XL |
+|---|---|---|---|
+| `ppu` mean / worst | ~9,000 / 18,650 µs | ~3,000 / 6,215 µs | ~4,500 / 8,581 µs |
+| `ppu.snap` mean | ~310 µs | ~165 µs | ~720 µs (worst 1,398) |
+| `paint` mean | 4,000 to 7,900 µs | 1,450 to 2,400 µs | 2,400 to 3,900 µs |
+| `framebegin` mean (spare time) | ~6,000 µs | ~13,000 µs | ~10,300 µs |
+| `frame` worst | 33,442 µs, 5 missed in one window | 16,741 µs | 16,762 µs, none missed |
+
+Azahar emulates the Old 3DS's 268 MHz clock even in New 3DS mode
+(`cpu_clock_percentage` defaults to 100), so an Azahar log shows the rasteriser
+at about twice what it costs on a New 3DS. Its five missed frames came from the
+rasteriser alone running past a frame (`ppu` worst 18,650 µs), which no amount
+of overlap with the paint can hide. Raised to 300% it errs the other way and
+shows about two thirds of the console's cost; by the same arithmetic, about 200%
+would match the console. The setting is per game, in
+`custom/000400000FF3D500.ini` under Azahar's config directory
+(`~/Library/Application Support/Azahar/config/` on a Mac; the title ID comes from
+`UniqueId 0xFF3D5` in `emerald3ds.rsf`). Edit it only while Azahar is closed,
+because Azahar rewrites its config on exit.
+
+`ppu.snap` is where Azahar misleads most: 0.7 ms on the console against 0.16 ms
+at 300%. It is the one piece of the rasteriser's cost still on core 0, so it is
+the first thing to trim if core 0 ever needs time back.
+
 The rules below still stand, for two reasons. Every repaint is still an upload.
 And the single-core path is still live: the port falls back to it when no second
 core is available, and `make -C 3ds CTR_PPU_THREAD=0` builds it deliberately, so
