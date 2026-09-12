@@ -577,10 +577,10 @@ static u32 UiStateHash(void)
     // it would never be drawn at all. Zero while it is down.
     top[6] = UiQuickBallStateKey();
 
-    // The title screen's TOUCH TO START, which blinks with the PRESS START
-    // banner. A slot of its own for the same reason as the two above, and just
-    // as necessary: nothing else here moves when the banner blinks, so without
-    // it the prompt would never appear. Zero once the game is running. Safe
+    // The title screen's TOUCH TO START, which blinks on the PRESS START
+    // banner's clock. A slot of its own for the same reason as the two above,
+    // and just as necessary: nothing else here moves when the prompt blinks, so
+    // without it the prompt would never appear. Zero once the game runs. Safe
     // before there is a save block, because it reads only gMain, the tasks and
     // the sprites.
     top[7] = sInGame ? 0 : UiTitleStateKey();
@@ -672,8 +672,8 @@ static void Redraw(void)
 
     // Before the game proper is running there is nothing meaningful to show,
     // and a menu floating under the title screen looks broken. The one thing
-    // drawn here is the title's TOUCH TO START, and only while PRESS START is
-    // lit on the top screen.
+    // drawn here is the title's TOUCH TO START, and only in the lit half of its
+    // blink.
     if (!sInGame)
     {
         UiClear(0);

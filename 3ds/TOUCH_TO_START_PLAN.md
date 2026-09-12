@@ -1,9 +1,14 @@
 # TOUCH TO START on the bottom screen
 
-**Status: implemented** as planned, in `3ds/ui/ui_title.c` and
-`src/title_screen.c`. This file is the design record. Line numbers below were
-taken on 2026-09-12 at `ea832a8`, before the change; the function names are the
-stable anchors.
+**Status: implemented**, in `3ds/ui/ui_title.c` and `src/title_screen.c`. This
+file is the design record. Line numbers below were taken on 2026-09-12 at
+`ea832a8`, before the change; the function names are the stable anchors.
+
+**One change since the plan:** the bottom prompt blinks at half the banner's
+rate (32 frames lit, 32 dark) rather than copying it. It is still timed off the
+banner's own frame count, so `Ctr3dsTitlePromptState()` below became
+`Ctr3dsTitlePromptClock()`, and the rate and phase live in `ui_title.c` as
+`TITLE_BLINK_FRAMES`.
 
 ## Context
 

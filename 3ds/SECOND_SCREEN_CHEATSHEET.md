@@ -115,7 +115,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
-| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 100 / 34 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering and blinking with it, and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
+| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 128 / 35 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
@@ -380,7 +380,7 @@ in Options, being handed the Pokedex.
 | `top[4]` | the active tab's own key, dispatched by `sTab` |
 | `top[5]` | whether the shiny notice is up |
 | `top[6]` | `UiQuickBallStateKey()`, zero while the quick-throw strip is down |
-| `top[7]` | `UiTitleStateKey()`: whether the title's PRESS START is lit, dark or not up, **only while `!sInGame`**. Read from the banner's own sprites, which is what keeps TOUCH TO START blinking with it |
+| `top[7]` | `UiTitleStateKey()`: zero unless the title's PRESS START is up, otherwise which half of TOUCH TO START's blink is showing, **only while `!sInGame`**. Timed off the banner's own frame count (`Ctr3dsTitlePromptClock()`), so it keeps a fixed phase with the top screen |
 | then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
 
 The party fields used to be folded on every tab, so in a battle each hit
