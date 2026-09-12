@@ -1,7 +1,8 @@
 # Give the bottom screen its animations back
 
-**Status: proposed, not started.** Written 2026-09-12 against `ea832a8`. Every
-line reference below was read against that tree; re-check them before starting.
+**Status: proposed, not started.** Written 2026-09-12 against `ea832a8`, and
+re-checked against `893409a`, after TOUCH TO START. Every line reference below
+was read against that tree; re-check them before starting.
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (the code as it actually is; read section 7 first),
 [UI_SKIN_PLAN.md](UI_SKIN_PLAN.md) (a reskin that shares the repaint path, see
@@ -21,6 +22,7 @@ tuning for the one path that still has no second core.
 - [Context](#context)
 - [Decisions](#decisions)
 - [What was cut](#what-was-cut)
+- [TOUCH TO START](#touch-to-start)
 - [What it will cost](#what-it-will-cost)
 - [How this meets the skin plan](#how-this-meets-the-skin-plan)
 - [Changes, in stages](#changes-in-stages)
@@ -72,9 +74,9 @@ Visible losses, oldest first. "Before" is how the code was first written.
 | # | What | Before | Now | What the player sees today |
 |---|---|---|---|---|
 | 1 | Bottom upload sliced (`66e6da5`) | whole screen in one frame | 48 rows a frame, five frames per picture ([host/video.c:579](host/video.c#L579)); a new picture waits for a run in flight ([:741](host/video.c#L741)) | every bottom animation shows at 12 fps at most; a tap or tab switch lands up to 5 frames late, up to 9 if a run is in flight, and wipes down in bands |
-| 2 | Icon pace (`daa46b6`) | swap every 6 frames, `ICON_ANIM_FRAMES`, the pace of Emerald's own party menu | every 12 frames on the shared clock ([ui/bottom_screen.c:244](ui/bottom_screen.c#L244)) | icons visibly slower than the in-game party menu |
-| 3 | Shiny twinkle (`daa46b6`) | every frame, `NOTICE_CYCLE` 64 frames: each size held 4/4/6/4/4 frames, then dark for 42; corners 16 frames apart | 8 steps of 12 frames ([:292](ui/bottom_screen.c#L292), [:351](ui/bottom_screen.c#L351)); each size held 12 frames; corners 24 apart | five changes a second |
-| 4 | Shiny glint (`daa46b6`) | a slanted 4 px gold band crossing the panel behind the text over 24 frames (`DrawSweep`, `NOTICE_SWEEP_END`, `SWEEP_W`, `SWEEP_SLANT`) | removed; a two-step "burst" stands in ([:297](ui/bottom_screen.c#L297)) | the effect is gone |
+| 2 | Icon pace (`daa46b6`) | swap every 6 frames, `ICON_ANIM_FRAMES`, the pace of Emerald's own party menu | every 12 frames on the shared clock ([ui/bottom_screen.c:245](ui/bottom_screen.c#L245)) | icons visibly slower than the in-game party menu |
+| 3 | Shiny twinkle (`daa46b6`) | every frame, `NOTICE_CYCLE` 64 frames: each size held 4/4/6/4/4 frames, then dark for 42; corners 16 frames apart | 8 steps of 12 frames ([:293](ui/bottom_screen.c#L293), [:352](ui/bottom_screen.c#L352)); each size held 12 frames; corners 24 apart | five changes a second |
+| 4 | Shiny glint (`daa46b6`) | a slanted 4 px gold band crossing the panel behind the text over 24 frames (`DrawSweep`, `NOTICE_SWEEP_END`, `SWEEP_W`, `SWEEP_SLANT`) | removed; a two-step "burst" stands in ([:298](ui/bottom_screen.c#L298)) | the effect is gone |
 | 5 | Party frozen under an overlay (`ccc5fd7`, `0d221a3`, `5219f5b`, `92f3947`) | icons kept animating under the shiny panel, and bars kept sliding | all six icons baked at frame 0 while the shiny panel or the quick-throw strip is up ([ui/tab_party.c:584](ui/tab_party.c#L584), [:889](ui/tab_party.c#L889)), and the HP block baked at whatever value it had ([:620](ui/tab_party.c#L620)) | the grid stops moving at every action select of a catchable battle, and **a bar that starts sliding under an overlay stalls near its old value** until something else forces a repaint. That part is a bug, not a trade-off |
 | 6 | BATTLE ANIM toggle (`92f3947`) | none | EXTRA page 3, default ON ([ui/tab_extra.c:431](ui/tab_extra.c#L431)) | its hint, "off = smoother battles", stops being true |
 
@@ -82,6 +84,23 @@ Efficiency changes from the same commits stay exactly as they are, because they
 cost nothing visible and reverting them would only cost time: the snapshot and
 restore-rect cheap path (`ccc5fd7`), the 32-bit fills (`15efa7b`), the matchup
 memo and the HP block on the animated layer (`92f3947`).
+
+## TOUCH TO START
+
+The title screen's prompt ([ui/ui_title.c](ui/ui_title.c)) arrived after this
+plan was written. It is a bottom-screen animation too, but it runs before the
+game starts and was never cut for frame rate, so it is not a row above. The plan
+touches it in one place:
+
+- **Stage 2 leaves it alone.** It blinks on the title banner's own frame count
+  (`Ctr3dsTitlePromptClock()`, 32 frames lit and 32 dark), not on
+  `UiAnimStepped()`, and it repaints through its own hash slot, `top[7]`, as a
+  full `paint.blank` (the `!sInGame` branch of `Redraw`). Halving
+  `UI_ANIM_STEP_FRAMES` does not change its pace.
+- **Stage 1 improves it.** The prompt sits in the third 48-row slice, so today
+  it lights about 3 frames after PRESS START does on the top screen
+  ([TOUCH_TO_START_PLAN.md](TOUCH_TO_START_PLAN.md), "Cost"). With the
+  whole-screen upload the two light on the same frame.
 
 ## What it will cost
 
@@ -183,7 +202,7 @@ the second-core path:
 
 ### Stage 2: the clock, and the party under an overlay
 
-**Clock.** `UI_ANIM_STEP_FRAMES` ([ui/bottom_screen.c:244](ui/bottom_screen.c#L244))
+**Clock.** `UI_ANIM_STEP_FRAMES` ([ui/bottom_screen.c:245](ui/bottom_screen.c#L245))
 becomes a function of the guard: 6 on the second-core path, 12 otherwise. The
 icons already flip on `UiAnimStepped()`
 ([ui/tab_party.c:248](ui/tab_party.c#L248)), so they get the game's pace back
@@ -196,8 +215,8 @@ with no change of their own.
   `UiOverlayActive()`.
 - `CtrBottomUpdate()` asks for a **full** repaint whenever `UiPartyTick()` moves
   anything while `UiOverlayActive()`
-  ([ui/bottom_screen.c:865](ui/bottom_screen.c#L865)). Today that branch skips
-  the cheap redraw under the strip ([:878](ui/bottom_screen.c#L878)), and under
+  ([ui/bottom_screen.c:881](ui/bottom_screen.c#L881)). Today that branch skips
+  the cheap redraw under the strip ([:894](ui/bottom_screen.c#L894)), and under
   the shiny panel it runs a cheap redraw that draws only sparkles and uploads an
   unchanged screen.
 - The baked HP block ([ui/tab_party.c:620](ui/tab_party.c#L620)) already reads
@@ -211,17 +230,17 @@ with no change of their own.
 
 On the second-core path only:
 
-- `NoticeTick()` ([ui/bottom_screen.c:310](ui/bottom_screen.c#L310)) counts
+- `NoticeTick()` ([ui/bottom_screen.c:311](ui/bottom_screen.c#L311)) counts
   frames rather than steps.
 - Restore the per-frame twinkle: `NOTICE_CYCLE` 64 and the original
   `TwinkleSize` thresholds from `38d8870` (`git show 38d8870 --
   3ds/ui/bottom_screen.c`), as a second table beside the step-based one
-  ([:351](ui/bottom_screen.c#L351)). Keep the cycle a power of two, for the
+  ([:352](ui/bottom_screen.c#L352)). Keep the cycle a power of two, for the
   reason the comment above `NOTICE_CYCLE` gives.
 - Return TRUE only on frames where some corner's size actually changes, so a
   frame with nothing new uploads nothing.
 - Restore `DrawSweep()` from the same commit, drawn in `DrawNotice()`
-  ([:427](ui/bottom_screen.c#L427)) behind the rule and the text while the frame
+  ([:428](ui/bottom_screen.c#L428)) behind the rule and the text while the frame
   count is under `NOTICE_SWEEP_END` (24). Each glint frame asks for a full
   repaint, plus one more after the last so the band leaves the snapshot before
   the cheap sparkle path resumes.
@@ -236,17 +255,21 @@ The single-core path keeps the step-based twinkle and the burst unchanged.
   smoother battles". The toggle, its setting and its default are unchanged.
 - **Cheatsheet section 7:** "So there is one clock", "Keep the step period
   longer than a slice run" and "A moving thing needs a rate its motion survives"
-  ([SECOND_SCREEN_CHEATSHEET.md:574](SECOND_SCREEN_CHEATSHEET.md#L574),
-  [:586](SECOND_SCREEN_CHEATSHEET.md#L586)) become rules of the single-core
+  ([SECOND_SCREEN_CHEATSHEET.md:582](SECOND_SCREEN_CHEATSHEET.md#L582),
+  [:594](SECOND_SCREEN_CHEATSHEET.md#L594)) become rules of the single-core
   path. Say what the second-core path does instead.
 - **Cheatsheet section 2:** the frame path shows the upload after the join; move
   it before.
 - **README-TECHNICAL.md:** one sentence that the bottom upload is whole-screen
   and overlapped on the second-core path.
+- **TOUCH_TO_START_PLAN.md:** its "Cost" paragraph says the bottom prompt trails
+  the top by about 3 frames. Add that the trail is gone on the second-core path.
+  Its "16-frame toggle" there predates the 32-frame blink, which the file's own
+  status note already records.
 - **Comments that state a single-core rule as universal**, rewritten to say which
   path they describe:
-  - the clock comment at [ui/bottom_screen.c:244](ui/bottom_screen.c#L244) and
-    the repaint figures at [:750](ui/bottom_screen.c#L750);
+  - the clock comment at [ui/bottom_screen.c:245](ui/bottom_screen.c#L245) and
+    the repaint figures at [:762](ui/bottom_screen.c#L762);
   - "Half the game's pace is the price" at
     [ui/tab_party.c:174](ui/tab_party.c#L174), and the 4.9 ms at
     [:297](ui/tab_party.c#L297);
@@ -260,11 +283,11 @@ The single-core path keeps the step-based twinkle and the burst unchanged.
     `UiPartyRedrawAnimated` redraws all six.
   - [ui/tab_party.c:569](ui/tab_party.c#L569), [:574](ui/tab_party.c#L574) and
     [:887](ui/tab_party.c#L887) name `UiPartyRedrawIcons`, since renamed.
-  - [SECOND_SCREEN_CHEATSHEET.md:567](SECOND_SCREEN_CHEATSHEET.md#L567) names
+  - [SECOND_SCREEN_CHEATSHEET.md:575](SECOND_SCREEN_CHEATSHEET.md#L575) names
     `UiPartyIconOnly()`, now `UiPartyAnimOnly()`, and says a slide forces a full
     rebuild; it takes the cheap path now.
   - "Dark for most of the cycle" at
-    [ui/bottom_screen.c:349](ui/bottom_screen.c#L349) is wrong for the step
+    [ui/bottom_screen.c:350](ui/bottom_screen.c#L350) is wrong for the step
     version, where each corner is lit five steps of eight.
 
 ## Verification
@@ -274,6 +297,23 @@ build is checked by the `build-3ds` CI workflow. The UI changes are gated at
 runtime, so one binary exercises both tunings; only `host/video.c`'s inline path
 is compile-time, behind `CTR_PPU_THREAD`. CI does not build that variant, so
 build `make -C 3ds CTR_PPU_THREAD=0` once wherever the CIA is built.
+
+Game-side files (`3ds/ui/*.c`, `src/*.c`) can still be syntax-checked on the Mac
+with clang, run from the repository root:
+
+```sh
+clang --target=armv6k-none-eabihf -march=armv6k -mfloat-abi=hard -ffreestanding \
+  -fsyntax-only -std=gnu11 -isystem <dir with a stub string.h> -iquote include \
+  -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=0 -D__INTELLISENSE__ <file>
+```
+
+`-D__INTELLISENSE__` takes the IDE branch in `include/global.h`, which turns
+`INCBIN` into `{0}`, so no generated assets are needed. The stub `string.h`
+declares `memcpy`, `memset`, `strlen` and the like, because the bare-metal
+target has no libc headers. Judge the result by clang's exit status, not by
+filtering its output: without the stub the first include is fatal, the file's
+own diagnostics never appear, and that reads as a clean pass. Host files
+(`3ds/host/*.c`) still need devkitPro or CI.
 
 **Console log, after stage 1 and again after stage 4.** On the New 3DS XL, then
 in Azahar, play several wild battles including a shiny test encounter (EXTRA
@@ -295,6 +335,8 @@ the one part that can be removed outright (see [Later](#later-not-in-scope)).
 - the shiny panel opens with the glint crossing behind "SHINY!", and the corners
   twinkle smoothly;
 - a tab switch appears in one frame, with no band wiping down the screen;
+- on the title screen, TOUCH TO START lights on the same frame as PRESS START on
+  the top screen;
 - HP bars slide smoothly on the bottom screen;
 - under the quick-throw strip and the shiny panel, icons keep moving and bars
   keep sliding, and nothing draws over either panel;
