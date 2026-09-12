@@ -1,7 +1,9 @@
 # TOUCH TO START on the bottom screen
 
-**Status: proposed, not implemented.** Line numbers below were taken on
-2026-09-12 at `ea832a8`; the function names are the stable anchors.
+**Status: implemented** as planned, in `3ds/ui/ui_title.c` and
+`src/title_screen.c`. This file is the design record. Line numbers below were
+taken on 2026-09-12 at `ea832a8`, before the change; the function names are the
+stable anchors.
 
 ## Context
 
