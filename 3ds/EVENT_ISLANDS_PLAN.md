@@ -13,6 +13,12 @@ then; the script and function names are the stable anchors.
   wasn't given gets flags, as planned. `giveitem` itself says nothing on a full
   bag (`EventScript_NoRoomForItem` only sets `VAR_RESULT`), which is why the
   script shows `gText_TooBadBagIsFull` itself.
+- **No catch check, from the second commit on.** The first skipped an item
+  whose island Pokémon was already caught, as the Mystery Gift scripts do. A
+  legit save showed that can only hurt: its legendaries had been transferred
+  from Sapphire, which sets none of the island flags, so it was fine, but a
+  save with a catch flag set and the item missing (a save editor can make one)
+  would have been stuck below 4/4 on New Adventures Await for good.
 - **One give helper for all four,** `Ctr3ds_EventScript_GiveEventItemIfMissing`.
   It takes the item in `VAR_0x8000`, the scratch var `giveitem` overwrites
   anyway, so a caller sees nothing a plain `giveitem` wouldn't do.
@@ -85,9 +91,10 @@ What the game already does:
   conditions, and the four callers.
 - **One "needed" check per item:** `Ctr3ds_EventScript_EonTicketNeeded` and
   three siblings, each setting `VAR_RESULT`. An item is needed unless the player
-  already has both it and its enable flag, or has already caught its Pokémon
-  (both of Ho-Oh and Lugia for the Mystic Ticket), mirroring the gift scripts'
-  guards.
+  already has both it and its enable flag. Catches are not consulted, unlike the
+  gift scripts: an island catch leaves its item in the bag, so a catch check
+  never decides anything on a legit save and could only strand one whose flags
+  and bag disagree.
 - **`Ctr3ds_EventScript_AnyEventTicketNeeded`:** FALSE if `FLAG_SYS_GAME_CLEAR`
   is unset. Otherwise it runs the four checks, stopping at the first TRUE. Every
   caller is already gated on the Hall of Fame, but this way the file refuses
