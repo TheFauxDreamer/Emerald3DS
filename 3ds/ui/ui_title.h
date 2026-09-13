@@ -10,6 +10,10 @@
 // Task_TitleScreenPhase3 (src/title_screen.c) reads beside its own START test,
 // so the fade, the music and the hand-off to the main menu are the title
 // screen's own code rather than a second copy of it.
+//
+// For as long as the prompt is up, the bottom-right corner also shows which
+// build this is (Ctr3dsBuildId, ../bridge.h), in small dim text. That is the
+// only place it appears.
 
 #ifndef CTR_UI_TITLE_H
 #define CTR_UI_TITLE_H
@@ -17,9 +21,9 @@
 #include "global.h"
 #include "../bridge.h"
 
-// Paints TOUCH TO START in the lit half of its blink, and nothing otherwise, so
-// the dark half is simply the blank screen. For the shell's pre-game paint,
-// over a cleared screen.
+// Paints TOUCH TO START in the lit half of its blink, and the build id in the
+// corner in both halves; nothing at all off the title. For the shell's
+// pre-game paint, over a cleared screen.
 void UiTitleDraw(void);
 
 // A release anywhere on the screen, while the prompt is up, is START. It still

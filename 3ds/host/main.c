@@ -26,6 +26,16 @@
 #ifndef CTR_BUILD_STAMP
 #define CTR_BUILD_STAMP "build stamp unknown"
 #endif
+#ifndef CTR_BUILD_ID
+#define CTR_BUILD_ID "unknown"
+#endif
+
+// The title screen's corner (3ds/ui/ui_title.c). Here rather than game side
+// because this is the one file rebuilt on every make, so it cannot go stale.
+const char *Ctr3dsBuildId(void)
+{
+    return CTR_BUILD_ID;
+}
 
 int  CtrVideoInit(void);
 void CtrVideoExit(void);

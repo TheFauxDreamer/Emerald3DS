@@ -38,6 +38,15 @@ int UiTextWidth(const u8 *str);
 int UiTextBig(int x, int y, const u8 *str, u16 fg, u16 shadow);
 int UiTextBigWidth(const u8 *str);
 
+// The game's small font (FONT_SMALL, gFontSmallLatinGlyphs): letters 7px tall
+// on a 5px advance, against the normal font's 9 on 6. For incidental text that
+// must not compete with anything else on the screen, like the build id in the
+// title screen's corner. Everything that is actually read stays in UiText.
+#define UI_GLYPH_SMALL_H 13   // gCurGlyph.height for the Small Latin font
+
+int UiTextSmall(int x, int y, const u8 *str, u16 fg, u16 shadow);
+int UiTextSmallWidth(const u8 *str);
+
 // Right-aligned variant, for HP and quantities that should line up.
 int UiTextRight(int xRight, int y, const u8 *str, u16 fg, u16 shadow);
 

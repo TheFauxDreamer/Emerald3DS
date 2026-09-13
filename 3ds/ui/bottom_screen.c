@@ -858,8 +858,8 @@ static void Redraw(void)
 
     // Before the game proper is running there is nothing meaningful to show,
     // and a menu floating under the title screen looks broken. The one thing
-    // drawn here is the title's TOUCH TO START, and only in the lit half of its
-    // blink.
+    // drawn here is the title's TOUCH TO START, only in the lit half of its
+    // blink, with the build id in the corner while it is up.
     if (!sInGame)
     {
         UiClear(0);

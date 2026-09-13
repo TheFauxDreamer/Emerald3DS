@@ -74,6 +74,13 @@ void Rp2350PresentFrame(void);
 // VBlank on that path, see 3ds/SECOND_SCREEN_ANIMATION_PLAN.md.
 int Ctr3dsRasteriserOnOwnCore(void);
 
+// Which build this is: `git describe --always --dirty` when it was built, e.g.
+// "bc688ed", "bc688ed-dirty" for a tree with uncommitted changes, or "nogit"
+// for one built outside a repository. ASCII, never NULL. The title screen
+// prints it in the bottom screen's corner, so a player can check which build
+// is installed; the boot log carries it too, with the time it was built.
+const char *Ctr3dsBuildId(void);
+
 // Save flash write hooks, called from src/agb_flash*.c. Reads go straight
 // through FLASH_BASE (gCtrSaveFlash); only writes come through here.
 // Return 0 on success, 0x80FF on failure.
