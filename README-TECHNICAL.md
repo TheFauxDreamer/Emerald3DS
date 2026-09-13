@@ -324,8 +324,11 @@ upload cost holds for both.
 
 Measured on a New 3DS XL, the rasteriser took about 4.5 ms a frame and 8.6 ms at
 worst, core 0 had about 10 ms to spare, and the longest frame in five minutes of
-play, repaints included, was 16.76 ms, which is one VBlank. Azahar's numbers are
-off in either direction depending on its CPU clock setting;
+play, repaints included, was 16.76 ms, which is one VBlank. That still held once
+the bottom screen's animations were restored (`59a0ba6`): about two and a half
+minutes of battles with the shiny panel up, at up to 33 bottom-screen uploads a
+second, had a longest frame of 16.77 ms and about 10 ms to spare. Azahar's
+numbers are off in either direction depending on its CPU clock setting;
 [the cheatsheet](3ds/SECOND_SCREEN_CHEATSHEET.md#measured-after-the-move) puts
 the three side by side.
 

@@ -588,14 +588,25 @@ Since then the bottom upload has moved inside the overlap too: whole-screen,
 before the join (section 2), where it used to be sliced and after it. That
 gave the bottom screen its animations back
 ([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)). Core 0's
-share of the overlap is now paint plus upload. Estimated from the New 3DS XL
-figures above (animation step 0.9 to 1.2 ms, bottom copy 0.8 ms, flush plus
-transfer about 0.25 ms per 48 rows), to be replaced by a console log:
+share of the overlap is now paint plus upload. Measured on the New 3DS XL at
+`59a0ba6`, over about two and a half minutes that included wild battles with the
+shiny panel up:
 
 | Case | Core 0 inside the overlap | Frame |
 |---|---|---|
-| An animation step (icons, twinkle, HP slide) | ~1 ms paint + ~2 ms upload | hidden behind the rasteriser |
-| A full repaint (glint frame, overlay change, a step under an overlay) | 2.4 to 3.9 ms paint + ~2 ms upload | up to ~1.75 ms past the join, about 11 ms worst against 16.7 |
+| A sparkle step | ~0.07 ms paint + ~1.6 ms upload | hidden behind the rasteriser |
+| A party grid step (icons and HP blocks) | ~0.9 ms paint + ~1.6 ms upload | hidden behind the rasteriser |
+| A full repaint with the shiny panel up (so every step under an overlay) | ~4.1 ms paint (4.7 worst) + ~1.6 ms upload | about 1 ms past the join |
+
+The longest frame was 16,766 µs and none missed VBlank. `ppu.wait` averaged
+2.6 ms even in the busiest window, at about 33 uploads a second, and
+`framebegin` stayed at 10.2 to 10.9 ms, the same spare time as before the
+animations came back. The upload is about 0.7 ms in windows of full paints
+alone and 1.45 to 1.75 ms in battle windows made mostly of animation steps,
+where the copy alone averages about 1 ms (2.1 ms worst). Azahar at 300% shows
+that upload as 0.28 ms, about a sixth of the console's cost, so read it on the
+console. The plan's [Measured](SECOND_SCREEN_ANIMATION_PLAN.md#measured)
+section has the full table.
 
 The rules below are the **single-core path's**, and that path is still live:
 the port falls back to it when no second core is available, and
