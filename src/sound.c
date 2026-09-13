@@ -507,20 +507,32 @@ bool8 IsCryFinished(void)
     }
 }
 
+// UB: gMPlay_PokemonCry is NULL until the first cry plays. If the player skips
+// the intro, a double battle can stop a cry before any cry plays.
 void StopCryAndClearCrySongs(void)
 {
-    m4aMPlayStop(gMPlay_PokemonCry);
+#ifdef UBFIX
+    if (gMPlay_PokemonCry != NULL)
+#endif
+        m4aMPlayStop(gMPlay_PokemonCry);
     ClearPokemonCrySongs();
 }
 
 void StopCry(void)
 {
-    m4aMPlayStop(gMPlay_PokemonCry);
+#ifdef UBFIX
+    if (gMPlay_PokemonCry != NULL)
+#endif
+        m4aMPlayStop(gMPlay_PokemonCry);
 }
 
 bool8 IsCryPlayingOrClearCrySongs(void)
 {
+#ifdef UBFIX
+    if (gMPlay_PokemonCry != NULL && IsPokemonCryPlaying(gMPlay_PokemonCry))
+#else
     if (IsPokemonCryPlaying(gMPlay_PokemonCry))
+#endif
     {
         return TRUE;
     }
@@ -533,7 +545,11 @@ bool8 IsCryPlayingOrClearCrySongs(void)
 
 bool8 IsCryPlaying(void)
 {
+#ifdef UBFIX
+    if (gMPlay_PokemonCry != NULL && IsPokemonCryPlaying(gMPlay_PokemonCry))
+#else
     if (IsPokemonCryPlaying(gMPlay_PokemonCry))
+#endif
         return TRUE;
     else
         return FALSE;
