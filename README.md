@@ -85,6 +85,15 @@ caption when they apply:
   than a spoiler for it. It follows the randomiser when that is on, and it
   follows you from room to room inside a cave.
 
+**TROPHY.** 48 achievements, earned by playing: the eight badges, the Champion,
+the legends, Pokédex milestones, contests, the Battle Frontier symbols, and a
+few odder ones (use Splash, hit a jackpot, catch a shiny). Every one is read
+from the game's own data, and counters show how far along the shorter goals
+are. Progress is kept per playthrough, keyed on your trainer ID, so a new game
+starts a fresh list, and loading a save that already has badges unlocks them
+straight away. Nothing syncs to RetroAchievements; `3ds/ACHIEVEMENTS_PLAN.md`
+says why.
+
 **EXTRA.** Three pages of port settings.
 
 *Page 1* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
@@ -123,8 +132,9 @@ forty rows of their party grid during a wild battle.
 
 **A fourth page exists in debug builds only.** It holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
-every tab regardless of what the save has unlocked, and silence one half of the
-mixer at a time. One value in `3ds/bridge.h` turns the page off, and turning it
+every tab regardless of what the save has unlocked, silence one half of the
+mixer at a time, and fire a test achievement toast or re-derive the save's
+achievements. One value in `3ds/bridge.h` turns the page off, and turning it
 off also pins those settings to their harmless values, so a `settings.bin`
 written by a debug build cannot leave a player with a muted channel and no
 control to unmute it.
@@ -157,6 +167,13 @@ already tell you twice, with a recoloured sprite and a sparkle, but both land in
 the first second of a battle whose transition you may not have been watching,
 and neither survives being missed.
 
+**Achievement toasts, over every tab.** When one unlocks, a gold strip appears
+across the top of the bottom screen with its name and a VIEW button that opens
+the list on it. It goes by itself after four seconds, and anything you did not
+look at leaves a gold dot on the TROPHY tab until you do. The strip ends exactly
+where the shiny panel begins, which ends exactly where the quick-throw strip
+begins, so all three can be up at once without covering each other.
+
 The whole interface follows your **Options → Frame** border choice, live, as you
 cycle through it.
 
@@ -176,6 +193,7 @@ emulator.
 | Tweaks: EXP All, level cap, randomiser, bag sort | ✅ |
 | Battle items from the touch screen | ✅ |
 | Bottom: quick throw of your last used ball | ✅ |
+| Bottom: achievements and unlock toasts | 🚧 On the `achievements` branch, not yet tested on a console |
 | Audio | ✅ Stereo PCM16: music, cries and PSG. Needs a DSP firmware dump |
 | Link cable and wireless | 🚧 On the `local-wireless` branch, unbuilt and untested |
 | Battery life, sustained timing | ❓ Never measured over a long session |

@@ -200,6 +200,24 @@ static u32 PlayerId(void)
     return T1_READ_32(gSaveBlock2Ptr->playerTrainerId);
 }
 
+// TRUE while the save in memory is the playthrough being scored. Everything
+// that reads a condition asks this first, and it is not the same question as
+// sLive: the save block changes owner without passing through the overworld.
+//
+//   New Game: the trainer ID changes in Birch's speech, over the old save's
+//   flags, until NewGameInitData() clears them.
+//
+//   Soft reset: the intro reloads the save on the card, which need not be the
+//   playthrough just being played. Start a new game, never save it, reset, and
+//   the old save is back in memory under the new game's record.
+//
+// In both, the ID in the save block stops matching the adopted one, so nothing
+// is evaluated until the next overworld frame adopts whoever it now is.
+static bool8 Current(void)
+{
+    return sLive && SaveLive() && PlayerId() == sPlayerId;
+}
+
 static void QueueToast(u16 index, u16 batch)
 {
     if (sToastLen == TOAST_QUEUE)
@@ -226,8 +244,8 @@ static bool8 Owns(u16 species)
         && GetSetPokedexFlag(SpeciesToNationalPokedexNum(species), FLAG_GET_CAUGHT);
 }
 
-// How far along a definition is right now. Only ever called with save data to
-// read: every caller checks SaveLive() or sLive first.
+// How far along a definition is right now. Only ever called while Current():
+// there is save data to read, and it belongs to the adopted playthrough.
 static u32 Value(const struct AchDef *d)
 {
     u32 n = 0;
@@ -335,15 +353,10 @@ void AchTick(void)
     if (!SaveLive())
         return;
 
-    if (gMain.callback2 == CB2_Overworld)
-    {
-        u32 id = PlayerId();
+    if (gMain.callback2 == CB2_Overworld && !Current())
+        Adopt(PlayerId());
 
-        if (!sLive || id != sPlayerId)
-            Adopt(id);
-    }
-
-    if (!sLive)
+    if (!Current())
         return;
 
     // One definition a frame: about fifty frames for the whole table, and a
@@ -359,7 +372,7 @@ void AchTick(void)
 
 void Ctr3dsAchOnCaught(struct Pokemon *mon)
 {
-    if (!sLive || mon == NULL || !IsMonShiny(mon))
+    if (!Current() || mon == NULL || !IsMonShiny(mon))
         return;
 
     for (u16 i = 0; i < ACH_COUNT; i++)
@@ -388,7 +401,7 @@ static void LocalGet(u16 i, struct AchView *out)
 
     if (out->unlocked)
         value = d->goal;
-    else if (sLive && SaveLive())
+    else if (Current())
         value = Value(d);
 
     out->progress = value > d->goal ? d->goal : value;
@@ -474,7 +487,7 @@ void AchDebugTestToast(void)
 
 void AchDebugResync(void)
 {
-    if (!sLive || !SaveLive())
+    if (!Current())
         return;
 
     for (u32 b = 0; b < CTR_ACH_BYTES; b++)

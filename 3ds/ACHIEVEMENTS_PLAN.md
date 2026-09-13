@@ -1,10 +1,46 @@
 # Achievements plan
 
-**Status: proposed, not started.** Written 2026-09-12 against `04aebdd`, and
-re-checked 2026-09-13 against `480dc6b`, after the second-screen animation
-stages ([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)).
-Every line reference below was read against that tree; re-check them before
-starting.
+**Status: implemented on the `achievements` branch, not yet built by CI or
+tested on a console.** Written 2026-09-12 against `04aebdd`, and re-checked
+2026-09-13 against `480dc6b`, after the second-screen animation stages
+([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)). This file
+is now the design record. Its line references were read before the change;
+the function names are the stable anchors.
+
+**How it landed, where that differs from the text below:**
+
+- **Five commits**, "achievements 1" to "achievements 5", in the build order
+  below: the host store, the definitions and provider, the TROPHY tab, the
+  toast and the tab-bar dot, then the debug row and the docs.
+- **The hash slots are the other way round:** `top[8]` is the provider's key
+  (it landed with the tab) and `top[9]` is the toast's.
+- **48 achievements, not "about 50", and two groups were dropped.** The
+  complete Hoenn Pokédex and National 300 both need trade evolutions, and this
+  port cannot trade yet (ROADMAP Part E keeps them for later). Two conditions
+  changed on reading the game: the Secret Base checks the player's own base slot
+  (`secretBases[0].secretBaseId`), because `GAME_STAT_MOVED_SECRET_BASE` only
+  counts moving out, and Latias/Latios asks the Pokédex, because catching the
+  roamer sets no flag. Every game stat used was checked for a live increment
+  (`IncrementGameStat`, or `incrementgamestat` in the battle and map scripts).
+- **The text limits are the list's real ones:** 212px for a title and 268px for
+  a description, not 150 and 288. Counters are drawn only for goals up to 999,
+  so the 100,000-step goal has none and cannot repaint the tab on every step.
+- **The batch toast says "N achievements unlocked"**, not "from your save": a
+  full queue folds into a batch as well, and the text has to be true for both.
+- **Paint order puts the toast before the notice**, not after it. The shell's
+  rule is that the alert paints last, so it survives any future overlap, and a
+  catchable shiny is the more urgent of the two.
+- **The debug controls are a seventh row on the debug page**, whose grid was
+  re-fitted from 22px buttons at a 26px pitch to 20px at 22 to make room. RESET
+  became **RESYNC**: it forgets and re-derives from the save rather than
+  leaving an empty list, which a state-based set would refill a second later
+  anyway. It takes a second tap. The row's note is the text-width check.
+- **UiAscii learned the UTF-8 e-acute**, so the text says Pokémon the way the
+  game does; the achievement table spells it with octal escapes so the source
+  stays ASCII.
+- **The shell gained `UiActiveTab()`**, so the toast can drop VIEW on the
+  TROPHY tab itself.
+- **Not done:** the optional glint. The toast is static.
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists

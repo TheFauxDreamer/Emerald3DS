@@ -708,3 +708,30 @@ run (published as the `emerald3ds-elf` artifact alongside `emerald3ds.map`).
 
 `svcOutputDebugString` output needs `Debug.Emulated:Debug` in Azahar's
 `log_filter`, or the traces are discarded before reaching the log.
+
+---
+
+# Part E: Achievements (built in; RetroAchievements later, maybe)
+
+The built-in set is done: 48 achievements, the TROPHY tab and the unlock toast.
+[ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record. What is left:
+
+- **Trade-dependent goals.** The complete Hoenn Pokedex and anything much past
+  200 in the National one need trade evolutions, so they were left out rather
+  than shipped unearnable. They can be appended (never inserted: the table is
+  append-only) once the Cable Club from Part C works.
+- **A RetroAchievements provider.** The TROPHY tab and the toast read only
+  through `AchActive()` (`3ds/achievements.h`), so a second provider replaces
+  the built-in one without touching either. Casual (softcore) unlocks are
+  accepted from unrecognised clients, and HayatoG/tmc's Minish Cap Switch port
+  ships exactly this. Three things stand in the way here that tmc did not have:
+  - **No ROM to hash.** tmc hashes the player's `baserom.gba`. This port needs
+    no ROM, so it would have to claim the retail hash, which RA does not
+    support for decomp ports.
+  - **No retail memory map.** `EWRAM_DATA`/`IWRAM_DATA` are plain `.bss` here,
+    and RA's Emerald set follows the save-block pointers, which move on every
+    warp. It needs a retail-address translation layer that rewrites pointer
+    values, built from a GBA `.map` that CI cannot produce without agbcc.
+  - **Plumbing.** curl + mbedtls portlibs, a network thread with responses
+    handed back to the main thread, swkbd login storing only the token, and
+    text-only badges because there is no libpng.

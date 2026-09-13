@@ -118,7 +118,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 947 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 164 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 360 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 369 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/tab_party.c](ui/tab_party.c) | 944 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP and mon-icon animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
@@ -127,11 +127,20 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 128 / 35 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
+| [ui/tab_trophy.c](ui/tab_trophy.c) | 358 | The TROPHY tab: the achievements list, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
+| [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 178 / 56 | The achievement toast: the third overlay, y 0..40, with a VIEW button into the TROPHY tab |
+
+Game side outside `ui/`: [achievements.c](achievements.c) /
+[.h](achievements.h) hold what each achievement is, when it unlocks, and the
+provider interface the TROPHY tab and the toast read through. See
+[ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md).
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
 and the rasteriser's worker thread that runs alongside the paint),
-[host/settings.c](host/settings.c) (persistence).
+[host/settings.c](host/settings.c) (persistence), and
+[host/achievements.c](host/achievements.c) (the per-playthrough achievement
+bits, written the way settings are).
 
 ---
 
@@ -153,8 +162,9 @@ tab bar is painted **after** it returns, so it must not draw below
 ### Overlays
 
 An overlay is drawn over whichever tab just painted, and claims its rect of
-touches before any tab sees them. There are two, and they are worth reading as a
-pair because they answer the same question differently:
+touches before any tab sees them. There are three. The first two are worth
+reading as a pair because they answer the same question differently, and the
+third is what copying them looks like:
 
 - The **shiny notice** ([bottom_screen.c:137](ui/bottom_screen.c#L137)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
@@ -168,6 +178,16 @@ pair because they answer the same question differently:
   third overlay. Its geometry starts at y 152 for one reason: the notice ends
   there, so the two abut exactly and neither has to paint over the other's
   border in the case where both are up, which is a catchable shiny.
+- The **achievement toast** ([ui_achtoast.c](ui/ui_achtoast.c)) is that
+  copy: a 320x40 band along the TOP of the content area, in its own file, with
+  the same `Active` / `Draw` / `Touch` / `StateKey` / `Tick` calls. Its `Touch`
+  returns TRUE for VIEW and the shell does the tab switch, because the shell
+  owns `sTab`. It ends at y 40, where the notice begins, so the
+  three tile the 192px content area and can all be up at once. It is bound to
+  a rare event (an unlock) and expires after four seconds, which is the tight
+  bracket the paragraph below asks of any overlay. Paint order puts it before
+  the notice, so the shiny alert is still the one that survives if geometry
+  ever overlaps.
 
 An overlay that is up for a COMMON state rather than a rare one has a cost the
 notice does not pay. Every tab's layout is hand-fitted to a 192px content area,
@@ -205,8 +225,8 @@ Finally, `UiOverlayActive()` is not bookkeeping. A tab that defers drawing to
 the shell's animated layer paints those pieces into its own paint while it is
 TRUE, and the reason is that the layer paints over a snapshot which now
 contains the overlay. The party grid's bottom row of mon icons sits under the
-strip, and would otherwise be redrawn straight through it on every animation
-step. The overlay is painted after the tab, so nothing the tab paints
+strip, and its top row under the achievement toast, and either would otherwise
+be redrawn straight through the panel on every animation step. The overlay is painted after the tab, so nothing the tab paints
 can show through it. What happens next depends on the path:
 
 - **Second core:** `CtrBottomUpdate` asks for a **full** repaint on every frame
@@ -218,8 +238,10 @@ can show through it. What happens next depends on the path:
 - **Single core:** the icons are baked at frame 0 and the HP block at whatever
   value the last full paint caught, and nothing repaints for them. The layer
   has nothing to draw for the party, so `CtrBottomUpdate` also skips asking for
-  the cheap animated redraw while the strip is up, or the host would upload an
-  unchanged screen five times a second. A bar that starts sliding under an
+  the cheap animated redraw while the strip or the toast is up, or the host
+  would upload an unchanged screen five times a second. (The notice needs no
+  such exclusion: its sparkles take the layer, so a cheap redraw with it up
+  still has something to draw.) A bar that starts sliding under an
   overlay therefore stalls near its old value on this path until something
   else forces a repaint.
 
@@ -230,8 +252,10 @@ and (192-112)/2 are both 40.
 ### Adding a tab
 
 The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
-53px, which is about the practical floor for a fingertip. Do not add a seventh.
-`SECOND_SCREEN_PLAN.md` proposes converting EXTRA into a launcher instead.
+53px, which is about the practical floor for a fingertip, and TROPHY is the
+sixth, so the bar is full. Do not add a seventh. `SECOND_SCREEN_PLAN.md`
+proposes converting EXTRA into a launcher instead, which is now the only way to
+add a view.
 
 1. Add to `enum UiTab` in [ui_shell.h:19](ui/ui_shell.h#L19), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
@@ -405,6 +429,8 @@ in Options, being handed the Pokedex.
 | `top[5]` | whether the shiny notice is up |
 | `top[6]` | `UiQuickBallStateKey()`, zero while the quick-throw strip is down |
 | `top[7]` | `UiTitleStateKey()`: zero unless the title's PRESS START is up, otherwise which half of TOUCH TO START's blink is showing, **only while `!sInGame`**. Timed off the banner's own frame count (`Ctr3dsTitlePromptClock()`), so it keeps a fixed phase with the top screen |
+| `top[8]` | `AchActive()->stateKey()`: the unlocked count and whether anything is unseen, on every tab, because the TROPHY tab's dot depends on it and an unlock can land on any of them. Reads only the provider's own bits, so it is safe before there is a save block |
+| `top[9]` | `UiAchToastStateKey()`, zero while the achievement toast is down and different for every toast, so two in a row still repaint between them |
 | then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
 
 The party fields used to be folded on every tab, so in a battle each hit
@@ -1102,19 +1128,21 @@ encounters view and both overlays below are all fitted to them.
 `UI_SKIN_PLAN.md` moves them only while re-fitting every one of those against
 wireframes. Do not change them casually.
 
-The two overlays divide that 192px content area between them, and their numbers
-are load bearing against **each other**:
+The three overlays divide that 192px content area between them, and their
+numbers are load bearing against **each other**:
 
 ```c
+UI_AT_Y  / UI_AT_H     0 /  40   // ui_achtoast.h, the toast:         y 0..40
 NOTICE_Y / NOTICE_H   40 / 112   // bottom_screen.c, the shiny notice: y 40..152
 UI_QB_Y  / UI_QB_H   152 /  40   // ui_quickball.h, the strip:        y 152..192
 ```
 
-152 appears in both on purpose. Move either and they overlap, and then the one
-drawn second eats the other's border row -- which is visible, because
-`UiWindowFrame`'s centre tiles are opaque. Both are expressed in TILES
-(`NOTICE_TY`, `UI_QB_TY`) because that is what `UiWindowFrame` takes, so any new
-value has to land on an 8px boundary as well as clear the other panel.
+40 and 152 each appear twice on purpose. Move any of them and two overlap, and
+then the one drawn later eats the other's border row -- which is visible,
+because `UiWindowFrame`'s centre tiles are opaque. All three are expressed in
+TILES (`UI_AT_TY`, `NOTICE_TY`, `UI_QB_TY`) because that is what `UiWindowFrame`
+takes, so any new value has to land on an 8px boundary as well as clear the
+other panels. There is no room left for a fourth.
 
 Per-view constants are `#define`d at the top of each tab file, derived from each
 other rather than tabulated twice (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`).
@@ -1153,6 +1181,8 @@ appears.
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
+| A playthrough gets another save's achievements | Conditions were read while the save in memory belonged to someone else. A New Game sets the trainer ID in Birch's speech while the old save's flags are still loaded, until `NewGameInitData()` clears them; a soft reset reloads the card's save under whatever was being played. So a playthrough is adopted only on a `CB2_Overworld` frame, and nothing is evaluated unless the save block's trainer ID matches it ([achievements.c](achievements.c), `Current` and `Adopt`). |
+| Saved achievements come back as the wrong ones | The achievement table was reordered, or an entry inserted or deleted. A position is a bit in `achievements.bin`: the table is append-only, and an entry is retired by leaving it in place. |
 | Mon icons punch through an overlay every few frames | The tab redrew them on the shell's animated layer, which paints over a snapshot that already contains the overlay. Fold the overlay into `UiOverlayActive()` so the tab paints the icons into its own paint instead (live on the second-core path, which then repaints fully for each step; still on the single-core path). |
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
