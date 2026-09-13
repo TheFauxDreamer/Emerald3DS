@@ -27,6 +27,7 @@
 #include "ui_shell.h"
 #include "matchup.h"
 #include "status_tags.h"
+#include "ui_team.h"
 
 #define COLS      2
 #define ROWS      3
@@ -200,7 +201,7 @@ static void SnapBars(void)
 {
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
-        struct Pokemon *mon = &gPlayerParty[i];
+        struct Pokemon *mon = UiPartyMon((u8)i);
 
         sShownSpecies[i] = GetMonData(mon, MON_DATA_SPECIES);
         sShownMax[i]     = GetMonData(mon, MON_DATA_MAX_HP);
@@ -297,7 +298,7 @@ bool8 UiPartyTick(bool8 visible)
 
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
-        struct Pokemon *mon = &gPlayerParty[i];
+        struct Pokemon *mon = UiPartyMon((u8)i);
         u32 species = GetMonData(mon, MON_DATA_SPECIES);
         u32 hp      = GetMonData(mon, MON_DATA_HP);
         u32 maxHp   = GetMonData(mon, MON_DATA_MAX_HP);
@@ -436,8 +437,16 @@ static bool8 AnyTweakOn(void)
     return Ctr3dsGetExpAll() || CapOn() || Ctr3dsGetRandomizer();
 }
 
-static int TagStripH(void) { return AnyTweakOn() ? TAG_STRIP_H : 0; }
-static int CellH(void)     { return AnyTweakOn() ? CELL_H_TIGHT : CELL_H_FULL; }
+// The strip also carries the key to a battle partner's coloured cells: their
+// name, in the same colour, at the right-hand end (ui_team.h). So it is up for
+// a partner battle too, and goes again when it ends.
+static bool8 StripOn(void)
+{
+    return AnyTweakOn() || UiAllyPresent();
+}
+
+static int TagStripH(void) { return StripOn() ? TAG_STRIP_H : 0; }
+static int CellH(void)     { return StripOn() ? CELL_H_TIGHT : CELL_H_FULL; }
 static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
 
 // The pieces that move: restore what the last full paint had under them and
@@ -446,13 +455,13 @@ static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
 // already correct in the snapshot and is not touched.
 void UiPartyRedrawAnimated(void)
 {
-    const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
+    const struct CellRows *rows = StripOn() ? &sRowsTight : &sRowsFull;
 
     // The detail view covers the grid, and shows one icon and one badge of its
     // own.
     if (sDetailOpen)
     {
-        struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
+        struct Pokemon *mon = UiPartyMon(UiSelectedMon());
         u32 species = GetMonData(mon, MON_DATA_SPECIES);
 
         if (species != SPECIES_NONE)
@@ -470,7 +479,7 @@ void UiPartyRedrawAnimated(void)
 
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
-        struct Pokemon *mon = &gPlayerParty[i];
+        struct Pokemon *mon = UiPartyMon((u8)i);
         u32 species = GetMonData(mon, MON_DATA_SPECIES);
         int x, y;
 
@@ -584,6 +593,18 @@ static void DrawTagStrip(void)
 
     if (Ctr3dsGetRandomizer())
         x += DrawTag(x, "RND", UI_COL_ACCENT);
+
+    // The partner's name, right-aligned, as the key to their coloured cells.
+    // The cheat tags run left to right and take under half the strip even with
+    // all three up, and a name is at most seven characters, so the two never
+    // meet.
+    if (UiAllyPresent())
+    {
+        int w = UiAllyTagWidth();
+
+        if (w > 0)
+            UiAllyTag(CTR_BOTTOM_WIDTH - TAG_X0 - w, TAG_Y, TAG_H);
+    }
 }
 
 // Where the HP label starts. Measured off maxHp, which cannot move during a
@@ -604,7 +625,7 @@ static int HpLabelX(int cx, u32 maxHp)
 // screen -- about 9,000 pixels a step instead of 76,800.
 static void DrawCellHp(int index, int cx, int cy, const struct CellRows *rows)
 {
-    struct Pokemon *mon = &gPlayerParty[index];
+    struct Pokemon *mon = UiPartyMon((u8)index);
     u32 maxHp = GetMonData(mon, MON_DATA_MAX_HP);
     u32 hp = sShownHp[index];        // the animated value, not the raw one
     int hpLabelX = HpLabelX(cx, maxHp);
@@ -619,11 +640,12 @@ static void DrawCellHp(int index, int cx, int cy, const struct CellRows *rows)
 
 static void DrawCell(int index)
 {
-    struct Pokemon *mon = &gPlayerParty[index];
-    const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
+    struct Pokemon *mon = UiPartyMon((u8)index);
+    const struct CellRows *rows = StripOn() ? &sRowsTight : &sRowsFull;
     int cellH = CellH();
     int cx = (index % COLS) * CELL_W;
     int cy = CellTop(index);
+    bool8 ally = UiAllySlot((u8)index);
     u32 species, maxHp, level;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[8];
@@ -631,13 +653,21 @@ static void DrawCell(int index)
 
     UiWindowFrame(cx / 8, cy / 8, CELL_W / 8, cellH / 8);
 
+    species = GetMonData(mon, MON_DATA_SPECIES);
+
+    // A battle partner's Pokemon, in the partner's colour, the way the game's
+    // own party menu draws them. Under everything else in the cell, and in the
+    // snapshot, so the animated layer's restores bring it back with the rest
+    // of the cell. An empty slot has no one to attribute, so it stays plain.
+    if (ally && species != SPECIES_NONE)
+        UiAllyFrameGround(cx, cy, CELL_W, cellH);
+
     // Before the empty-slot check below, so an empty slot still shows which one
     // the player is on. This slot is what the detail view opens on and what the
     // BAG tab's target picker starts from, so it has to be readable either way.
     if (index == UiSelectedMon())
         UiChevron(cx + CELL_CURSOR_X, cy + (cellH - UI_CHEVRON_H) / 2);
 
-    species = GetMonData(mon, MON_DATA_SPECIES);
     if (species == SPECIES_NONE)
         return;
 
@@ -674,10 +704,14 @@ static void DrawCell(int index)
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(cx + CELL_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());
 
-    // Centred in the 15px name row, immediately after the name.
-    DrawMatchupArrows(cx + CELL_TEXT_X + nameW + 4,
-                      cy + 8 + (UI_GLYPH_H - UI_ARROW_H) / 2,
-                      cx + CELL_W - 8, mon);
+    // Centred in the 15px name row, immediately after the name. Not for a
+    // partner's Pokemon: the arrows are advice about which of yours to send
+    // in, and the game will not let you switch to one of theirs
+    // (TrySwitchInPokemon, src/party_menu.c).
+    if (!ally)
+        DrawMatchupArrows(cx + CELL_TEXT_X + nameW + 4,
+                          cy + 8 + (UI_GLYPH_H - UI_ARROW_H) / 2,
+                          cx + CELL_W - 8, mon);
 
     level = GetMonData(mon, MON_DATA_LEVEL);
     UiAscii(label, "Lv", sizeof(label));
@@ -944,13 +978,19 @@ static void DrawSpreadButton(void)
 
 static void DrawDetail(void)
 {
-    struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
+    struct Pokemon *mon = UiPartyMon(UiSelectedMon());
     u32 species = GetMonData(mon, MON_DATA_SPECIES);
+    bool8 ally = UiAllySlot(UiSelectedMon()) && species != SPECIES_NONE;
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 label[16];
     int y, nameW;
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
+
+    // The same colour the partner's grid cell has, so opening one of their
+    // Pokemon still says whose it is.
+    if (ally)
+        UiAllyFrameGround(0, 0, CTR_BOTTOM_WIDTH, UI_CONTENT_H);
 
     // Drawn first, before any content that might bail. The way out of a modal
     // must not depend on what is inside it: an empty slot used to return below
@@ -979,8 +1019,17 @@ static void DrawDetail(void)
 
     // Same treatment as the grid: arrows follow the name. The limit is the BACK
     // target's left edge rather than the window frame.
-    DrawMatchupArrows(52 + nameW + 4, 12 + (UI_GLYPH_H - UI_ARROW_H) / 2,
-                      BACK_X - 6, mon);
+    //
+    // A partner's Pokemon gets their name there instead, in the tag that keys
+    // the grid's colours: the arrows mean nothing for a Pokemon you cannot
+    // send in. Two pixels above the name row and two below it, which clears
+    // the Lv line at y=30. The widest nickname and a seven-letter name still
+    // end well short of BACK.
+    if (ally)
+        UiAllyTag(52 + nameW + 6, 10, UI_GLYPH_H + 4);
+    else
+        DrawMatchupArrows(52 + nameW + 4, 12 + (UI_GLYPH_H - UI_ARROW_H) / 2,
+                          BACK_X - 6, mon);
 
     UiText(52, 30, UiAscii(label, "Lv", sizeof(label)), UI_COL_DIM, UiThemeShadow());
     UiNum(70, 30, (s32)GetMonData(mon, MON_DATA_LEVEL), UiThemeText(), UiThemeShadow());
@@ -1101,7 +1150,7 @@ u32 UiPartyStateKey(void)
     u32 key = UiTweakStateKey();
 
     if (sDetailOpen && sSpreadOpen)
-        key ^= (u32)GetMonEVCount(&gPlayerParty[UiSelectedMon()]) * 2654435761u;
+        key ^= (u32)GetMonEVCount(UiPartyMon(UiSelectedMon())) * 2654435761u;
 
     return key;
 }
@@ -1139,7 +1188,7 @@ void UiPartyTouch(const CtrTouchState *t)
         // between, and a control that is not on screen must not be tappable:
         // the toggle would otherwise carry, silently, into the next mon opened.
         if (UiHit(t, SPREAD_X, SPREAD_Y, SPREAD_W, SPREAD_H)
-            && GetMonData(&gPlayerParty[UiSelectedMon()], MON_DATA_SPECIES)
+            && GetMonData(UiPartyMon(UiSelectedMon()), MON_DATA_SPECIES)
                != SPECIES_NONE)
         {
             // A move panel is borrowing the same column, so the first tap here
@@ -1165,7 +1214,7 @@ void UiPartyTouch(const CtrTouchState *t)
             // An empty slot has nothing to describe. Silently ignored rather
             // than clearing the selection, so a mis-tap below the last move
             // does not throw away what you were reading.
-            if (GetMonData(&gPlayerParty[UiSelectedMon()],
+            if (GetMonData(UiPartyMon(UiSelectedMon()),
                            MON_DATA_MOVE1 + i) == MOVE_NONE)
                 return;
 

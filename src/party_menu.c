@@ -6086,6 +6086,20 @@ u8 GetPartyIdFromBattlePartyId(u8 battlePartyId)
     return 0;
 }
 
+#if PLATFORM_3DS
+// Whether gPlayerParty is in battle order right now. The in-battle party menu,
+// and the summary screen opened from it, physically reorder the array for as
+// long as they are up, and the bottom screen reads the party on every frame:
+// without this it would take the shuffle for a different party. Set and
+// cleared by the two functions below, which always run in pairs.
+static bool8 sCtr3dsPartyInBattleOrder;
+
+bool8 Ctr3dsPartyInBattleOrder(void)
+{
+    return sCtr3dsPartyInBattleOrder;
+}
+#endif
+
 static void UpdatePartyToBattleOrder(void)
 {
     struct Pokemon *partyBuffer = Alloc(sizeof(gPlayerParty));
@@ -6095,6 +6109,9 @@ static void UpdatePartyToBattleOrder(void)
     for (i = 0; i < PARTY_SIZE; i++)
         memcpy(&gPlayerParty[GetPartyIdFromBattlePartyId(i)], &partyBuffer[i], sizeof(struct Pokemon));
     Free(partyBuffer);
+#if PLATFORM_3DS
+    sCtr3dsPartyInBattleOrder = TRUE;
+#endif
 }
 
 static void UpdatePartyToFieldOrder(void)
@@ -6106,6 +6123,9 @@ static void UpdatePartyToFieldOrder(void)
     for (i = 0; i < PARTY_SIZE; i++)
         memcpy(&gPlayerParty[GetPartyIdFromBattleSlot(i)], &partyBuffer[i], sizeof(struct Pokemon));
     Free(partyBuffer);
+#if PLATFORM_3DS
+    sCtr3dsPartyInBattleOrder = FALSE;
+#endif
 }
 
 static void UNUSED SwitchAliveMonIntoLeadSlot(void)

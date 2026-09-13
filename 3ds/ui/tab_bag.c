@@ -36,6 +36,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "status_tags.h"
+#include "ui_team.h"
 
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
@@ -284,6 +285,8 @@ static void UseItemOn(u16 item, u8 slot)
         sMessage = MSG_NOT_NOW;
     }
     // Inverted return, matching the game: FALSE means the item DID something.
+    // gPlayerParty directly rather than UiPartyMon: out of battle the party is
+    // always in field order, and the effect takes `slot` as an index into it.
     else if (PokemonUseItemEffects(&gPlayerParty[slot], item, slot, 0, FALSE) == FALSE)
     {
         RemoveBagItem(item, 1);
@@ -305,7 +308,7 @@ static void UseItemOn(u16 item, u8 slot)
 // party menu, which refuses to use an item on one (IsSelectedMonNotEgg).
 static bool8 IsPickable(u8 slot)
 {
-    struct Pokemon *mon = &gPlayerParty[slot];
+    struct Pokemon *mon = UiPartyMon(slot);
 
     if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
         return FALSE;
@@ -441,7 +444,7 @@ static void DrawDetails(void)
 // same object in two places rather than as two designs.
 static void DrawPickCell(u8 slot)
 {
-    struct Pokemon *mon = &gPlayerParty[slot];
+    struct Pokemon *mon = UiPartyMon(slot);
     int cx = (slot % PICK_COLS) * PICK_CELL_W;
     int cy = PICK_HEAD_H + (slot / PICK_COLS) * PICK_CELL_H;
     u32 species = GetMonData(mon, MON_DATA_SPECIES);
@@ -450,6 +453,13 @@ static void DrawPickCell(u8 slot)
     u32 hp, maxHp;
 
     UiWindowFrame(cx / 8, cy / 8, PICK_CELL_W / 8, PICK_CELL_H / 8);
+
+    // A battle partner's Pokemon in the partner's colour, as on the PARTY tab.
+    // Still pickable: the game's own bag lets you use an item on one of them,
+    // and this is a second route to the same thing, not a stricter one. The
+    // colour is so that healing one of Steven's is a choice, not a slip.
+    if (UiAllySlot(slot) && species != SPECIES_NONE)
+        UiAllyFrameGround(cx, cy, PICK_CELL_W, PICK_CELL_H);
 
     // Drawn before the checks below, so an empty or egg slot still shows where
     // the cursor is rather than looking like the selection vanished.

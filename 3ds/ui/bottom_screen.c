@@ -32,6 +32,7 @@
 #include "ui_quickball.h"
 #include "ui_achtoast.h"
 #include "ui_title.h"
+#include "ui_team.h"
 
 // Two distinct flags: sNeedsRepaint means the framebuffer contents are stale,
 // sDirty means the host has not uploaded the current contents yet. Conflating
@@ -760,9 +761,12 @@ static u32 UiStateHash(void)
     // HP on the frame the tab comes back.
     if (sTab == UI_TAB_PARTY || (sTab == UI_TAB_BAG && UiBagPickerOpen()))
     {
+        // Through UiPartyMon, as the views read it: the game's own party
+        // menu shuffles gPlayerParty into battle order while it is up, and
+        // that is not a change to anything this screen shows.
         for (u32 i = 0; i < PARTY_SIZE; i++)
         {
-            struct Pokemon *mon = &gPlayerParty[i];
+            struct Pokemon *mon = UiPartyMon((u8)i);
             u32 fields[5];
 
             fields[0] = GetMonData(mon, MON_DATA_SPECIES);
@@ -785,6 +789,13 @@ static u32 UiStateHash(void)
         // way to flip. The grid flips on its animated layer, and folding the
         // phase there would turn every flip into a full repaint.
         hash ^= UiStatusTagsKey(sTab == UI_TAB_BAG);
+        hash *= 16777619u;
+
+        // Which slots are a battle partner's (ui_team.h). Their Pokemon are
+        // already in the party during the battle transition, so nothing above
+        // moves when the battle proper starts and they take the partner's
+        // colour, or when it ends and they lose it.
+        hash ^= UiTeamKey();
         hash *= 16777619u;
     }
 

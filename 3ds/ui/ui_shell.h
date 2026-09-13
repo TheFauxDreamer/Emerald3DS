@@ -103,6 +103,17 @@ struct UiRamp
 // tab_trophy.c; the achievement toast shares it.
 const struct UiRamp *UiAchCategoryRamp(u8 category);
 
+// A battle partner's Pokemon (Steven at the Space Center, the Battle Frontier's
+// multi partners), in the colour the game's own party menu gives them: the
+// PARTY_PAL_MULTI_ALT boxes, graphics/party_menu/bg.png indices 68-70
+// (sPartyBoxMultiPalIds1, src/data/party_menu.h). Hardcoded from the art for
+// the same reason the HP bar colours are. The ground is index 68, the box's own
+// fill, washed 45% over white so the theme's dark text still reads on it: every
+// one of the 20 window frames has a white interior. See ui_team.h.
+#define UI_COL_ALLY        0xC523   // RGB(197,164, 24) pal index 69
+#define UI_COL_ALLY_EDGE   0x9CE4   // RGB(156,156, 32) pal index 70
+#define UI_COL_ALLY_GROUND 0xEF36   // RGB(236,229,181) index 68 over white
+
 // Poke Ball marker. Fixed rather than themed: the ball is recognisable by its
 // colours, and it carries its own dark outline on every window frame.
 #define UI_COL_BALL_TOP    0xE104   // red
