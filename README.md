@@ -85,14 +85,16 @@ caption when they apply:
   than a spoiler for it. It follows the randomiser when that is on, and it
   follows you from room to room inside a cave.
 
-**TROPHY.** 48 achievements, earned by playing: the eight badges, the Champion,
-the legends, Pokédex milestones, contests, the Battle Frontier symbols, and a
-few odder ones (use Splash, hit a jackpot, catch a shiny). Every one is read
-from the game's own data, and counters show how far along the shorter goals
-are. Progress is kept per playthrough, keyed on your trainer ID, so a new game
-starts a fresh list, and loading a save that already has badges unlocks them
-straight away. Nothing syncs to RetroAchievements; `3ds/ACHIEVEMENTS_PLAN.md`
-says why.
+**TROPHY.** 67 achievements, earned by playing, from choosing your starter and
+getting the Bike through the eight badges, the HMs, the Master Ball and the
+Champion, plus the legends, Pokédex milestones, contests and a few odder ones
+(use Splash, hit a jackpot, catch a shiny). Two buttons split them into MAIN and
+POST-GAME. The post-game ones stay "Hidden Achievement" until you enter the Hall
+of Fame, then show what they are. Every one is read from the game's own data,
+and counters show how far along the shorter goals are. Progress is kept per
+playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
+loading a save that already has badges unlocks them straight away. Nothing
+syncs to RetroAchievements; `3ds/ACHIEVEMENTS_PLAN.md` says why.
 
 **EXTRA.** Three pages of port settings.
 

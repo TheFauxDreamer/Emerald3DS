@@ -1,6 +1,6 @@
 # Achievements plan
 
-**Status: implemented on the `achievements` branch, not yet built by CI or
+**Status: implemented on the `achievements` branch and built by CI, not yet
 tested on a console.** Written 2026-09-12 against `04aebdd`, and re-checked
 2026-09-13 against `480dc6b`, after the second-screen animation stages
 ([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)). This file
@@ -41,6 +41,38 @@ the function names are the stable anchors.
 - **The shell gained `UiActiveTab()`**, so the toast can drop VIEW on the
   TROPHY tab itself.
 - **Not done:** the optional glint. The toast is static.
+
+**A sixth commit** added early-game achievements and split the list into
+MAIN and POST-GAME:
+
+- **67 achievements: 57 main, 10 post-game.** The 19 new ones are mostly early
+  and mid-game milestones read straight off story flags: the starter, the rival
+  on Route 103, the Pokédex, the Running Shoes, the PokéNav, Steven's letter,
+  the Devon Goods, the Bike, the Day Care, a full party, a first evolution,
+  Mt. Chimney, a revived fossil, Cut, Surf, Fly, all eight HMs, the Master Ball,
+  and a level-100 Pokémon. "Wider World" became "A Bigger Journey Begins".
+- **Each achievement now has a fixed id, and the id is its bit** in
+  `achievements.bin`. Rows can be ordered for reading, which is story order, and
+  the rule changed from "append only" to **"ids are permanent and never
+  reused"**. The first 48 kept their old positions as ids, so earlier saves lose
+  nothing. The debug row's note counts duplicate ids ahead of the width check.
+- **Two tables, one per page**, so a row cannot be filed on the wrong one.
+  Post-game is what only opens after the Hall of Fame: the National Pokédex,
+  Groudon and Kyogre (their caves need `FLAG_SYS_GAME_CLEAR`), the roaming
+  Lati, the tree outside the Frontier, and the Battle Frontier. Rayquaza and the
+  Regis stay in MAIN, because Emerald lets both be faced before the Elite Four.
+- **Post-game rows are hidden until `FLAG_SYS_GAME_CLEAR`** (entering the Hall
+  of Fame), showing "Hidden Achievement / Progress to discover" with a "?"
+  marker. The provider does the hiding, so the tab only ever sees placeholder
+  text, and an unlocked row is never hidden.
+- **The TROPHY header became two page buttons**, `MAIN n/57` and
+  `POST-GAME n/10`, with the bar measuring the page on screen. Opening the tab
+  on something new switches to that thing's page.
+- **Three new condition kinds:** a party count and a highest party level (both
+  read without decrypting), and a list of flags for the HMs. The party checks
+  pause inside the Battle Factory, whose Open Level rentals sit in the player's
+  party at level 100 under the player's own OT ID.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists
