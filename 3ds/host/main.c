@@ -1,14 +1,13 @@
-// 3DS entry point.
+// The 3DS entry point.
 //
-// AgbMain() is the game's superloop and never returns, so this file does not
-// own a frame loop -- the game does. Every frame, src/main.c calls back into
-// Rp2350PresentFrame() (under #if RP2350) once the frame's VRAM, palette, OAM
-// and registers are final. That hook is where all 3DS work happens: rasterise,
-// present, sample input, feed audio, flush saves.
+// AgbMain() is the game's main loop and never returns, so the game owns the
+// frame loop. Each frame, src/main.c calls Rp2350PresentFrame() (under #if
+// RP2350) when the frame's VRAM, palette, OAM and registers are final. All 3DS
+// work occurs in that hook: rasterize, present, read input, feed audio and
+// flush saves.
 //
-// The one thing the 3DS needs that a GBA superloop has no concept of is a way
-// out: the HOME menu can ask the application to close at any time. Since
-// AgbMain() will never return on its own, the exit path longjmps back here.
+// The HOME menu can ask the application to close at any time. AgbMain() never
+// returns by itself, so the exit path uses a longjmp back to here.
 
 #include <3ds.h>
 #include <setjmp.h>
@@ -20,9 +19,8 @@
 #include "io_thread.h"
 #include "trace.h"
 
-// Normally passed by 3ds/Makefile. Defaulted here so this file still builds
-// standalone, and so a missing one shows up in the log as "unknown" rather than
-// silently reading as a stale value.
+// 3ds/Makefile gives these values. The defaults let this file build alone. A
+// missing value shows as "unknown" in the log, not as an old value.
 #ifndef CTR_BUILD_STAMP
 #define CTR_BUILD_STAMP "build stamp unknown"
 #endif
@@ -30,8 +28,9 @@
 #define CTR_BUILD_ID "unknown"
 #endif
 
-// The title screen's corner (3ds/ui/ui_title.c). Here rather than game side
-// because this is the one file rebuilt on every make, so it cannot go stale.
+// For the title screen's corner (3ds/ui/ui_title.c). It is here, not on the
+// game side, because make rebuilds this file each time, so the value is never
+// stale.
 const char *Ctr3dsBuildId(void)
 {
     return CTR_BUILD_ID;
@@ -57,7 +56,8 @@ void CtrDiagSplash(void);
 static jmp_buf sQuitJmp;
 static int     sQuitting;
 
-// GBA REG_KEYINPUT bit order. Active-low: a CLEAR bit means pressed.
+// The bit order of the GBA's REG_KEYINPUT. Active low: a clear bit means
+// pressed.
 #define GBA_A      (1 << 0)
 #define GBA_B      (1 << 1)
 #define GBA_SELECT (1 << 2)
@@ -82,14 +82,14 @@ static uint16_t sample_keys(void)
     if (k & KEY_R)      gba |= GBA_R;
     if (k & KEY_L)      gba |= GBA_L;
 
-    // The circle pad doubles as the d-pad: KEY_C* are the libctru-synthesised
-    // digital edges, so both sticks and the pad drive the same GBA bits.
+    // The circle pad also works as the d-pad. KEY_C* are the digital edges that
+    // libctru makes, so the sticks and the pad set the same GBA bits.
     if (k & (KEY_DRIGHT | KEY_CPAD_RIGHT)) gba |= GBA_RIGHT;
     if (k & (KEY_DLEFT  | KEY_CPAD_LEFT))  gba |= GBA_LEFT;
     if (k & (KEY_DUP    | KEY_CPAD_UP))    gba |= GBA_UP;
     if (k & (KEY_DDOWN  | KEY_CPAD_DOWN))  gba |= GBA_DOWN;
 
-    // GBA hardware reports 1 = released.
+    // The GBA hardware reports 1 for released.
     return (uint16_t)(~gba & GBA_KEY_MASK);
 }
 
@@ -104,11 +104,10 @@ static void sample_touch(CtrTouchState *t)
     uint32_t held = hidKeysHeld();
     int touching = (held & KEY_TOUCH) != 0;
 
-    // hidScanInput() memsets the touch position every scan and only refills it
-    // while the panel is actually pressed, so on the RELEASE frame hidTouchRead
-    // returns (0,0) rather than the last contact point. Latch it -- otherwise
-    // every tap is reported at the top-left corner, which silently made all
-    // release-driven hit tests target whatever sits at (0,0).
+    // hidScanInput() clears the touch position on each scan and fills it only
+    // while the panel is pressed. Thus, on the release frame, hidTouchRead
+    // returns (0,0) and not the last contact point. Keep the last point here.
+    // Without this, every tap acts at the top-left corner.
     if (touching)
         lastPos = pos;
 
@@ -116,21 +115,20 @@ static void sample_touch(CtrTouchState *t)
     t->y = (int16_t)lastPos.py;
     t->touching     = (uint8_t)touching;
     t->justPressed  = (uint8_t)(touching && !wasTouching);
-    // Thanks to the latch above, the coordinates on the release frame are the
-    // last contact point, which is what a tap wants to act on.
+    // With the latch above, the release frame has the last contact point, which
+    // is where a tap acts.
     t->justReleased = (uint8_t)(!touching && wasTouching);
 
     wasTouching = touching;
 }
 
-// Callable from game-side code, which must never include <3ds.h> (the
-// two-worlds rule in 3ds/bridge.h). Plain `const char *` and `unsigned int`
-// cross the seam safely -- no u8/u16/u32 and no string.h in the signature.
+// Game-side code can call this, and it must never include <3ds.h> (the
+// two-worlds rule in 3ds/bridge.h). `const char *` and `unsigned int` cross the
+// seam safely: there is no u8/u16/u32 and no string.h in the signature.
 //
-// NOT behind CTR_BOOT_DIAG, unlike CtrTraceMsg below. A null function pointer
-// cannot be found by reading code; the only thing that says WHICH pointer is
-// null is printing them, and that has to work in the build that actually
-// crashes rather than in a diagnostic build nobody ships.
+// This is not behind CTR_BOOT_DIAG, unlike CtrTraceMsg below. The only way to
+// find which function pointer is null is to print them, and that must work in
+// the build that crashes.
 void CtrTraceHex(const char *label, unsigned int value)
 {
     CtrLog("emerald3ds: %s = %08X\n", label, value);
@@ -143,16 +141,15 @@ void CtrTraceMsg(const char *msg)
 }
 #endif
 
-// The cartridge RTC, backed by the console clock. src/siirtc.c calls this in
-// place of bit-banging an S-3511A that a 3DS does not have.
+// The cartridge RTC, from the console clock. src/siirtc.c calls this in place
+// of the S-3511A chip, which a 3DS does not have.
 //
-// Cached to the second. RtcCalcLocalTime() runs from DoTimeBasedEvents() every
-// frame in the overworld, and the chip only ever had one-second resolution, so
-// there is nothing to gain from breaking the time down sixty times a second.
+// Cached to the second. RtcCalcLocalTime() runs from DoTimeBasedEvents() on
+// each frame in the overworld, and the chip has one-second resolution.
 //
-// localtime() rather than gmtime(): a 3DS stores the wall-clock time the user
-// set, with no timezone database, so with TZ unset the two agree. localtime()
-// is the one that stays correct if that ever stops being true.
+// Use localtime(), not gmtime(). A 3DS stores the local time that the user set,
+// with no timezone data. Thus the two agree when TZ is not set. Only
+// localtime() stays correct if that changes.
 void Ctr3dsGetClock(CtrClock *out)
 {
     static time_t   cachedAt = (time_t)-1;
@@ -165,16 +162,16 @@ void Ctr3dsGetClock(CtrClock *out)
         struct tm *lt = localtime(&now);
 
         if (lt == NULL) {
-            // Should not happen, but a zeroed clock here would read as an
-            // invalid month and day to RtcCheckInfo. Hand back the epoch the
-            // cart RTC itself resets to.
+            // This must not occur. A zero clock gives an invalid month and day
+            // to RtcCheckInfo, so return the date that the cartridge RTC resets
+            // to.
             cached.year = 0; cached.month = 1; cached.day = 1;
             cached.dayOfWeek = 0;
             cached.hour = 0; cached.minute = 0; cached.second = 0;
         } else {
-            // The chip holds a two-digit year. Wrapping keeps it inside the
-            // 0..99 the BCD encoding and ConvertBcdToBinary can represent;
-            // outside that the game would report an invalid-year error.
+            // The chip holds a two-digit year. The wrap keeps the value in the
+            // 0..99 range of the BCD encoding and ConvertBcdToBinary. Outside
+            // that range, the game reports an invalid year.
             int year = lt->tm_year + 1900 - 2000;
 
             cached.year      = (uint8_t)(((year % 100) + 100) % 100);
@@ -192,32 +189,31 @@ void Ctr3dsGetClock(CtrClock *out)
     *out = cached;
 }
 
-// Fast-forward state. Deliberately not persisted: booting straight into 4x
-// because of a setting left on days ago would be a nasty surprise.
-static int sSpeed     = 1;  // game frames per displayed frame, in effect now
-static int sBaseSpeed = 1;  // what GAME SPEED chose; turbo overrides it while held
+// Fast-forward state. It does not persist: a boot at 4x from an old setting is
+// a bad surprise.
+static int sSpeed     = 1;  // game frames for each displayed frame, now
+static int sBaseSpeed = 1;  // the GAME SPEED choice; turbo overrides it
 static int sSubFrame;       // 0 .. sSpeed-1, wraps on the displayed frame
 
-// What each button is bound to: CTR_BIND_OFF, a speed, or CTR_BIND_MOD.
-// Indexed by CTR_TURBO_*.
+// The bind of each button: CTR_BIND_OFF, a speed, or CTR_BIND_MOD. The index is
+// CTR_TURBO_*.
 //
-// Y defaults to the modifier so the touch UI's jump-by-5 works out of the box.
-// One value per button is what makes turbo and the modifier mutually exclusive:
-// binding a speed to a button necessarily stops it being the modifier, and
-// there is no combination that quietly does both.
+// Y is the modifier by default, so the touch UI's jump-by-5 works at once. Each
+// button has one value, so a button cannot be turbo and the modifier at the
+// same time.
 static uint8_t sTurbo[CTR_TURBO_COUNT] = {
     [CTR_TURBO_Y] = CTR_BIND_MOD,
 };
 
-// The 3DS keys the GBA has no use for. Order must match CTR_TURBO_*.
+// The 3DS keys that the GBA does not use. The order must match CTR_TURBO_*.
 static const uint32_t kTurboKeys[CTR_TURBO_COUNT] = {
     KEY_X, KEY_Y, KEY_ZL, KEY_ZR
 };
 
 void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
 
-// Lowering the speed must restart the group, or a counter left above the new
-// limit stalls presentation for a frame. Shared by every path that changes it.
+// A lower speed must restart the group. Otherwise a counter above the new limit
+// stops presentation for a frame. Every path that changes the speed uses this.
 static void set_speed(int multiplier)
 {
     if (multiplier < CTR_SPEED_MIN) multiplier = CTR_SPEED_MIN;
@@ -232,20 +228,19 @@ static void set_speed(int multiplier)
 void Ctr3dsSetSpeed(int multiplier)
 {
     set_speed(multiplier);
-    sBaseSpeed = sSpeed;   // the menu sets the RESTING speed
+    sBaseSpeed = sSpeed;   // the menu sets the resting speed
 }
 
 int Ctr3dsGetSpeed(void)
 {
-    // Reports the baseline, not the momentary override, so the EXTRA tab keeps
-    // showing what the player chose while a turbo button is held.
+    // Returns the baseline, not the temporary override. Thus the EXTRA tab
+    // shows the player's choice while a turbo button is held.
     return sBaseSpeed;
 }
 
-// Set without persisting, for CtrSettingsLoad(). Writing the file back during
-// the load that produced it would be pointless churn, and would turn a
-// read-only SD card into a write attempt on every boot. Mirrors
-// Ctr3dsApplyTopScale in video.c.
+// Sets the value with no write, for CtrSettingsLoad(). A write during the load
+// that gave the value is unnecessary, and a read-only SD card would get a write
+// attempt at each boot. Ctr3dsApplyTopScale in video.c does the same.
 static int bind_is_valid(int value)
 {
     return value == CTR_BIND_OFF || value == CTR_BIND_MOD
@@ -278,20 +273,20 @@ int Ctr3dsGetTurboBind(int button)
     return sTurbo[button];
 }
 
-// Whether the bottom screen shows tabs the save has not unlocked. Lives here
-// rather than game-side because it has to survive a relaunch, and the settings
-// file is host-side; bottom_screen.c reads it through the bridge.
+// TRUE when the bottom screen shows tabs that the save has not unlocked. It is
+// here, not on the game side, because it must persist, and the settings file is
+// host side. bottom_screen.c reads it through the bridge.
 static uint8_t sShowAllTabs;
 
-// Set without persisting, for CtrSettingsLoad(), the same split as
+// Sets the value with no write, for CtrSettingsLoad(), like
 // Ctr3dsApplyTurboBind above.
 void Ctr3dsApplyShowAllTabs(int on)
 {
-    // Refused outright with the debug menu compiled out. Guarded HERE rather
-    // than in the getter because CtrSettingsLoad() calls this directly and
-    // never asks the getter: without it a shipping build would inherit "show
-    // every tab" from a debug session's settings.bin, with no control to undo
-    // it. Held at 0 rather than merely reported as 0, so every reader agrees.
+    // Refuse it when the debug menu is not in the build. The guard is here, not
+    // in the getter, because CtrSettingsLoad() calls this directly. Without it,
+    // a release build would get "show every tab" from a debug session's
+    // settings.bin, with no control to undo it. Hold the value at 0, so every
+    // reader agrees.
     sShowAllTabs = (CTR_DEBUG_MENU && on) ? 1 : 0;
 }
 
@@ -307,18 +302,16 @@ void Ctr3dsSetShowAllTabs(int on)
 
 int Ctr3dsGetShowAllTabs(void)
 {
-    return sShowAllTabs;   // held at 0 by Apply when the debug menu is off
+    return sShowAllTabs;   // held at 0 by Apply when there is no debug menu
 }
 
-// Gameplay tweaks (EXTRA page 2). Same Apply/Set/Get split as everything above:
-// Apply mutates without persisting so CtrSettingsLoad() can use it, Set
-// persists, Get reads. The two enums are range-checked in Apply rather than
-// trusted, exactly as Ctr3dsApplyTurboBind rejects an invalid bind: a corrupt
-// settings byte must leave the default standing, not select a mode that does
-// not exist.
+// Gameplay tweaks (EXTRA page 2), with the same Apply/Set/Get split as above.
+// Apply changes the value with no write, for CtrSettingsLoad(). Set also
+// writes. Get reads. Apply range-checks the two enums, like
+// Ctr3dsApplyTurboBind: a bad settings byte must keep the default.
 //
-// Game-side code reads these through 3ds/tweaks.c, which is the only
-// translation unit that turns them into behaviour.
+// The game side reads these through 3ds/tweaks.c, the only file that turns them
+// into behavior.
 static uint8_t sExpAll;
 static uint8_t sLevelCap;    // CTR_CAP_*
 static uint8_t sRandomizer;
@@ -327,15 +320,15 @@ static uint8_t sPhoneCallsOff;
 static uint8_t sQuickBallOff;
 static uint8_t sBattleAnimOff;
 
-// The last ball thrown, as a raw item id. Not range-checked here on purpose:
-// the valid range is a game constant this side may not include, so the check
-// lives with UiQuickBallItem(). See the note in bridge.h.
+// The last ball thrown, as a raw item id. There is no range check here: the
+// valid range is a game constant that this side cannot include.
+// UiQuickBallItem() checks it. See the note in bridge.h.
 static uint8_t sLastBall;
 
-// The shiny test switch. No Apply/Set split and no CtrSettingsMarkDirty()
-// call, because it is the one tweak that is not persisted -- see the note in
-// bridge.h. Game-side code clears it through Ctr3dsSetShinyTest(0) when the
-// armed encounter fires, so the setter has to stay callable from both worlds.
+// The shiny test switch. There is no Apply/Set split and no
+// CtrSettingsMarkDirty() call, because this tweak does not persist (see
+// bridge.h). The game side clears it with Ctr3dsSetShinyTest(0) when the armed
+// encounter starts, so both worlds call this setter.
 static uint8_t sShinyTest;
 
 void Ctr3dsSetShinyTest(int on)
@@ -345,7 +338,7 @@ void Ctr3dsSetShinyTest(int on)
 
 int Ctr3dsGetShinyTest(void)
 {
-    return sShinyTest;   // held at 0 by the setter when the debug menu is off
+    return sShinyTest;   // held at 0 by the setter when there is no debug menu
 }
 
 void Ctr3dsApplyExpAll(int on)
@@ -471,13 +464,11 @@ int Ctr3dsGetBattleAnimOff(void)
     return sBattleAnimOff;
 }
 
-// Unlike every other setter here this one is called from BATTLE LOGIC rather
-// than from a button on the EXTRA tab -- HandleAction_UseItem() in
-// src/battle_util.c, once per ball the player throws. That is safe for exactly
-// the reason the header of settings.c gives: CtrSettingsMarkDirty() only
-// queues, and the card is not touched until CtrSettingsFlush() runs from the
-// frame loop, a second after the last change. A player emptying a bag of balls
-// into one stubborn mon costs one write, not one per throw.
+// Battle logic calls this setter, not an EXTRA button: HandleAction_UseItem()
+// in src/battle_util.c, once for each ball thrown. That is safe, as the header
+// of settings.c explains. CtrSettingsMarkDirty() only queues, and the write
+// occurs from the frame loop one second after the last change. Many throws cost
+// one write.
 void Ctr3dsApplyLastBall(int item)
 {
     sLastBall = (uint8_t)(item & 0xFF);
@@ -521,8 +512,8 @@ int Ctr3dsGetBagSort(void)
     return sBagSort;
 }
 
-// Modifier for the touch UI. Read at the same point as everything else, so it
-// is the same fresh hidScanInput() the touch state came from.
+// The modifier for the touch UI. It uses the same hidScanInput() as the touch
+// state.
 int Ctr3dsUiModifierHeld(void)
 {
     uint32_t held = hidKeysHeld();
@@ -534,11 +525,11 @@ int Ctr3dsUiModifierHeld(void)
     return 0;
 }
 
-// What fast-forward does to the soundtrack. Persisted, like the other display
-// preferences: it is a taste question, not a mode you can be surprised by.
+// What fast-forward does to the music. It persists, like the other display
+// preferences.
 static uint8_t sFfAudio = CTR_FFAUDIO_NORMAL;
 
-// Set without persisting, for CtrSettingsLoad(), the same split as
+// Sets the value with no write, for CtrSettingsLoad(), like
 // Ctr3dsApplyTurboBind above.
 void Ctr3dsApplyFfAudio(int mode)
 {
@@ -563,53 +554,49 @@ int Ctr3dsGetFfAudio(void)
     return sFfAudio;
 }
 
-// Whether this game frame is the one that carries audio.
+// TRUE on the game frame that carries audio.
 //
-// Fast-forward runs several logical game frames per displayed frame. The sound
-// engine advances the song by one tick per m4aSoundMain() call, so calling it
-// every game frame plays the music at the fast-forward multiplier -- and since
-// the DSP still only consumes one frame's worth of samples, the surplus is
-// simply dropped, which is music racing past in chunks rather than music
-// playing faster.
+// Fast-forward runs several game frames for each displayed frame. The sound
+// engine advances the song one tick for each m4aSoundMain() call. A call on
+// every game frame plays the music at the fast-forward speed. The DSP uses only
+// one frame of samples, so the rest drops and the music skips.
 //
-// NORMAL therefore ticks the engine once per DISPLAYED frame. FAST keeps the
-// old every-frame behaviour for anyone who wants the pitch as a cue.
+// NORMAL thus ticks the engine once for each displayed frame. FAST keeps a tick
+// on every game frame, for a player who wants the pitch as a cue.
 //
-// Subframe 0 rather than the presenting subframe, matching where input is
-// sampled: any one frame of the group works, and the ring decouples this from
-// presentation anyway. At 1x every frame is subframe 0, so both settings behave
-// identically and nothing changes.
+// Use subframe 0, where the input is also read. Any frame of the group works,
+// because the ring buffer separates this from presentation. At 1x every frame
+// is subframe 0, so both settings are the same.
 int Ctr3dsIsAudioFrame(void)
 {
     return sFfAudio == CTR_FFAUDIO_FAST || sSubFrame == 0;
 }
 
-// Audio A/B switches. All three default ON, so a normal boot is the real mixer
-// and these only matter to someone deliberately hunting a sound fault.
+// The audio A/B switches. All three are ON by default, so a normal boot uses
+// the real mixer. They matter only to a tester who looks for a sound fault.
 //
-// Kept as one small array rather than three named flags because they are read
-// and written generically by the EXTRA tab's row and by the settings file, and
-// naming them individually would triple all three of those for nothing.
+// One small array, not three flags, because the EXTRA row and the settings file
+// read and write them generically.
 static uint8_t sAudioDbg[CTR_AUDIO_DBG_COUNT] = { 1, 1, 1, 1 };
 
-// Set without persisting, for CtrSettingsLoad(), the same split as
-// Ctr3dsApplyFfAudio above.
+// Sets the value with no write, for CtrSettingsLoad(), like Ctr3dsApplyFfAudio
+// above.
 void Ctr3dsApplyAudioDbg(int which, int on)
 {
     if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
         return;
 
-    // Same reasoning as Ctr3dsApplyShowAllTabs: this is what CtrSettingsLoad()
-    // calls, and ON is the neutral value because ON is the real mixer. Forcing
-    // the stored byte rather than the returned one also covers CtrAudioFrame,
-    // which reads the STEREO entry out of this array directly.
+    // The same reason as Ctr3dsApplyShowAllTabs: CtrSettingsLoad() calls this.
+    // ON is the neutral value, because ON is the real mixer. Set the stored
+    // byte, because CtrAudioFrame reads the STEREO entry from this array
+    // directly.
     if (!CTR_DEBUG_MENU)
         on = 1;
 
     sAudioDbg[which] = (uint8_t)(on ? 1 : 0);
 
-    // STEREO is a host-side downmix and is read straight out of this array by
-    // CtrAudioFrame; the other two live in the mixer and have to be pushed.
+    // STEREO is a host-side downmix, and CtrAudioFrame reads it from this
+    // array. The other two are in the mixer and must be pushed.
     Rp2350SetAudioDebug(sAudioDbg[CTR_AUDIO_DBG_PSG],
                         sAudioDbg[CTR_AUDIO_DBG_REVERB],
                         sAudioDbg[CTR_AUDIO_DBG_DS]);
@@ -634,18 +621,17 @@ int Ctr3dsGetAudioDbg(int which)
     if (which < 0 || which >= CTR_AUDIO_DBG_COUNT)
         return 1;
 
-    return sAudioDbg[which];   // held at 1 by Apply when the debug menu is off
+    return sAudioDbg[which];   // held at 1 by Apply when there is no debug menu
 }
 
-// Fastest bound button currently held, else the resting speed. Fastest rather
-// than first so holding two never gives the slower of the two, which would feel
-// like the binding had been ignored.
+// The fastest bound button that is held, or the resting speed. The fastest, not
+// the first, so two held buttons never give the slower speed.
 static int effective_speed(uint32_t held)
 {
     int best = 0;
 
-    // CTR_BIND_MOD is deliberately outside the speed range, so a modifier
-    // button can never be mistaken for a very fast turbo.
+    // CTR_BIND_MOD is outside the speed range, so a modifier button is never a
+    // very fast turbo.
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         if (sTurbo[i] != CTR_BIND_OFF && sTurbo[i] != CTR_BIND_MOD
             && (held & kTurboKeys[i]) && sTurbo[i] > best)
@@ -656,9 +642,9 @@ static int effective_speed(uint32_t held)
 
 void Rp2350PresentFrame(void)
 {
-    // The first frames are what matter: reaching frame 1 at all rules out a
-    // hang in the game's init, and a steadily rising count rules out a hang in
-    // the frame loop. After that it would just spam the log.
+    // Only the first frames matter. Frame 1 shows that the game's init did not
+    // hang, and a rising count shows that the frame loop did not hang. More
+    // lines add nothing.
     {
         static unsigned frame;
         frame++;
@@ -666,32 +652,31 @@ void Rp2350PresentFrame(void)
             CtrTrace("emerald3ds: present frame %u\n", frame);
     }
 
-    // HOME menu / power. Every game frame, not just displayed ones, so a close
-    // request is still honoured promptly while fast-forwarding.
+    // HOME menu or power. Check on every game frame, not only displayed ones,
+    // so a close request works quickly during fast-forward.
     if (!aptMainLoop() && !sQuitting) {
         sQuitting = 1;
-        // Before the longjmp, not only after it. This is the last moment the
-        // app is certainly still alive, and the flush costs nothing when the
-        // image is clean. main() flushes again after the jump; the second call
-        // returns immediately because this one cleared the dirty flag.
+        // Flush before the longjmp too. This is the last point where the app is
+        // surely alive. The flush costs nothing when the image is clean. The
+        // function main() flushes again after the jump, and that call returns
+        // at once.
         //
-        // Forced for the settings too: a preference changed in the last tenth
-        // of a second before closing is still inside the debounce, and losing
-        // it would look exactly like the setting not persisting at all.
+        // Force the settings too. A preference changed just before the close is
+        // still in the debounce. Without this, the setting seems not to
+        // persist.
         CtrSaveFlush(1);
         CtrSettingsFlush(1);
         CtrAchFlush(1);
         longjmp(sQuitJmp, 1);
     }
 
-    // Input is physical: it can only change once per DISPLAYED frame, because
-    // that is the rate the hardware updates at. Sampling it once per game frame
-    // instead would be worse than pointless -- hidScanInput() computes press
-    // edges by diffing against the previous scan, so the extra scans would
-    // consume the edge and sample_touch()/CtrBottomUpdate() would miss taps.
+    // Input changes only once for each displayed frame, which is the hardware's
+    // rate. hidScanInput() finds press edges by comparing with the previous
+    // scan. A scan on each game frame uses up the edge, and sample_touch() and
+    // CtrBottomUpdate() miss taps.
     //
-    // Holding the value across the group is also what makes fast-forward feel
-    // right: one real press becomes one JOY_NEW followed by held frames.
+    // One value for the full group also makes fast-forward correct: one press
+    // gives one JOY_NEW and then held frames.
     static uint16_t keys;
     int presenting;
 
@@ -699,26 +684,21 @@ void Rp2350PresentFrame(void)
         hidScanInput();
         keys = sample_keys();
 
-        // Turbo is resolved here, with the rest of the input, because this is
-        // the only point in the group where the button state is fresh.
+        // Resolve turbo here, with the input, because the button state is fresh
+        // only here.
         set_speed(effective_speed(hidKeysHeld()));
     }
 
-    // Whether this game frame is the one that gets displayed. Decided ONCE, after
-    // set_speed() (which can restart the group) and before anything else, and
-    // used for both the render kick and the present below. Computing it twice
-    // would let a touch on the EXTRA tab's speed buttons, in between, start a
-    // render that nothing then waits for.
+    // TRUE on the game frame that is displayed. Decide this once, after
+    // set_speed() (which can restart the group) and before anything else. The
+    // render start and the present both use it. Two decisions would let a tap
+    // on EXTRA's speed buttons start a render that nothing waits for.
     presenting = (sSubFrame + 1 >= sSpeed);
 
-    // Start rasterising this frame on the other core NOW, before the bottom
-    // screen paints, so the two run at the same time. The rasteriser takes a
-    // copy of the video state first, so nothing the touch handlers below do can
-    // tear it; see CtrVideoRenderBegin in 3ds/host/video.c.
-    //
-    // This is what the battle stutter was: a full bottom repaint and the
-    // rasteriser used to run one after the other on core 0, and together they
-    // did not fit in a frame.
+    // Start the rasterizer on the other core now, before the bottom screen
+    // paints, so the two run at the same time. The rasterizer first copies the
+    // video state, so the touch handlers below cannot tear it. See
+    // CtrVideoRenderBegin in 3ds/host/video.c.
     if (presenting)
         CtrVideoRenderBegin();
 
@@ -728,29 +708,27 @@ void Rp2350PresentFrame(void)
         CtrBottomUpdate(&touch);
     }
 
-    // Buttons for the NEXT frame's ReadKeys() (src/main.c), matching how the
-    // GBA's key register is sampled between frames.
+    // The buttons for the next frame's ReadKeys() (src/main.c), as the GBA
+    // reads its key register between frames.
     CtrSetKeyInput(keys);
 
-    // Drains what m4aSoundMain() just produced, so it has to run on exactly the
-    // frames the engine ticked on. One predicate decides both.
+    // Take what m4aSoundMain() just made. Thus this must run on the same frames
+    // as the engine ticks. One test decides both.
     if (Ctr3dsIsAudioFrame())
         CtrAudioFrame();
 
     if (presenting) {
         sSubFrame = 0;
 
-        // Collect the render, upload, present. C3D_FrameBegin blocks on VBlank,
-        // which is what paces the game to 60 Hz. Skipping this call is the whole
-        // fast-forward mechanism: it drops the rasterise (the expensive part)
-        // and the pacing together, so the intermediate frames cost only game
-        // logic.
+        // Collect the render, upload and present. C3D_FrameBegin waits for
+        // VBlank, which paces the game to 60 Hz. Fast-forward skips this call.
+        // That skips the rasterize (the expensive part) and the pacing, so the
+        // other frames cost only game logic.
         CtrVideoPresent();
 
-        // Writes the save image out once the burst of sector writes has stopped,
-        // and hands the settings to the I/O thread once the player has stopped
-        // changing them. Both here rather than at the point of change, after
-        // CtrVideoPresent() has presented the frame.
+        // Write the save image after the sector writes stop, and give the
+        // settings to the I/O thread after the player stops changing them. Both
+        // occur here, after CtrVideoPresent() showed the frame.
         CtrSaveFlush(0);
         CtrSettingsFlush(0);
         CtrAchFlush(0);
@@ -763,52 +741,49 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
-    // First line of the session, and the reason the log file exists at all: on
-    // a console svcOutputDebugString goes nowhere, so without a line on the SD
-    // card there is no way to tell "the port never started" from "the port
-    // started and something later went wrong". See 3ds/host/log.c.
-    // __DATE__/__TIME__ are baked when THIS file is compiled, so an
-    // incremental build that does not touch it reports a stale time and two
-    // different builds look identical in the log. CTR_BUILD_STAMP is passed
-    // fresh by the build script on every run.
+    // The first line of the session. On a console, svcOutputDebugString goes
+    // nowhere. Without a line on the SD card, "the port did not start" and "the
+    // port failed later" look the same. See 3ds/host/log.c. Do not use __DATE__
+    // and __TIME__: they come from the last compile of this file, so they can
+    // be stale. CTR_BUILD_STAMP is new on each build.
     CtrLog("emerald3ds: boot (%s)\n", CTR_BUILD_STAMP);
 
-    // Must precede everything: every VRAM/palette/OAM/register access in the
-    // game derives from this block.
+    // This must come first: every VRAM, palette, OAM and register access in the
+    // game uses this block.
     CtrTrace("emerald3ds: main() entered\n");
 
     Ctr3dsInitGbaMemory();
     CtrTrace("emerald3ds: gba memory ready\n");
     CtrSaveLoad();
 
-    // Display preferences. Before CtrVideoInit() so the very first frame is
-    // already at the scale the player chose, with no visible snap.
+    // The display preferences. Load them before CtrVideoInit(), so the first
+    // frame has the player's scale.
     CtrSettingsLoad();
 
-    // Which achievements each playthrough has, read once so the game side's
-    // first lookup is served from memory rather than from the card mid-frame.
+    // Load the achievements of each playthrough once. The game side's first
+    // lookup then comes from memory, not from the card in the middle of a
+    // frame.
     CtrAchStoreInit();
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
-        // CtrLog, not CtrTrace: this is the one failure that ends the run, so
-        // it has to survive into a release build's log.
+        // Use CtrLog, not CtrTrace. This failure ends the run, so it must be in
+        // a release build's log.
         CtrLog("emerald3ds: FATAL CtrVideoInit failed\n");
         CtrVideoExit();
         return 1;
     }
     CtrTrace("emerald3ds: video ready\n");
 
-    // New 3DS: 804 MHz + L2 cache; no-op on Old 3DS. Done after the graphics
-    // services are up, since it goes through PTM.
+    // New 3DS: 804 MHz and L2 cache. No effect on an Old 3DS. Do this after the
+    // graphics services start, because it goes through PTM.
     //
-    // Through ptm:sysm specifically, which 3ds/emerald3ds.rsf has to grant, and
-    // libctru goes back through the same service to re-apply the boost every
-    // time the game returns from the HOME menu. osSetSpeedupEnable() reports
-    // nothing either way, so ask for the service once and log the answer: a
-    // failure here is the difference between the boost surviving the HOME menu
-    // and the game quietly dropping to 268 MHz the first time it is suspended.
-    // The exheader's CpuSpeed still sets 804 MHz at launch regardless.
+    // It uses ptm:sysm, which 3ds/emerald3ds.rsf must grant. The libctru
+    // library uses the same service to apply the boost again after each return
+    // from the HOME menu. The function osSetSpeedupEnable() reports nothing, so
+    // open the service once and log the result. If this fails, the game drops
+    // to 268 MHz after the first suspend. The exheader's CpuSpeed still sets
+    // 804 MHz at launch.
     {
         bool isNew3ds = false;
         Result rc = ptmSysmInit();
@@ -824,40 +799,39 @@ int main(int argc, char **argv)
     }
     osSetSpeedupEnable(true);
 
-    // Says for itself whether audio came up, and why not when it did not: a
-    // missing sdmc:/3ds/dspfirm.cdc is the usual answer and is not fatal.
+    // It logs if audio started, and the reason if not. The usual reason is a
+    // missing sdmc:/3ds/dspfirm.cdc, which is not fatal.
     CtrAudioInit();
 
-    // After CtrAudioInit(), which settles the main thread's priority: the
-    // writer is created one step below it. Everything logged up to here went
-    // to the card synchronously, which is what a boot log wants.
+    // After CtrAudioInit(), which sets the main thread's priority. The writer
+    // thread runs one step below it. All log lines before this point went to
+    // the card directly, which is correct for a boot log.
     CtrIoInit();
 
     CtrBottomInit();
     CtrTrace("emerald3ds: bottom screen ready\n");
 
 #if CTR_BOOT_DIAG
-    // Leaves a known image on screen. If it survives, the game hung; if the
-    // screen stays black, nothing in this file ever ran.
+    // Leave a known image on the screen. If it stays, the game hung. If the
+    // screen stays black, nothing in this file ran.
     CtrDiagSplash();
 #endif
 
     if (setjmp(sQuitJmp) == 0) {
-        // If nothing after this line ever appears, the game hung inside its own
-        // init -- everything above it completed.
+        // If nothing after this line appears, the game hung in its own init.
         CtrTrace("emerald3ds: entering AgbMain\n");
-        AgbMain();   // never returns; exits via longjmp above
+        AgbMain();   // never returns; exits through the longjmp above
     }
 
-    // Unconditional flush: the deferred writeback may still be pending. Usually
-    // a no-op by now, because saves commit as they happen (CtrSaveCommit, from
-    // src/save.c) and the close path above flushes too. It stays as the last
-    // line of defence for writes that arrived outside a save.
+    // Flush always: the delayed write can still be pending. Usually this does
+    // nothing, because saves commit when they occur (CtrSaveCommit, from
+    // src/save.c) and the close path above flushes too. This is the last guard
+    // for writes outside a save.
     CtrSaveFlush(1);
     CtrSettingsFlush(1);
     CtrAchFlush(1);
-    // Before the other exits, so their own lines are written synchronously
-    // rather than queued for a writer that is about to stop.
+    // Stop the log writer before the other exits, so their lines go to the card
+    // directly and do not wait for a thread that stops.
     CtrIoExit();
     CtrAudioExit();
     CtrVideoExit();

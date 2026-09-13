@@ -1,37 +1,29 @@
 // The background SD-card writer.
 //
-// Every write this port makes to the card used to happen on the main thread,
-// inside a frame. On a console a single fflush() is a blocking round trip to
-// the FS process, and several of them landed exactly where they hurt:
+// On a console, each fflush() is a blocking call to the FS process. A write in
+// the frame loop stops the game for that time:
+// - The profiler writes a line when a stage's window closes. A rare stage
+//   closes its window on the repaint that an overlay just caused, so the write
+//   lands on a frame that is already slow.
+// - The settings file: the last ball thrown is a setting, and its write
+//   occurred while the ball shook on the screen.
 //
-//   The profiler. CtrProfile() closes a stage's window after ten seconds and
-//   writes a line. A stage that runs only now and then, such as `paint` or
-//   `upload.bot.*`, closes its window on its first sample after a quiet
-//   spell, and that sample is the repaint the battle's quick-throw strip or
-//   shiny notice just caused. So the card write landed in the one frame that
-//   was already over budget, and the stutter looked like the overlay's fault.
+// Thus those writes are queued and done here. The thread runs one priority step
+// below the main thread, on the same core. Thus it runs only while the main
+// thread waits (for VBlank or for the rasterizer). A card write then costs the
+// frame nothing.
 //
-//   The settings file. Throwing a different kind of ball records it as the
-//   last one thrown, and a second later settings.bin was rewritten while the
-//   ball was still shaking on screen.
-//
-// So those writes are queued and done here instead. The thread sits one
-// priority step below the main thread on the same core, which means it only
-// ever runs while the main thread is blocked: in the VBlank wait, or waiting
-// on the rasteriser. A card write then costs the frame nothing.
-//
-// What this does NOT take over: the save file. save.c commits a save the moment
-// the game finishes writing one, synchronously, because that is what survives
-// the emulator window being closed. A save already has the game's own "SAVING"
-// pause, so there is no frame to protect.
+// This thread does not write the save file. The file save.c commits a save
+// directly when the game finishes it, because only that survives a close of the
+// emulator window. A save already has the game's own "SAVING" pause.
 
 #include <3ds.h>
 
 #include "io_thread.h"
 #include "trace.h"
 
-// Room for newlib's stdio path and CtrLog's vsnprintf, which is the deepest
-// thing a pass calls. The buffers a pass works on are statics, not locals.
+// Space for newlib's stdio path and CtrLog's vsnprintf, the deepest calls of a
+// pass. The buffers of a pass are statics, not locals.
 #define IO_STACK_SIZE (32 * 1024)
 
 static Thread       sThread;
@@ -50,8 +42,8 @@ static void io_main(void *arg)
         CtrSettingsDrain();
         CtrAchDrain();
 
-        // After the pass, not before it: whatever was queued alongside the
-        // request to stop still reaches the card.
+        // After the pass, not before it: data that was queued with the stop
+        // request still reaches the card.
         if (sQuit)
             break;
     }
@@ -64,10 +56,10 @@ void CtrIoInit(void)
     if (sRunning)
         return;
 
-    // One step below the caller, so the writer never takes the core away from
-    // the game. The caller is the main thread, after fix_thread_priority()
-    // (3ds/host/audio.c) has placed it, which is why this runs after
-    // CtrAudioInit() rather than first thing in main().
+    // One step below the caller, so the writer never takes the core from the
+    // game. The caller is the main thread, after fix_thread_priority()
+    // (3ds/host/audio.c) set its priority. Thus this runs after CtrAudioInit(),
+    // not at the start of main().
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
     prio += 1;
     if (prio > 0x3F)
@@ -76,14 +68,13 @@ void CtrIoInit(void)
     LightEvent_Init(&sWake, RESET_ONESHOT);
     sQuit = 0;
 
-    // Core 0, beside the main thread. The other cores are the rasteriser's
-    // (3ds/host/video.c), and a writer that spends its life blocked in FS calls
-    // gains nothing from a core of its own.
+    // Core 0, next to the main thread. The other cores are for the rasterizer
+    // (3ds/host/video.c). A writer that is mostly blocked in FS calls gains
+    // nothing from its own core.
     sThread = threadCreate(io_main, NULL, IO_STACK_SIZE, prio, 0, false);
 
-    // Unconditional, like every other "which path did we get" line: without it
-    // "the writer is running" and "every write is still synchronous" leave
-    // identical logs.
+    // Always log which path started, like the other such lines. Without it,
+    // "the writer runs" and "all writes are still direct" give the same log.
     if (sThread == NULL) {
         CtrLog("emerald3ds: io thread not started; SD writes stay synchronous\n");
         return;
@@ -107,8 +98,7 @@ void CtrIoExit(void)
     sRunning = 0;
 
     // Anything queued after the writer's last pass. With sRunning clear, any
-    // later write takes the synchronous path, so nothing can slip in behind
-    // these.
+    // later write takes the direct path, so nothing can come after these.
     CtrLogDrain();
     CtrSettingsDrain();
     CtrAchDrain();

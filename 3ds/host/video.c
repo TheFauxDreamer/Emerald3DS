@@ -1,24 +1,19 @@
-// Presentation: the software PPU's output on the top screen, the game-drawn
-// touch UI on the bottom.
+// Presentation: the software PPU's output on the top screen, and the game-drawn
+// touch UI on the bottom screen.
 //
-// rp2350/ppu.c renders the GBA frame into a plain 240x160 RGB565 buffer. Two
-// things stand between that and the screen:
+// rp2350/ppu.c renders the GBA frame into a linear 240x160 RGB565 buffer. Two
+// facts apply before it can go on the screen:
+// - PICA200 textures must have power-of-two sizes and are stored in 8x8
+//   Morton-order tiles. The display-transfer engine does the tiling. Its input
+//   and output widths must agree, so the PPU output first goes into a buffer
+//   that is 256px wide. The file ppu.c does not change, so ppu_validate.sh
+//   stays meaningful.
+// - The GPU reads these buffers directly, so they must be in linear memory.
+//   Flush the ARM11 cache before each transfer.
 //
-//   1. PICA200 textures must have power-of-two dimensions and are stored
-//      swizzled (8x8 Morton-ordered tiles), so a linear image cannot be handed
-//      to the GPU as-is. The display-transfer engine does the tiling for us,
-//      which is why the staging buffers are 256 px wide rather than 240: the
-//      transfer's input and output widths must agree, so the PPU output is
-//      row-copied into a 256-stride buffer first. ppu.c itself stays untouched,
-//      which keeps ppu_validate.sh meaningful.
-//   2. The GPU reads these buffers directly, so they must live in linear memory
-//      and the ARM11 cache must be flushed before each transfer.
-//
-// Scaling is selectable at runtime from the EXTRA tab (see kTopScales below).
-// The default 1.5x gives 360x240, filling the top screen's height exactly with a
-// 20 px pillarbox each side. The texture filter follows the scale rather than
-// being fixed: point sampling is right only at 1x, and is the cause of the
-// uneven pixel widths at the two fractional scales. See apply_top_filter.
+// The EXTRA tab selects the scale (see kTopScales). The default 1.5x gives
+// 360x240, which fills the screen height with 20px on each side. The texture
+// filter follows the scale (see apply_top_filter).
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -38,9 +33,8 @@ void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
 #define TOP_SCREEN_W 400.0f
 #define TOP_SCREEN_H 240.0f
 
-// X and Y are separate because FILL is the only way to cover a 5:3 panel with
-// 3:2 content, and it does so by stretching horizontally. C2D_DrawImageAt has
-// always taken two scales, so this costs nothing.
+// X and Y are separate because FILL stretches horizontally to cover a 5:3 panel
+// with 3:2 content. C2D_DrawImageAt always takes two scales.
 static const struct { float sx, sy; } kTopScales[CTR_TOP_SCALE_COUNT] = {
     [CTR_TOP_SCALE_1X]   = { 1.0f, 1.0f },
     [CTR_TOP_SCALE_1_5X] = { 1.5f, 1.5f },
@@ -50,14 +44,13 @@ static const struct { float sx, sy; } kTopScales[CTR_TOP_SCALE_COUNT] = {
 
 static int sTopScale = CTR_TOP_SCALE_DEFAULT;
 
-// Chooses the texture filter for the current scale. Defined below, next to the
-// texture it configures; see the comment there for why this is not simply
-// nearest everywhere.
+// Selects the texture filter for the current scale. It is defined below, next
+// to the texture. See the comment there.
 static void apply_top_filter(void);
 
-// Set without persisting. CtrSettingsLoad() uses this: writing the file back
-// out during the load that produced it would be pointless churn, and would turn
-// a read-only SD card into a write attempt on every boot.
+// Sets the value with no write, for CtrSettingsLoad(). A write during the load
+// that gave the value is unnecessary, and a read-only SD card would get a write
+// attempt at each boot.
 void Ctr3dsApplyTopScale(int mode)
 {
     if (mode < 0 || mode >= CTR_TOP_SCALE_COUNT)
@@ -78,8 +71,8 @@ void Ctr3dsSetTopScale(int mode)
 
     Ctr3dsApplyTopScale(mode);
 
-    // Only queue a write when something actually changed: re-tapping the
-    // active button should not cost one.
+    // Queue a write only when the value changes. A tap on the active button
+    // costs nothing.
     if (sTopScale != before)
         CtrSettingsMarkDirty();
 }
@@ -101,61 +94,51 @@ static C2D_Image           sTopImage, sBotImage;
 static uint16_t *sTopStage;   // TOP_TEX_W x CTR_GBA_HEIGHT, linear
 static uint16_t *sBotStage;   // BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear
 
-// PPU output and its per-pixel layer scratch (see ppu.h).
+// The PPU output and its per-pixel layer bytes (see ppu.h).
 //
-// Owned by the rasteriser: in threaded mode the worker writes both and the
-// main thread reads sGbaFrame only after collecting the render. They carry
-// state across frames (window-masked pixels keep last frame's colour, and the
-// blend reads last frame's layer byte), which is why they are one pair and are
-// never double-buffered.
+// The rasterizer owns them. In threaded mode, the worker writes both, and the
+// main thread reads sGbaFrame only after it collects the render. They keep
+// state between frames (masked pixels keep their old color, and the blend reads
+// the old layer byte). Thus they are one pair and never double-buffered.
 static uint16_t sGbaFrame[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 
 static int sReady;
 
-// ---- the rasteriser on a second core -----------------------------------------
+// ---- the rasterizer on a second core ----------------------------------------
 //
-// This port used to do everything on core 0: the game, the rasteriser (~9 ms a
-// frame at 268 MHz) and the bottom screen's software paint (~4.9 ms per full
-// repaint), one after the other. A frame is 16.7 ms, so a repaint landing on a
-// frame fitted or missed depending on what the rasteriser had to draw. In a
-// battle, where the quick-throw strip and the shiny notice each force a
-// repaint, it missed. That was the stutter.
-//
-// Nothing about the rasteriser needs core 0. It reads four memory regions and
-// writes a picture, so it now runs on another core while the main thread
-// paints the bottom screen and feeds the audio:
+// The rasterizer does not need core 0. It reads four memory regions and writes
+// a picture. Thus it runs on another core while the main thread paints the
+// bottom screen and feeds the audio:
 //
 //   New 3DS: core 2, the second application core. CanAccessCore2 in
-//            3ds/emerald3ds.rsf is what permits it.
-//   Old 3DS: core 1, the system core, after APT_SetAppCpuTimeLimit() lends the
+//            3ds/emerald3ds.rsf permits it.
+//   Old 3DS: core 1, the system core, after APT_SetAppCpuTimeLimit() gives the
 //            game a share of it. One application thread is allowed there.
-//   Neither: inline on core 0, exactly as before. Also what CTR_PPU_THREAD=0
-//            builds, for comparison.
+//   Neither: inline on core 0, as before. CTR_PPU_THREAD=0 builds this too.
 //
-// SAME FRAME, NOT PIPELINED. The render is started once the game's frame is
-// finished and collected before this frame's top upload, so the picture on
-// screen is the one the game just produced and input latency does not change.
-// What overlaps is the rasteriser against the bottom paint, the bottom upload
-// and the audio.
+// The same frame, not a pipeline. The render starts when the game's frame is
+// complete and is collected before this frame's top upload. Thus the screen
+// shows the frame that the game just made, and the input latency does not
+// change. The rasterizer overlaps with the bottom paint, the bottom upload and
+// the audio.
 //
-// THE ISOLATION RULE, which is the whole of the thread-safety argument: the
-// worker reads only the snapshot below and writes only sGbaFrame and sGbaLayer.
-// It never reads gGbaMem, so nothing the main thread does while it runs can
-// tear the picture. A touch handler refreshing a battle healthbox, say, simply
-// shows up in the next frame. The worker also never calls
-// CtrProfile, CtrLogSlow or CtrLog: their tables are unlocked and main-thread
-// only, so it hands its timing back in sPpuTicks instead.
+// The isolation rule, which makes this thread safe: the worker reads only the
+// snapshot below and writes only sGbaFrame and sGbaLayer. It never reads
+// gGbaMem, so nothing that the main thread does can tear the picture. A change
+// from a touch handler shows in the next frame. The worker never calls
+// CtrProfile, CtrLogSlow or CtrLog, because their tables have no lock and are
+// for the main thread only. It returns its time in sPpuTicks.
 //
-// rp2350/ppu.c itself is untouched. It already treats the regions as a static
-// snapshot for the duration of a render, which is exactly what this gives it.
+// rp2350/ppu.c does not change. It already treats the regions as a static
+// snapshot during a render.
 
 #ifndef CTR_PPU_THREAD
 #define CTR_PPU_THREAD 1
 #endif
 
-// What the rasteriser reads, at the extents ppu.h documents. Every register it
-// reads, BLDY at 0x54 the last of them, is in the first 0x60 bytes.
+// What the rasterizer reads, at the sizes in ppu.h. All the registers that it
+// reads (the last is BLDY at 0x54) are in the first 0x60 bytes.
 #define SNAP_REG_SIZE   0x60
 #define SNAP_PAL_SIZE   0x400
 #define SNAP_VRAM_SIZE  0x18000
@@ -166,27 +149,28 @@ static uint8_t sSnapPal[SNAP_PAL_SIZE]   __attribute__((aligned(32)));
 static uint8_t sSnapVram[SNAP_VRAM_SIZE] __attribute__((aligned(32)));
 static uint8_t sSnapOam[SNAP_OAM_SIZE]   __attribute__((aligned(32)));
 
-// The live regions in gGbaMem: the copy's source when threaded, the
-// rasteriser's own input when inline.
+// The live regions in gGbaMem: the source of the copy when threaded, and the
+// rasterizer's own input when inline.
 static const void *sLiveReg, *sLivePal, *sLiveVram, *sLiveOam;
 
-// 0x18 is the highest priority userland may ask for. On its own core the worker
-// competes with none of this port's threads, so this only matters against the
+// 0x18 is the highest priority that userland can ask for. On its own core, the
+// worker competes with no thread of this port, so this matters only against the
 // system's threads on core 1.
 #define PPU_THREAD_PRIO     0x18
-#define PPU_STACK_SIZE      (16 * 1024)   // the rasteriser's state is all static
+#define PPU_STACK_SIZE      (16 * 1024)   // the rasterizer's state is static
 #define PPU_SYSCORE_PERCENT 80
 #define PPU_START_WAIT_MS   250           // see ppu_try_core
 
 static Thread     sPpuThread;
 static int        sPpuCore = -1;          // the worker's core, or -1 for inline
 static LightEvent sPpuKick;               // main -> worker: a snapshot is ready
-static LightEvent sPpuDone;               // worker -> main: the picture is ready
+static LightEvent sPpuDone;               // worker -> main: the picture is done
 static volatile int sPpuQuit;
 static volatile unsigned long long sPpuTicks;   // the worker's last render time
 static int        sPpuPending;            // main thread only: a render is out
 
-// The start-up handshake, one per core tried and never reused. See ppu_try_core.
+// The start-up handshake: one for each core tried, never used again. See
+// ppu_try_core.
 enum { PPU_START_PENDING, PPU_START_RUNNING, PPU_START_ABANDONED };
 static volatile int sPpuStart[2];
 
@@ -194,9 +178,9 @@ static void ppu_worker(void *arg)
 {
     volatile int *start = (volatile int *)arg;
 
-    // Claim the start before anything else. If the main thread got there first
-    // it has already given up on this thread and is rasterising without it, so
-    // leave without touching a single shared thing.
+    // Claim the start first. If the main thread was first, it has stopped
+    // waiting for this thread and rasterizes without it. Then leave without
+    // touching any shared state.
     if (!__sync_bool_compare_and_swap(start, PPU_START_PENDING, PPU_START_RUNNING))
         return;
 
@@ -207,33 +191,32 @@ static void ppu_worker(void *arg)
         if (sPpuQuit)
             break;
 
-        // Pairs with the barrier before the kick: the snapshot the main thread
-        // just wrote is what this render reads.
+        // This pairs with the barrier before the kick. This render reads the
+        // snapshot that the main thread just wrote.
         __dmb();
 
         t = svcGetSystemTick();
         ppu_render_rgb565(sGbaFrame, sGbaLayer);
         sPpuTicks = svcGetSystemTick() - t;
 
-        // The picture has to be visible to the main thread before it is told.
+        // The picture must be visible to the main thread before the signal.
         __dmb();
         LightEvent_Signal(&sPpuDone);
     }
 }
 
-// Start a worker on `core` and make sure it actually RUNS there.
+// Start a worker on `core`, and make sure that it runs there.
 //
-// A thread that was created but is never scheduled is the one failure here that
-// would not fail politely: the main thread would wait for its first picture
-// forever, on the first frame, with nothing in the log. Creation succeeding is
-// not proof, so the worker has to check in first.
+// A thread that exists but never runs is the one failure here that does not
+// fail safely. The main thread would wait for its first picture forever, with
+// nothing in the log. Thus the worker must report first.
 //
-// Exactly one side decides, through a compare-and-swap on this attempt's own
-// flag: the worker by starting, or the main thread by giving up after
-// PPU_START_WAIT_MS. A worker that starts after being given up on sees that and
-// returns without touching the events, so it can never swallow a kick meant for
-// a worker on another core. Its handle is abandoned rather than joined, because
-// joining a thread that never runs would hang right here instead.
+// A compare-and-swap on this attempt's own flag lets exactly one side decide:
+// the worker when it starts, or the main thread after PPU_START_WAIT_MS. A
+// worker that starts too late sees that, and returns without touching the
+// events. Thus it cannot take a kick for a worker on another core. Its handle
+// is left, not joined, because a join on a thread that never runs would hang
+// here.
 static int ppu_try_core(int core, volatile int *start)
 {
     Thread t;
@@ -258,9 +241,8 @@ static int ppu_try_core(int core, volatile int *start)
     return 1;
 }
 
-// Which core the rasteriser gets, most capable first. Every outcome is logged,
-// because "rasterising on core 2" and "fell back to core 0" otherwise leave
-// the same symptoms and no trace.
+// The core for the rasterizer, the most capable first. Log every result,
+// because "core 2" and "fell back to core 0" give the same symptoms otherwise.
 static void ppu_thread_start(void)
 {
     bool isNew3ds = false;
@@ -270,8 +252,8 @@ static void ppu_thread_start(void)
     LightEvent_Init(&sPpuDone, RESET_ONESHOT);
     sPpuQuit = 0;
 
-    // Core 2 only where it exists. An emulator in Old 3DS mode has two cores,
-    // and asking it for a third is asking for trouble rather than an error.
+    // Try core 2 only where it exists. An emulator in Old 3DS mode has two
+    // cores, and a request for a third can cause problems.
     APT_CheckNew3DS(&isNew3ds);
     if (isNew3ds && ppu_try_core(2, &sPpuStart[0])) {
         CtrLog("emerald3ds: rasteriser on core 2\n");
@@ -307,23 +289,23 @@ static void ppu_thread_stop(void)
     sPpuCore = -1;
 }
 
-// Settled once, by ppu_thread_start() inside CtrVideoInit(), which main() runs
-// before CtrBottomInit(). The bottom screen reads it to pick its tuning, so it
-// is constant for everything that asks.
+// Set once, by ppu_thread_start() in CtrVideoInit(), which main() calls before
+// CtrBottomInit(). The bottom screen reads it to select its tuning, so it is
+// constant for every reader.
 int Ctr3dsRasteriserOnOwnCore(void)
 {
     return sPpuCore >= 0;
 }
 
-// Copy the video state out of gGbaMem and start rasterising it.
+// Copy the video state out of gGbaMem and start the rasterizer on it.
 //
-// Called from Rp2350PresentFrame() (3ds/host/main.c) on the frame that will be
-// presented, after the game's frame and VBlankIntr() have finished writing it
-// and BEFORE the bottom screen paints, which is what lets the two overlap. The
-// copy is about 99 KB, a fraction of a millisecond, and is what makes the
-// isolation rule above hold without any rule about what the paint may touch.
+// Rp2350PresentFrame() (3ds/host/main.c) calls this on the frame that will
+// show. It runs after the game's frame and VBlankIntr() are complete, and
+// before the bottom screen paints, so the two overlap. The copy is about 99 KB
+// and takes a fraction of a millisecond. It makes the isolation rule above
+// true, with no rule for what the paint can touch.
 //
-// A no-op when inline: CtrVideoPresent() then rasterises gGbaMem directly.
+// No effect when inline: CtrVideoPresent() then rasterizes gGbaMem directly.
 void CtrVideoRenderBegin(void)
 {
     unsigned long long t;
@@ -345,46 +327,36 @@ void CtrVideoRenderBegin(void)
     LightEvent_Signal(&sPpuKick);
 }
 
-// Nearest only where nearest is actually correct.
+// Use nearest only where it is correct.
 //
-// This used to be GPU_NEAREST unconditionally, "to keep GBA pixels crisp", and
-// at 1x that is exactly right: one GBA pixel is one 3DS pixel, no resampling
-// happens, and any filter would only blur a perfect image.
+// At 1x, nearest is correct: one GBA pixel is one 3DS pixel, and a filter would
+// only blur it.
 //
-// At 1.5x it is the bug. 240 -> 360 and 160 -> 240 are both 3:2, so nearest has
-// no choice but to emit source columns and rows as 1,2,1,2,... pixels wide.
-// Every glyph stroke and every sprite edge is then randomly one or two pixels
-// thick depending on where it happens to land, which is the "pixels are not
-// aligned" artifacting. It is not a race and not a bug in the upload path; it
-// is what point sampling a 3:2 ratio means. FILL is worse still, being 5:3
-// horizontally.
+// At 1.5x, nearest is wrong. Both 240 -> 360 and 160 -> 240 are 3:2, so nearest
+// makes source columns and rows 1, 2, 1, 2 pixels wide. Glyph strokes and
+// sprite edges are then one or two pixels thick at random. FILL is worse, at
+// 5:3 horizontally. GPU_LINEAR is the 3DS GPU's bilinear filter, and it costs
+// nothing extra. (open_agb_firm also uses a filtered scale by default.)
 //
-// open_agb_firm, which is how most people play GBA titles on a 3DS, does not
-// point sample either: its `scaler` setting is none / bilinear / matrix and it
-// defaults to `matrix`, a filtered scale. GPU_LINEAR is the 3DS GPU's built-in
-// equivalent of its `bilinear`, and it costs nothing extra to sample.
+// Thus: nearest at the integer scale, linear at the two fractional scales.
 //
-// So: nearest at the integer scale, linear at the two fractional ones.
-//
-// Safe to call before the texture exists. CtrSettingsLoad() restores the saved
-// scale through Ctr3dsApplyTopScale() before CtrVideoInit() has run, so the
-// guard lives here rather than at the call site: this is the only function that
-// touches the texture, and putting the check anywhere else needs sReady visible
-// higher up the file than it is declared.
+// It is safe to call before the texture exists. CtrSettingsLoad() applies the
+// saved scale through Ctr3dsApplyTopScale() before CtrVideoInit() runs, so the
+// guard is here, in the only function that touches the texture.
 static void apply_top_filter(void)
 {
     GPU_TEXTURE_FILTER_PARAM f =
         (sTopScale == CTR_TOP_SCALE_1X) ? GPU_NEAREST : GPU_LINEAR;
 
     if (!sReady)
-        return;   // CtrVideoInit() applies it itself once the texture exists
+        return;   // CtrVideoInit() applies it when the texture exists
 
     C3D_TexSetFilter(&sTopTex, f, f);
 }
 
 #if CTR_BOOT_DIAG
-// Kept so the diagnostics below can read DISPCNT; ppu_set_memory() otherwise
-// consumes these and video.c never needs them again.
+// Kept so that the diagnostics below can read DISPCNT. ppu_set_memory() uses
+// these, and video.c does not need them again.
 static const uint8_t *sRegBase;
 #endif
 
@@ -414,10 +386,10 @@ int CtrVideoInit(void)
         !C3D_TexInit(&sBotTex, BOT_TEX_W, BOT_TEX_H, GPU_RGB565))
         return 0;
 
-    // The bottom screen is drawn 1:1 and never resampled, so nearest is always
-    // right there. The top screen depends on the scale, and its filter is set
-    // at the bottom of this function: apply_top_filter() is a no-op until
-    // sReady, precisely so the pre-init call from CtrSettingsLoad() is safe.
+    // The bottom screen draws at 1:1 with no resampling, so nearest is always
+    // correct there. The top filter depends on the scale, and the end of this
+    // function sets it. The function apply_top_filter() does nothing until
+    // sReady, so the early call from CtrSettingsLoad() is safe.
     C3D_TexSetFilter(&sBotTex, GPU_NEAREST, GPU_NEAREST);
 
     init_subtex(&sTopSub, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, TOP_TEX_W, TOP_TEX_H);
@@ -433,10 +405,10 @@ int CtrVideoInit(void)
     memset(sTopStage, 0, TOP_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
     memset(sBotStage, 0, BOT_TEX_W * CTR_BOTTOM_HEIGHT * sizeof(uint16_t));
 
-    // Point the PPU at its input. Must happen after Ctr3dsInitGbaMemory().
+    // Point the PPU at its input. This must occur after Ctr3dsInitGbaMemory().
     //
-    // Once, and for good: the snapshot when a second core rasterises, the
-    // game's own memory when the main thread does. See CtrVideoRenderBegin.
+    // Do this once: the snapshot when a second core rasterizes, the game's own
+    // memory when the main thread does. See CtrVideoRenderBegin.
     const void *reg, *pal, *vram, *oam;
     CtrGetGbaRegions(&reg, &pal, &vram, &oam);
     sLiveReg = reg;
@@ -459,9 +431,9 @@ int CtrVideoInit(void)
 
     sReady = 1;
 
-    // After sReady, or the guard inside it would swallow this one too. The
-    // filter is only read when the texture is bound, so setting it last in init
-    // is no different from setting it first.
+    // After sReady, or the guard inside it would ignore this call too. The
+    // filter is read only when the texture is bound, so the order in init does
+    // not matter.
     apply_top_filter();
 
     return 1;
@@ -472,7 +444,7 @@ void CtrVideoExit(void)
     if (!sReady)
         return;
 
-    // First: the worker may still be drawing into sGbaFrame.
+    // First: the worker can still be writing to sGbaFrame.
     ppu_thread_stop();
 
     linearFree(sTopStage);
@@ -486,16 +458,14 @@ void CtrVideoExit(void)
 }
 
 #if CTR_BOOT_DIAG
-// Presented once, before AgbMain(), so a black screen stops being ambiguous.
-// Without it "hung inside the game's init" and "never got as far as running"
-// look identical. Solid blue top / green bottom means everything in this file
-// works and the game is what stalled.
+// Shown once, before AgbMain(), so a black screen has only one meaning. A blue
+// top and a green bottom mean that this file works and the game stopped.
 void CtrDiagSplash(void)
 {
     if (!sReady)
         return;
 
-    // A few frames: one alone can be lost to double buffering.
+    // A few frames: double buffering can lose one.
     for (int i = 0; i < 4; i++) {
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         C2D_TargetClear(sTopTarget, C2D_Color32(0x00, 0x00, 0xC0, 0xFF));
@@ -508,17 +478,14 @@ void CtrDiagSplash(void)
 }
 #endif
 
-// Three profile names per caller, not one name plus a suffix built at runtime:
-// CtrProfile keys on the string's ADDRESS, so a constructed name would never
-// match itself and every sample would open a new stage.
+// Three profile names for each caller, not one name with a suffix built at run
+// time. CtrProfile uses the string's address as the key, so a built name never
+// matches itself.
 //
-// Split three ways because that is the open question. A bottom repaint costs
-// about a whole VBlank and the paint itself is nowhere near that, so the cost
-// is somewhere in here -- and which of the three it is decides whether the fix
-// is a narrower transfer, a smaller flush, or not blocking on the transfer at
-// all. The top screen carries the same three as the control: it uploads on
-// every frame at 256x160 against the bottom's 512x240, so it is the same code
-// doing a third of the work.
+// The upload is in three parts, so the log shows which part costs the time. The
+// answer selects the fix: a narrower transfer, a smaller flush, or no block on
+// the transfer. The top screen has the same three parts as a control. It
+// uploads on each frame at 256x160 against the bottom's 512x240.
 static const char *const kProfTop[3] = {
     "upload.top.copy", "upload.top.flush", "upload.top.xfer"
 };
@@ -526,21 +493,19 @@ static const char *const kProfBot[3] = {
     "upload.bot.copy", "upload.bot.flush", "upload.bot.xfer"
 };
 
-// Copy a linear w x h RGB565 image into a wider staging buffer, then let the
-// transfer engine tile it into the texture.
+// Copy a linear w x h RGB565 image into a wider staging buffer. Then the
+// transfer engine tiles it into the texture.
 //
-// The TOP screen's path on every frame, and the BOTTOM screen's whenever a
-// second core is rasterising.
+// The top screen uses this on every frame. The bottom screen uses it when a
+// second core rasterizes.
 //
-// The top stays whole-image because it has to be: the game's frame is new every
-// frame and there is nowhere to spread the cost to. At 256x160 it moves 81,920
-// bytes, which fits.
+// The top upload is always a full image, because the game's frame is new on
+// each frame. At 256x160 it moves 81,920 bytes, which fits.
 //
-// The bottom is three times that, about 2 ms with the copy, and whether that
-// fits depends on where it runs. With a second core it runs before the join in
-// CtrVideoPresent, inside the time core 0 would otherwise spend waiting for the
-// rasteriser, so the whole picture lands on the frame it was painted. Without
-// one there is no such time, and the inline path slices it instead (below).
+// The bottom upload is three times larger, about 2 ms with the copy. With a
+// second core, it runs before the join in CtrVideoPresent, in time that core 0
+// would spend waiting. Thus the picture shows on the frame of the paint.
+// Without a second core, the inline path sends it in slices (below).
 static void upload(uint16_t *stage, int stageW, const uint16_t *src,
                    int w, int h, C3D_Tex *tex, const char *const *prof)
 {
@@ -552,9 +517,9 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
     CtrProfile(prof[0], t);
     t = CtrTicksNow();
 
-    // Note this flushes the WHOLE stage, padding included: stageW is 512 for a
-    // 320-wide bottom screen, so 37% of both this and the transfer below is
-    // blank. Whether that matters is what the numbers are for.
+    // This flushes the full stage, the padding too. The value of stageW is 512
+    // for a 320-wide bottom screen, so 37% of this flush and of the transfer is
+    // blank.
     GSPGPU_FlushDataCache(stage, (size_t)stageW * h * sizeof(uint16_t));
 
     CtrProfile(prof[1], t);
@@ -567,45 +532,35 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
     CtrProfile(prof[2], t);
 }
 
-// The bottom screen's upload on the INLINE path, pushed a slice at a time. With
-// a second core rasterising none of this runs: upload() above sends the whole
-// picture, overlapped with the rasteriser, and a slice would only make every
-// repaint land up to five frames late for no saving.
+// The bottom screen's upload on the inline path, one slice at a time. With a
+// second core, none of this runs: upload() above sends the full picture, in
+// parallel with the rasterizer.
 //
-// The asymmetry here is the whole design: the TOP screen has to hold 60fps, and
-// the bottom is allowed to arrive late. Before this, it was not allowed to --
-// a full bottom upload happened inside one frame, and it cost the game a whole
-// VBlank every time the UI repainted. Measured through the animations that
-// caused it: repainting 60 times a second ran the game at 30fps, 10 times a
-// second at 53, which is fps = 3600 / (60 + repaints per second). That was
-// with the rasteriser, the paint and this upload all taking turns on core 0,
-// which is still exactly the inline path.
+// On the inline path, the top screen must hold 60fps, and the bottom screen can
+// arrive late. A full bottom upload in one frame costs the game a VBlank. The
+// measured rate is fps = 3600 / (60 + repaints per second).
 //
-// A full bottom upload moves 245,760 bytes -- THREE TIMES the top screen's,
-// because the stage is 512 wide for a 320-wide image -- through a blocking
-// transfer. So the frame budget picks the slice, not the picture: 48 rows is
-// 49,152 bytes, under two thirds of what the top screen already uploads every
-// frame without trouble. A repaint takes five frames to reach the panel instead
-// of one, and on this path the screen's animations step five times a second,
-// so that is invisible.
+// A full bottom upload moves 245,760 bytes through a blocking transfer, three
+// times the top screen. Thus the frame budget selects the slice size: 48 rows
+// is 49,152 bytes. A repaint takes five frames to reach the panel. On this path
+// the animations step five times a second, so the delay is not visible.
 //
-// 48 because it is a multiple of 8. A tiled texture stores eight rows to a
-// strip and strips run in order, so any 8-row-aligned band is a contiguous run
-// in BOTH buffers: the source at row * BOT_TEX_W, the destination at
-// (row / 8) * BOT_TEX_W * 8. TEX_TRANSFER_FLAGS has no flip and no scaling, so
-// a band lands where it was taken from.
+// 48 is a multiple of 8. A tiled texture stores eight rows in a strip, and the
+// strips are in order. Thus any band that starts on an 8-row boundary is one
+// contiguous run in both buffers. The source is at row * BOT_TEX_W, and the
+// destination is at (row / 8) * BOT_TEX_W * 8. TEX_TRANSFER_FLAGS has no flip
+// and no scaling, so a band lands where it came from.
 //
-// That destination arithmetic is the one thing in here that hardware has to
-// confirm. If it is wrong the bottom screen shows its 48-row bands stacked in
-// the wrong order -- unmistakable, and harmless to everything else.
+// Only hardware can confirm this destination arithmetic. If it is wrong, the
+// 48-row bands show in the wrong order. That is easy to see and harms nothing
+// else.
 #define BOT_CHUNK_ROWS 48
 
-static int sBotRow = CTR_BOTTOM_HEIGHT;   // next row to push; height means idle
+static int sBotRow = CTR_BOTTOM_HEIGHT;   // next row; the height means idle
 
-// Copied whole, and only the transfer is sliced. The UI can repaint again while
-// a slice run is in flight, and a source copied in pieces across those frames
-// would tear between them. 153,600 bytes in one pass is cheap; it was never the
-// expensive half.
+// Copy the full image and slice only the transfer. The UI can repaint again
+// during a run. A source copied in pieces over several frames would tear. The
+// copy of 153,600 bytes is cheap.
 static void snapshot_bottom(void)
 {
     const uint16_t *fb = CtrBottomFramebuffer();
@@ -630,8 +585,8 @@ static void upload_bottom_slice(void)
 
     unsigned long long t;
 
-    // Flush only the band about to move, not the whole stage. Same total work
-    // across a repaint, spread over the frames that do it.
+    // Flush only the band that moves next, not the full stage. The total work
+    // is the same, spread over the frames.
     t = CtrTicksNow();
     GSPGPU_FlushDataCache(src, (size_t)rows * BOT_TEX_W * sizeof(uint16_t));
     CtrProfile(kProfBot[1], t);
@@ -645,18 +600,17 @@ static void upload_bottom_slice(void)
     sBotRow += rows;
 }
 
-// Dropped frames, counted rather than inferred.
+// Dropped frames, counted.
 //
-// Every stage above says what something costs; none of them says whether the
-// frame made it. `framebegin` only hints at it, and a missed VBlank inflates
-// that stage's mean rather than showing up as a miss. So this times the
-// displayed frame itself, sync point to sync point: `frame` reports the mean and
-// worst period, and every 600 frames a line says how many were late, which is
-// the number a stutter fix has to bring to zero.
+// The stages above tell the cost of each part, but not if the frame was on
+// time. A missed VBlank only raises the mean of `framebegin`. Thus this
+// measures the displayed frame from one sync point to the next. `frame` reports
+// the mean and worst period. Every 600 frames, a line tells how many frames
+// were late. A stutter fix must bring that number to zero.
 //
-// Late means over 25 ms, a frame and a half: a 33 ms period is one VBlank
-// missed, and a period that is merely jittery is not. A trip to the HOME menu
-// counts as one late frame, which is fine.
+// Late means more than 25 ms, one and a half frames. A 33 ms period is one
+// missed VBlank. A HOME menu visit counts as one late frame, which is
+// acceptable.
 #define FRAME_LATE_TICKS    ((unsigned long long)SYSCLOCK_ARM11 / 40)
 #define FRAME_REPORT_EVERY  600
 
@@ -675,7 +629,7 @@ static void note_frame_period(void)
     sLast = now;
 
     if (++sFrames >= FRAME_REPORT_EVERY) {
-        // Silence means none late, so a healthy log stays short.
+        // No line means that no frame was late, so a normal log stays short.
         if (sLate > 0)
             CtrLog("emerald3ds: %u of the last %u frames missed VBlank\n",
                    sLate, sFrames);
@@ -686,22 +640,21 @@ static void note_frame_period(void)
 
 void CtrVideoPresent(void)
 {
-    // Timed in pieces, because "presenting is slow" is not a finding. The top
-    // upload runs on every displayed frame and the bottom one only after the UI
-    // has repainted, so the top is the control: if both overrun, the transfer
-    // path is at fault; if only the bottom does, it is something about the
-    // 512-wide stride or about this being the once-in-a-while cold path.
+    // Measure the parts separately. The top upload runs on every displayed
+    // frame and the bottom one only after a repaint, so the top is the control.
+    // If both are slow, the transfer path is at fault. If only the bottom is
+    // slow, the cause is the 512-wide stride or the rare cold path.
     unsigned int tPresent = CtrTimeNowMs();
     unsigned int t0;
 
     if (!sReady)
         return;
 
-    // The bottom screen, whole, BEFORE the join, when a second core is
-    // rasterising. It reads only the UI's own framebuffer, which is final once
-    // CtrBottomUpdate() has returned, and the rasteriser never touches that or
-    // the bottom texture, so this can run while the render is still going: its
-    // ~2 ms comes out of what `ppu.wait` would otherwise have spent idle.
+    // The full bottom screen, before the join, when a second core rasterizes.
+    // It reads only the UI's own framebuffer, which is final after
+    // CtrBottomUpdate() returns. The rasterizer never touches that buffer or
+    // the bottom texture, so this can run during the render. Its ~2 ms comes
+    // from time that `ppu.wait` would spend idle.
     if (sPpuCore >= 0 && CtrBottomIsDirty()) {
         t0 = CtrTimeNowMs();
         upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
@@ -710,30 +663,30 @@ void CtrVideoPresent(void)
         CtrLogSlow("upload.bot", t0);
     }
 
-    // The frame the game just finished writing: collect it from the worker, or
-    // rasterise it here when there is no worker.
+    // The frame that the game just wrote: collect it from the worker, or
+    // rasterize it here when there is no worker.
     t0 = CtrTimeNowMs();
     if (sPpuCore >= 0) {
         unsigned long long tw;
 
-        // Defensive only. Rp2350PresentFrame() starts the render on exactly
-        // the frames it presents, so this finds one in flight every time.
+        // Only a guard. Rp2350PresentFrame() starts the render on each
+        // presented frame, so a render is always out here.
         if (!sPpuPending)
             CtrVideoRenderBegin();
 
-        // ppu.wait is how long the main thread was left with nothing to do.
-        // Near zero means the paint, the bottom upload and the audio took as
-        // long as the rasteriser; close to `ppu` means the second core bought
-        // nearly all of it back.
+        // ppu.wait is the time that the main thread had nothing to do. Near
+        // zero means that the paint, the bottom upload and the audio took as
+        // long as the rasterizer. Close to `ppu` means that the second core
+        // saved nearly all of it.
         tw = CtrTicksNow();
         LightEvent_Wait(&sPpuDone);
         __dmb();
         sPpuPending = 0;
         CtrProfile("ppu.wait", tw);
 
-        // The worker's own measurement, reported from here because CtrProfile
-        // is main-thread only. Same stage name as the inline path, so the two
-        // builds' logs compare directly.
+        // The worker's own measurement, reported here because CtrProfile is
+        // only for the main thread. The stage name is the same as on the inline
+        // path, so the logs of the two builds compare directly.
         CtrProfile("ppu", CtrTicksNow() - sPpuTicks);
     } else {
         unsigned long long tp = CtrTicksNow();
@@ -743,10 +696,10 @@ void CtrVideoPresent(void)
     CtrLogSlow("ppu", t0);
 
 #if CTR_BOOT_DIAG
-    // Two facts decide where a black screen comes from:
-    //   DISPCNT == 0x0080 (forced blank) or 0 -> the game is not driving the
-    //   display, so the PPU is right to emit black; the fault is upstream.
-    //   Otherwise a wholly black frame means the game IS driving the display
+    // Two facts show where a black screen comes from:
+    // - DISPCNT == 0x0080 (forced blank) or 0: the game does not drive the
+    //   display, so black is correct. The fault is upstream.
+    // - Otherwise, a fully black frame means that the game drives the display,
     //   and the PPU or its memory pointers are at fault.
     {
         static unsigned frame;
@@ -768,14 +721,13 @@ void CtrVideoPresent(void)
     CtrLogSlow("upload.top", t0);
 
     // The inline path's bottom upload. The bottom screen is mostly static, so
-    // only re-tile it when the UI says something actually changed -- and then
-    // hand it over a slice per frame rather than all at once, because on this
-    // path there is no idle time to hide it in, and no single frame should lose
-    // its budget to it. The second-core path uploaded above.
+    // tile it again only when the UI changed. Send it one slice for each frame,
+    // because this path has no idle time, and no single frame must lose its
+    // budget to it. The second-core path uploaded above.
     //
-    // Cleared as soon as the snapshot is taken, not when the run finishes: a
-    // repaint arriving mid-run is a NEW picture, and it gets its own run after
-    // this one rather than being lost or tearing into it.
+    // Clear the flag when the snapshot is taken, not when the run ends. A
+    // repaint during a run is a new picture. It gets its own run after this
+    // one, and does not tear into this one.
     if (sPpuCore < 0) {
         if (sBotRow >= CTR_BOTTOM_HEIGHT && CtrBottomIsDirty()) {
             snapshot_bottom();
@@ -790,15 +742,13 @@ void CtrVideoPresent(void)
         }
     }
 
-    // THE frame's sync point, and the one number that says whether this port has
-    // any budget left. C3D_FRAME_SYNCDRAW waits here, at Begin, for the previous
-    // frame's rendering -- not at C3D_FrameEnd, whatever the comment below that
-    // call used to claim. Measured `frameend` came back at 311 us, which is what
-    // proved it: a real VBlank wait on a frame with slack is milliseconds.
+    // The frame's sync point, and the best measure of the spare time. With
+    // C3D_FRAME_SYNCDRAW, the wait for the previous frame's render is here, at
+    // Begin, not at C3D_FrameEnd.
     //
-    // So read this as the slack. Milliseconds means the frame has room and
-    // something is briefly overrunning it; near zero means the port is already
-    // saturated and any added work at all costs a frame.
+    // Thus read this as the spare time. Milliseconds mean that the frame has
+    // space. Near zero means that the port has no time left, and any new work
+    // costs a frame.
     {
         unsigned long long tb = CtrTicksNow();
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -807,11 +757,10 @@ void CtrVideoPresent(void)
     }
 
 #if CTR_BOOT_DIAG
-    // Liveness, visible without the log: cycling bars mean the frame loop is
-    // running, a permanently black screen means it is not. How much shows
-    // depends on the scale mode -- 20 px each side at the default 1.5x, a wide
-    // border at 1x, and nothing at all in FILL, where the image covers the
-    // whole panel.
+    // Liveness without the log: moving bars mean that the frame loop runs, and
+    // a black screen means that it does not. How much shows depends on the
+    // scale: 20px on each side at 1.5x, a wide border at 1x, and nothing in
+    // FILL.
     {
         static unsigned tick;
         tick++;
@@ -825,8 +774,8 @@ void CtrVideoPresent(void)
 #endif
     C2D_SceneBegin(sTopTarget);
     {
-        // Derived, not tabulated: the offset is always whatever centres the
-        // scaled image, so the two can never disagree.
+        // Calculated, not in a table: the offset always centers the scaled
+        // image, so the two always agree.
         float sx = kTopScales[sTopScale].sx;
         float sy = kTopScales[sTopScale].sy;
         float x  = (TOP_SCREEN_W - CTR_GBA_WIDTH  * sx) / 2.0f;
@@ -843,11 +792,10 @@ void CtrVideoPresent(void)
     {
         unsigned long long tf = CtrTicksNow();
         C3D_FrameEnd(0);
-        // NOT the VBlank wait, despite what this comment said for a long time.
-        // Measured at 311 us mean, which is far too short to be one: with
-        // C3D_FRAME_SYNCDRAW the wait is at C3D_FrameBegin above. This is just
-        // the submit, and it is kept measured because a submit that starts
-        // taking milliseconds means the GPU or the GSP event thread is behind.
+        // This is not the VBlank wait. With C3D_FRAME_SYNCDRAW, the wait is at
+        // C3D_FrameBegin above. This is only the submit. It stays measured,
+        // because a submit that takes milliseconds means that the GPU or the
+        // GSP event thread is late.
         CtrProfile("frameend", tf);
     }
     CtrLogSlow("frameend", t0);

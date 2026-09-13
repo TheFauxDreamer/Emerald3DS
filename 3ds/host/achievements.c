@@ -1,30 +1,28 @@
-// The achievements store, persisted beside settings.bin on the SD card.
+// The achievements store, stored next to settings.bin on the SD card.
 //
-// Host side, and deliberately dumb. What an achievement is and when it unlocks
-// lives game-side in 3ds/achievements.c, where the game's own accessors are;
-// this file keeps the bits it is handed, one record per playthrough, and gets
-// them onto the card without touching the frame.
+// Host side, and simple. The game side (3ds/achievements.c) decides what an
+// achievement is and when it unlocks, with the game's own accessors. This file
+// keeps the bits that it gets, one record for each playthrough, and writes them
+// to the card away from the frame.
 //
-// It copies settings.c's write discipline exactly, for the reasons that file's
-// header records: a change marks the table dirty, CtrAchFlush() waits for a
-// second of quiet and hands a snapshot to the I/O thread (io_thread.c), and the
-// card write happens while the main thread waits for VBlank. An unlock lands in
-// the middle of whatever earned it -- a catch, a badge, the end of a battle --
-// which is exactly the moment a synchronous write would be seen.
+// It follows the write rules of settings.c. A change marks the table dirty.
+// CtrAchFlush() waits for one second of quiet and gives a snapshot to the I/O
+// thread (io_thread.c). The card write occurs while the main thread waits for
+// VBlank. An unlock occurs during a catch, a badge or the end of a battle,
+// where a direct write would be visible.
 //
-// Also like settings.c, it is not save data and must never be treated like it.
-// A missing, short or wrong-version file is ordinary, not an error: the table
-// starts empty and the game side re-derives every achievement it can from the
-// save itself (the backfill in 3ds/achievements.c). Nothing here blocks boot.
+// Like settings.c, this is not save data. A missing, short or wrong-version
+// file is normal. The table then starts empty, and the game side finds again
+// every achievement that it can from the save (the backfill in
+// 3ds/achievements.c). Nothing here blocks boot.
 //
-// And it borrows settings.c's in-place rewrite rather than save.c's
-// temp-and-rename. The file is one fixed 460-byte image, a single sector, so
-// there is no torn state to protect against, and the magic and version checks
-// turn anything unexpected into "no records" rather than into damage.
+// It writes in place, like settings.c, not with a temp file and a rename. The
+// file is one fixed 460-byte image in one sector, so a write cannot tear. The
+// magic and version checks turn a bad file into "no records".
 //
-// Version 1 (332 bytes) had no place bits. It is still read, and carried over
-// with every place unvisited, because its unlocks are not all re-derivable:
-// the shiny catch leaves nothing in the save to find again.
+// Version 1 (332 bytes) has no place bits. It is still read, with every place
+// unvisited. Not all of its unlocks can be found again: the shiny catch leaves
+// nothing in the save.
 
 #include <3ds.h>
 #include <stddef.h>
@@ -39,16 +37,16 @@
 #define ACH_DIR   "sdmc:/3ds/emerald3ds"
 #define ACH_PATH  ACH_DIR "/achievements.bin"
 
-#define ACH_MAGIC    0x43413345u      // 'E3AC' little-endian
+#define ACH_MAGIC    0x43413345u      // 'E3AC' little endian
 #define ACH_VERSION  2
 
-// One playthrough. Fixed size with every byte spoken for, so the layout on the
-// card does not depend on how the compiler chooses to align it.
+// One playthrough. A fixed size with every byte in use, so the layout on the
+// card does not depend on the compiler's alignment.
 struct CtrAchRecord
 {
     uint32_t playerId;
-    // The table's clock when this record was last loaded or saved. The lowest
-    // is the one a new playthrough replaces once all CTR_ACH_RECORDS are used.
+    // The table's clock when this record was last loaded or saved. When all
+    // CTR_ACH_RECORDS are in use, a new playthrough replaces the lowest.
     uint32_t lastUsed;
     uint8_t  unlocked[CTR_ACH_BYTES];
     uint8_t  unseen[CTR_ACH_BYTES];
@@ -65,7 +63,7 @@ struct CtrAchFile
     struct CtrAchRecord rec[CTR_ACH_RECORDS];
 };
 
-// Version 1, kept only to read. The same header, and records without places.
+// Version 1, only for reading: the same header, and records with no places.
 struct CtrAchRecordV1
 {
     uint32_t playerId;
@@ -84,8 +82,8 @@ struct CtrAchFileV1
     struct CtrAchRecordV1 rec[8];
 };
 
-// If any of these fails the compiler added padding, and ach_put() would write
-// uninitialised bytes to the card. Add explicit padding instead.
+// If one of these fails, the compiler added padding, and ach_put() would write
+// uninitialized bytes to the card. Add explicit padding.
 _Static_assert(sizeof(struct CtrAchRecord)
                    == 8 + 2 * CTR_ACH_BYTES + CTR_ACH_PLACE_BYTES,
                "CtrAchRecord has implicit padding");
@@ -93,28 +91,29 @@ _Static_assert(sizeof(struct CtrAchFile)
                    == 12 + CTR_ACH_RECORDS * sizeof(struct CtrAchRecord),
                "CtrAchFile has implicit padding");
 
-// Version 1's layout is history: it must stay the 332 bytes that were written,
-// and a later change to the live sizes must not reach back into it.
+// Version 1's layout must stay the 332 bytes that were written. A later change
+// to the live sizes must not change it.
 _Static_assert(sizeof(struct CtrAchFileV1) == 332,
                "CtrAchFileV1 must match the version 1 file");
 _Static_assert(CTR_ACH_BYTES >= 16 && CTR_ACH_RECORDS >= 8,
                "a version 1 record must still fit a live one");
 
-// Same second of quiet as settings.c's CTR_SETTINGS_QUIET_MS, for a related
-// reason: a backfill or a burst of unlocks (the end of a battle can finish
-// several at once) should cost one write, not one per achievement.
+// The same one second of quiet as settings.c's CTR_SETTINGS_QUIET_MS. A
+// backfill or a burst of unlocks (a battle can complete several) costs one
+// write.
 #define CTR_ACH_QUIET_MS 1000
 
-// The live table. Main thread only: the game side loads and saves through it,
-// and the I/O thread only ever sees the copy handed over in sPending.
+// The live table, for the main thread only. The game side loads and saves
+// through it. The I/O thread sees only the copy in sPending.
 static struct CtrAchFile sTable;
 
 static int      sDirty;
 static uint64_t sLastChangeMs;
 
-// The file, held open for the session and never closed, the way settings.c
-// and log.c hold theirs: fflush() pushes the bytes and process teardown closes
-// it. One open attempt per boot, so a read-only card costs one failed open.
+// The file, open for the full session and never closed, like the files of
+// settings.c and log.c. The call to fflush() pushes the bytes, and the process
+// exit closes the file. One open attempt for each boot, so a read-only card
+// costs one failed open.
 static FILE *sFile;
 static int   sOpenTried;
 
@@ -125,8 +124,8 @@ static void table_reset(void)
     sTable.version = ACH_VERSION;
 }
 
-// The directory, made once per boot. settings.c makes the same one; each keeps
-// its own flag so neither depends on the other having run first.
+// Make the directory once for each boot. settings.c makes the same directory.
+// Each file keeps its own flag, so neither depends on the other.
 static void ensure_dir(void)
 {
     static int done;
@@ -144,8 +143,8 @@ static void ensure_dir(void)
     CtrLogSlow("ach.mkdir", t0);
 }
 
-// "r+b" first so an existing file is opened without being truncated, "w+b" on
-// a first run only. See settings_open() for why the order matters.
+// Try "r+b" first, so an existing file opens without truncation. Use "w+b" only
+// on a first run. See settings_open() for why the order matters.
 static FILE *ach_open(void)
 {
     unsigned int t0;
@@ -168,9 +167,9 @@ static FILE *ach_open(void)
     return sFile;
 }
 
-// A version 1 file into the freshly reset table: every record kept, every
-// place unvisited. The clock carries over, so "least recently used" still
-// picks the same record to replace.
+// Load a version 1 file into the reset table: keep every record, with every
+// place unvisited. The clock carries over, so the same record is still the
+// least recently used.
 static void table_from_v1(const struct CtrAchFileV1 *v1)
 {
     sTable.count = v1->count;
@@ -185,15 +184,15 @@ static void table_from_v1(const struct CtrAchFileV1 *v1)
         r->lastUsed = old->lastUsed;
         memcpy(r->unlocked, old->unlocked, sizeof(old->unlocked));
         memcpy(r->unseen, old->unseen, sizeof(old->unseen));
-        // places stays as table_reset() left it: zero, nowhere visited.
+        // places stays as table_reset() set it: zero, no place visited.
     }
 }
 
-// Boot. Reads the whole table once; everything after this is served from
-// memory. Anything unexpected in the file leaves the table empty.
+// At boot, read the full table once. After this, everything comes from memory.
+// A bad file leaves the table empty.
 void CtrAchStoreInit(void)
 {
-    // Either version's image, from one read. The header is the same in both.
+    // The image of either version, from one read. Both have the same header.
     union
     {
         struct CtrAchFile   now;
@@ -214,9 +213,9 @@ void CtrAchStoreInit(void)
     memset(&f, 0, sizeof(f));
     n = fread(&f, 1, sizeof(f), fp);
 
-    // At least version 1's size rather than exactly it. The rewrite is in
-    // place and never truncates, so a version 1 file that a build from before
-    // the change wrote over a newer one keeps the newer one's tail.
+    // At least the size of version 1, not exactly that size. The write is in
+    // place and never truncates. Thus an old build's version 1 write over a
+    // newer file keeps the newer tail.
     if (n >= sizeof(f.v1) && f.v1.magic == ACH_MAGIC && f.v1.version == 1
         && f.v1.count <= sizeof(f.v1.rec) / sizeof(f.v1.rec[0]))
     {
@@ -226,8 +225,8 @@ void CtrAchStoreInit(void)
         return;
     }
 
-    // Unconditional, like the other "which path did we get" lines: without it
-    // "no file yet" and "a file we threw away" leave identical logs.
+    // Always log which path loaded, like the other such lines. Without it, "no
+    // file yet" and "a file that was discarded" give the same log.
     if (n != sizeof(f.now) || f.now.magic != ACH_MAGIC
         || f.now.version != ACH_VERSION || f.now.count > CTR_ACH_RECORDS)
     {
@@ -237,8 +236,8 @@ void CtrAchStoreInit(void)
     }
 
     sTable = f.now;
-    // Only what the header vouches for. Whatever an unused slot holds is
-    // overwritten before it is ever read.
+    // Only the records that the header counts. An unused slot is written before
+    // it is read.
     sTable.pad = 0;
 
     CtrLog("emerald3ds: achievements: %u playthrough%s loaded\n",
@@ -254,8 +253,8 @@ static struct CtrAchRecord *find_record(uint32_t playerId)
     return NULL;
 }
 
-// A slot for a playthrough the table has not seen: the next free one, or once
-// all are used, the least recently used. Cleared, and keyed to the new ID.
+// A slot for a new playthrough: the next free slot or, when all are in use, the
+// least recently used. Clear it and set its ID.
 static struct CtrAchRecord *claim_record(uint32_t playerId)
 {
     struct CtrAchRecord *r;
@@ -300,9 +299,9 @@ int CtrAchStoreLoad(uint32_t playerId, uint8_t *unlocked, uint8_t *unseen,
     memcpy(unseen, r->unseen, CTR_ACH_BYTES);
     memcpy(places, r->places, CTR_ACH_PLACE_BYTES);
 
-    // Being played is being used. Not marked dirty: the new clock only matters
-    // when a record has to be replaced, which is decided in memory, and it
-    // reaches the card with the next unlock anyway.
+    // The playthrough in play is in use. Do not mark the table dirty. The new
+    // clock matters only when a record must be replaced, which occurs in
+    // memory. It reaches the card with the next unlock.
     r->lastUsed = ++sTable.clock;
     return 1;
 }
@@ -323,17 +322,17 @@ void CtrAchStoreSave(uint32_t playerId, const uint8_t *unlocked,
     mark_dirty();
 }
 
-// The card half. Runs on the I/O thread in play, and on the main thread only
-// when there is no I/O thread or the game is closing, always under sFileLock.
-// A slow write is reported with CtrLog rather than CtrLogSlow, whose table is
-// main-thread only.
+// The card part. It runs on the I/O thread during play, and on the main thread
+// only when there is no I/O thread or the game closes. It always holds
+// sFileLock. Report a slow write with CtrLog, not CtrLogSlow, whose table is
+// for the main thread only.
 static void ach_put(const struct CtrAchFile *f)
 {
     unsigned int t0, elapsed;
     FILE *fp = ach_open();
 
     if (fp == NULL)
-        return;                       // read-only card, full card: not fatal
+        return;                       // read-only card or full card: not fatal
 
     t0 = CtrTimeNowMs();
 
@@ -351,11 +350,10 @@ static void ach_put(const struct CtrAchFile *f)
         CtrLog("emerald3ds: slow achievements.write %u ms\n", elapsed);
 }
 
-// The write waiting for the I/O thread, and the two locks around it, exactly
-// as settings.c has them: sPendingLock is only ever held for a struct copy, so
-// the main thread never waits on the card, and sFileLock is held across the
-// whole write, which keeps an older table from landing on top of a newer one.
-// Both start at 1, which is what LightLock_Init() writes.
+// The write that waits for the I/O thread, and its two locks, as in settings.c.
+// The main thread holds sPendingLock only for a struct copy, so it never waits
+// on the card. The writer holds sFileLock for the full write, so an older table
+// never overwrites a newer one. Both start as 1, what LightLock_Init() writes.
 static LightLock         sPendingLock = 1;
 static LightLock         sFileLock = 1;
 static struct CtrAchFile sPending;
@@ -363,7 +361,7 @@ static int               sHavePending;
 
 void CtrAchDrain(void)
 {
-    static struct CtrAchFile f;       // 460 bytes: off the writer's stack
+    static struct CtrAchFile f;       // 460 bytes: not on the writer's stack
     int have;
 
     LightLock_Lock(&sFileLock);
@@ -383,14 +381,14 @@ void CtrAchDrain(void)
     LightLock_Unlock(&sFileLock);
 }
 
-// Called from Rp2350PresentFrame() beside CtrSettingsFlush(), and with force
-// from the close paths. Hands the table to the I/O thread once the unlocks
-// have stopped for a second; writes it here and now only when forced or when
-// there is no I/O thread.
+// Rp2350PresentFrame() calls this next to CtrSettingsFlush(), and the close
+// paths call it with force. It gives the table to the I/O thread one second
+// after the last unlock. It writes directly only when forced or when there is
+// no I/O thread.
 //
-// sDirty clears whether or not the write succeeds, the same choice settings.c
-// makes: one attempt per change, so a read-only card does not turn every later
-// frame into an FS attempt. The next unlock tries again.
+// The flag sDirty clears even if the write fails, as in settings.c. There is
+// one attempt for each change, so a read-only card does not cause an FS attempt
+// on every frame. The next unlock tries again.
 void CtrAchFlush(int force)
 {
     unsigned int t0;
@@ -408,8 +406,8 @@ void CtrAchFlush(int force)
         queued = 1;
     }
 
-    // Checked even when nothing new was queued: a forced flush must also land
-    // a write the I/O thread was handed and has not reached yet.
+    // Check this even when nothing new was queued. A forced flush must also
+    // complete a write that the I/O thread has not reached yet.
     if (force || !CtrIoRunning())
     {
         t0 = CtrTimeNowMs();

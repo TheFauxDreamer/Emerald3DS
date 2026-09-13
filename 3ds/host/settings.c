@@ -1,33 +1,21 @@
-// Port settings, persisted beside the save on the SD card.
+// Port settings, stored next to the save on the SD card.
 //
-// This is NOT save data and must never be treated like it. A missing, short,
-// truncated or wrong-version file is an ordinary situation, not an error: the
-// defaults apply and the game boots. Nothing here is allowed to block startup.
+// This is not save data. A missing, short or wrong-version file is normal, not
+// an error: the defaults apply and the game boots. Nothing here can block
+// startup.
 //
-// Kept separate from save.c because the two have different contents, but they
-// now share its WRITE DISCIPLINE, and the reason is worth recording. This used
-// to write the file synchronously from the setter, i.e. from inside
-// CtrBottomUpdate() in the middle of a game frame, on the grounds that a
-// handful of bytes written on a button tap was too rare for a debounce to earn
-// its keep. That reasoning counted bytes and not FS calls: the sequence below
-// is seven or more blocking round trips to the FS process however small the
-// payload, and on a console -- unlike in an emulator -- the player sees the
-// game stop for it. So the setters mark dirty and the frame loop flushes,
-// exactly as save.c does, and a burst of taps costs one write.
+// Writes follow the rules of save.c. A setter only marks the settings dirty,
+// and the frame loop flushes. Each file operation is a blocking call to the FS
+// process, and on a console the player sees the game stop. Thus many taps cost
+// one write. The flush only gives a snapshot to the I/O thread
+// (3ds/host/io_thread.c), which writes while the main thread waits for VBlank.
+// See CtrSettingsFlush.
 //
-// Since then the flush itself moved off the frame as well: the frame loop only
-// hands the snapshot to the I/O thread (3ds/host/io_thread.c), which does the
-// card write while the main thread waits for VBlank. See CtrSettingsFlush.
-//
-// It does NOT borrow save.c's write-to-temp-then-rename discipline, and that is
-// the second thing measurement changed. That dance exists so an interrupted
-// write cannot leave a half-written file, which is worth six FS round trips for
-// a 128 KB image spanning hundreds of sectors. This payload is 24 bytes: it
-// lands in a single sector, so there is no torn state to protect against, and
-// the magic and version checks below turn anything unexpected into "use the
-// defaults" rather than into damage. On a console the remove-and-rename half
-// measured 51-56 ms on its own -- paid, per tap, to protect a display
-// preference from resetting. So the file is opened once and rewritten in place.
+// This file does not write to a temp file and rename, as save.c does. The
+// payload is 24 bytes in one sector, so a write cannot tear. The magic and
+// version checks turn any bad file into "use the defaults". On a console, the
+// rename alone costs 51-56 ms. Thus the file opens once and is written in
+// place.
 
 #include <3ds.h>
 #include <stddef.h>
@@ -42,115 +30,82 @@
 #define SETTINGS_DIR  "sdmc:/3ds/emerald3ds"
 #define SETTINGS_PATH SETTINGS_DIR "/settings.bin"
 
-#define SETTINGS_MAGIC   0x53443345u   // 'E3DS' little-endian
-// v3 changed what a binding VALUE means (CTR_BIND_MOD joined the speeds), so a
-// v2 file must be discarded rather than reinterpreted: it would otherwise load
-// as "nothing is the modifier" and silently lose the Y default.
-//
-// v4 appended the four gameplay tweaks. Nothing about the v3 fields changed, so
-// unlike v2 a v3 file is MIGRATED rather than discarded: it is exactly the
-// leading 12 bytes of a v4 file, and throwing it away would silently reset the
-// player's top scale and turbo binds as the price of adding an unrelated
-// option. The new fields take their defaults, which is what a v3 file means.
-//
-// v5 appended the fast-forward audio preference, and migrates the same way. A
-// zero there is CTR_FFAUDIO_NORMAL, which is the default anyway, so an older
-// file loads as exactly what it meant.
-//
-// v6 claimed v5's three explicit padding bytes for the audio A/B switches, so
-// it is the same SIZE as v5 and needs no migration at all: every v5 file has
-// zeros there, and the sense is inverted (these store MUTED, not enabled)
-// precisely so that zero keeps meaning "the normal mixer".
-//
-// v7 added a fourth switch, which does grow the struct. It migrates as a short
-// read like v3 and v4 did, and the byte it adds means "not muted" when zero, so
-// a v6 file still loads as the normal mixer.
-//
-// v8 claimed the first of v7's three explicit padding bytes for the phone-call
-// switch, so like v6 before it it is the same SIZE as its predecessor and needs
-// no migration beyond accepting the older version number. Every v7 file has a
-// zero there, and the field stores OFF rather than on precisely so that zero
-// keeps meaning "calls happen", which is what those files meant.
-//
-// v9 claimed the LAST TWO padding bytes for the quick-throw strip: the ball the
-// player last threw, and whether the strip is shown at all. Same size again, so
-// again no migration beyond accepting v8. Both mean the right thing at zero --
-// "nothing thrown yet", and (stored as OFF) "the strip is shown".
-//
-// There is now no padding left. That is not a problem in itself, because 24 is
-// already a multiple of the struct's 4-byte alignment and the compiler adds
-// nothing, but it does mean the NEXT field to be added grows the struct and
-// must bring explicit padding back with it -- see the comment on the fields
-// themselves for what that padding is actually protecting against.
-// v10 is the first version since v5 to GROW the struct: v9 took the last
-// padding byte, so there was nowhere left to claim. That makes it a SHORT-READ
-// migration (v3, v4, v7) rather than the same-size accept v6, v8 and v9 used --
-// a v9 file is exactly the leading 24 bytes of a v10 one, and the new field
-// takes its default. Note the older accepts below now compare against
-// SETTINGS_V9_SIZE rather than sizeof(s), which has moved.
+#define SETTINGS_MAGIC   0x53443345u   // 'E3DS' little endian
+// The history of the versions:
+// - v3 changed what a bind value means (CTR_BIND_MOD joined the speeds).
+//   Discard a v2 file: it would load as "no modifier" and lose the Y default.
+// - v4 added the four gameplay tweaks. A v3 file is the first 12 bytes of a v4
+//   file, so migrate it with a short read. The new fields take their defaults.
+// - v5 added the fast-forward audio setting, and migrates the same way. Zero is
+//   CTR_FFAUDIO_NORMAL, the default.
+// - v6 used v5's three padding bytes for the audio A/B switches. Same size, so
+//   no migration. They store MUTED, so zero means "the normal mixer".
+// - v7 added a fourth switch, which grows the struct. It migrates as a short
+//   read. Zero means "not muted".
+// - v8 used the first of v7's padding bytes for the phone-call switch. Same
+//   size. It stores OFF, so zero means "calls occur".
+// - v9 used the last two padding bytes for the quick-throw strip: the last ball
+//   thrown, and whether the strip shows. Same size. Zero means "nothing thrown"
+//   and (stored as OFF) "the strip shows".
+// - v10 grows the struct, because v9 used the last padding byte. A v9 file is
+//   the first 24 bytes of a v10 file, so it migrates as a short read. The older
+//   checks below compare against SETTINGS_V9_SIZE, not sizeof(s).
 #define SETTINGS_VERSION 10
 
-// Fixed-size, with every byte spoken for, so the on-disk layout does not depend
-// on how the compiler chooses to align it.
+// A fixed size with every byte in use, so the file layout does not depend on
+// the compiler's alignment.
 struct CtrSettings {
     uint32_t magic;
     uint16_t version;
     uint8_t  topScale;
-    // Was explicit padding, always written as 0. Claiming it costs no version
-    // bump precisely because of that: every v3 file in existence has a zero
-    // here, which is the same as the default this field wants.
+    // This was padding, always written as 0. Every v3 file has a zero here,
+    // which is the default of this field, so it needs no version change.
     uint8_t  showAllTabs;
     uint8_t  turbo[CTR_TURBO_COUNT];   // CTR_BIND_OFF / a speed / CTR_BIND_MOD
-    // Appended in v4. Everything above keeps its v3 offset, which is what makes
-    // the migration below a plain short read rather than a conversion.
+    // Added in v4. The fields above keep their v3 offsets, so the migration
+    // below is a plain short read.
     uint8_t  expAll;
     uint8_t  levelCap;                 // CTR_CAP_*
     uint8_t  randomizer;
     uint8_t  bagSort;                  // CTR_BAGSORT_*
-    // Appended in v5.
+    // Added in v5.
     uint8_t  ffAudio;                  // CTR_FFAUDIO_*
-    // v6, in the three bytes v5 reserved as explicit padding. They exist at all
-    // because without them the compiler would round the struct to its 4-byte
-    // alignment itself and settings_put() would write uninitialised stack to
-    // the card; v5 said they were somewhere for v6 to go, and this is v6.
+    // v6, in the three bytes that v5 kept as padding. The padding stops the
+    // compiler from rounding the struct up to 4 bytes, which would make
+    // settings_put() write uninitialized stack to the card.
     //
-    // Stores MUTED rather than enabled, so the zeros a v5 file already has mean
-    // "nothing is muted", which is the default and what that file meant.
+    // It stores MUTED, not enabled, so the zeros in a v5 file mean "nothing is
+    // muted", the default.
     uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
-    // v8, in the first of the three bytes v7 reserved as explicit padding, the
-    // same trick v6 played on v5. Stores OFF rather than on, so the zero a v7
-    // file already has means "calls happen" -- the behaviour that file had.
+    // v8, in the first of the three padding bytes of v7. It stores OFF, so the
+    // zero in a v7 file means "calls occur", which is what that file meant.
     uint8_t  phoneCallsOff;
-    // v9, in the two bytes v7 reserved and v8 left. lastBall is a raw item id
-    // and is the one value in this struct NOT range-checked on load: the ball
-    // ids are game constants this side may not include, so UiQuickBallItem()
-    // checks them where they are defined. quickBallOff stores OFF for the same
-    // reason phoneCallsOff does.
+    // v9, in the two bytes that v7 kept and v8 left. lastBall is a raw item id.
+    // It is the one value in this struct with no range check on load. The ball
+    // ids are game constants that this side cannot include, so
+    // UiQuickBallItem() checks them. quickBallOff stores OFF, like
+    // phoneCallsOff.
     //
-    // These were the last of the explicit padding, which existed because
-    // without it the compiler would round the struct up to its 4-byte alignment
-    // itself and settings_put() would write uninitialised stack to the card.
-    // 22 + 2 is 24, which is already aligned, so nothing implicit is added --
-    // but a v10 field would take the struct to 25 and that hazard comes
-    // straight back. Pad explicitly again when it does.
+    // These were the last padding bytes. 22 + 2 is 24, which is already
+    // aligned.
     uint8_t  lastBall;
     uint8_t  quickBallOff;
-    // v10, and the struct grows for it. 24 + 1 is 25, which the compiler would
-    // round up to 28 on its own and settings_put() would then put three bytes
-    // of uninitialised stack on the card -- so explicit padding comes back,
-    // exactly as v5 and v7 kept it. Stores OFF, so zero means "animate".
+    // v10 grows the struct. 24 + 1 is 25, which the compiler would round up to
+    // 28. Then settings_put() would write three bytes of uninitialized stack to
+    // the card. Thus the padding is explicit again, as in v5 and v7. It stores
+    // OFF, so zero means "animate".
     uint8_t  battleAnimOff;
     uint8_t  pad[3];
 };
 
-// How much of the struct each older layout fills: everything up to the fields
-// the next version appended.
+// The size of the struct in each older layout: all fields before the next
+// version's new fields.
 #define SETTINGS_V3_SIZE  offsetof(struct CtrSettings, expAll)
 #define SETTINGS_V4_SIZE  offsetof(struct CtrSettings, ffAudio)
-// v5 and v6 are the same shape as each other: 20 bytes, differing only in what
-// the last three mean.
+// v5 and v6 have the same shape: 20 bytes. Only the meaning of the last three
+// is different.
 #define SETTINGS_V6_SIZE  (offsetof(struct CtrSettings, audioDbgMuted) + 3)
-// v7 through v9 are all 24 bytes: everything up to the field v10 appended.
+// v7 to v9 are all 24 bytes: all fields before the v10 field.
 #define SETTINGS_V9_SIZE  offsetof(struct CtrSettings, battleAnimOff)
 
 // Defined in video.c and main.c, which own the live values.
@@ -179,37 +134,34 @@ extern void Ctr3dsApplyBattleAnimOff(int on);
 extern int  Ctr3dsGetLastBall(void);
 extern void Ctr3dsApplyLastBall(int item);
 
-// How long after the last change to write.
+// The time after the last change before the write.
 //
-// Deliberately NOT save.c's 100 ms, though this was matched to it at first. The
-// two are debouncing different things: a save burst is 28 mechanical hook calls
-// milliseconds apart, so 100 ms coalesces all of them, while settings arrive
-// from a finger moving between buttons seconds apart, so 100 ms coalesces
-// nothing at all. One pass through the EXTRA tab measured nine separate writes.
-// A second of quiet is what actually turns "browsing the settings" into one.
+// Not save.c's 100 ms. A save is 28 calls a few milliseconds apart. Settings
+// come from a finger that moves between buttons, seconds apart, so 100 ms joins
+// nothing. One second of quiet makes a visit to the settings one write.
 #define CTR_SETTINGS_QUIET_MS 1000
 
 static int      sDirty;
 static uint64_t sLastChangeMs;
 
-// The file, held open for the session.
+// The file, open for the full session.
 //
-// Reopening per write is what made this expensive: creating, closing, deleting
-// and renaming all mutate the directory, and each is its own round trip to the
-// FS process. Rewriting 24 bytes at offset 0 of an already-open file changes no
-// directory entry and touches one sector.
+// A new open for each write is expensive. Create, close, delete and rename all
+// change the directory, and each is a call to the FS process. A write of 24
+// bytes at offset 0 of an open file changes no directory entry and touches one
+// sector.
 //
-// Never closed, exactly as log.c never closes its own handle: fflush() is what
-// pushes the bytes, and process teardown is what closes it.
+// It never closes, like the handle in log.c. fflush() pushes the bytes, and the
+// process exit closes the file.
 static FILE *sFile;
 static int   sOpenTried;
 
-// The directory, made once per boot rather than before every write.
+// Make the directory once for each boot, not before each write.
 //
-// Two mkdir calls is two FS round trips, and after the first one they can only
-// ever report "already there". Called from CtrSettingsLoad() so it lands during
-// boot where a pause costs nothing, and from the writer as well so a write
-// still works in a build that never loaded.
+// Two mkdir calls are two FS calls, and after the first time they only report
+// "already there". CtrSettingsLoad() calls this during boot, where a pause
+// costs nothing. The writer calls it too, so a write works in a build that did
+// not load.
 static void ensure_dir(void)
 {
     static int done;
@@ -227,19 +179,17 @@ static void ensure_dir(void)
     CtrLogSlow("settings.mkdir", t0);
 }
 
-// Open the file once, for both reading and writing.
+// Open the file once, for read and write.
 //
-// Called from CtrSettingsLoad() so the open lands during boot, where a pause is
-// invisible, rather than on the first setting the player touches.
+// CtrSettingsLoad() calls this, so the open occurs during boot, where a pause
+// is not visible.
 //
-// "r+b" first, and the order matters: it opens an existing file WITHOUT
-// truncating it, so no cluster is freed and reallocated. "w+b" is the first-run
-// path only. On a first run that never changes a setting this leaves a zero-byte
-// settings.bin behind, which the next boot reads as a magic mismatch and
-// ignores -- the same outcome as no file at all.
+// Try "r+b" first. It opens an existing file without truncating it, so no
+// cluster is freed and allocated again. "w+b" is only for the first run. A
+// first run that changes no setting leaves an empty settings.bin. The next boot
+// sees a bad magic and uses the defaults, as with no file.
 //
-// One attempt per boot, whether or not it works, so a read-only card costs one
-// failed open rather than one per write.
+// One attempt for each boot, so a read-only card costs one failed open.
 static FILE *settings_open(void)
 {
     unsigned int t0;
@@ -262,8 +212,8 @@ static FILE *settings_open(void)
     return sFile;
 }
 
-// Queue a write. This is what every Ctr3dsSetFoo() calls; nothing touches the
-// card until CtrSettingsFlush() runs from the frame loop.
+// Queue a write. Every Ctr3dsSetFoo() calls this. Nothing touches the card
+// until CtrSettingsFlush() runs from the frame loop.
 void CtrSettingsMarkDirty(void)
 {
     sDirty = 1;
@@ -276,14 +226,13 @@ void CtrSettingsLoad(void)
 
     FILE *f = settings_open();
     if (f == NULL)
-        return;                       // read-only or full card: defaults stand
+        return;                       // read-only or full card: defaults
 
-    // Zeroed first so a short v3 read leaves the v4 fields at their defaults
-    // rather than at whatever was on the stack.
+    // Clear it first, so a short v3 read leaves the v4 fields at their
+    // defaults.
     memset(&s, 0, sizeof(s));
 
-    // The handle stays open for the session, so every access sets its own
-    // position rather than inheriting one.
+    // The handle stays open, so each access sets its own position.
     if (fseek(f, 0, SEEK_SET) != 0)
         return;
 
@@ -299,91 +248,88 @@ void CtrSettingsLoad(void)
     }
     else if (s.version == 9 || s.version == 8 || s.version == 7)
     {
-        // All 24 bytes -- v8 and v9 only gave meaning to bytes v7 wrote as zero
-        // padding, and each of those fields stores the value zero already meant:
-        // "calls happen", "nothing thrown yet", "the strip is shown". So the
-        // three load identically, and v10 reads them as a short read.
+        // All 24 bytes. Versions v8 and v9 only gave a meaning to bytes that v7
+        // wrote as zero. Each of those fields stores the old meaning of zero.
+        // Thus the three load the same, and v10 reads them as a short read.
         if (n != SETTINGS_V9_SIZE)
             return;
     }
     else if (s.version == 6 || s.version == 5)
     {
-        // Both are 20 bytes. v5 wrote its last three as padding and v6 gave
-        // them meaning, but v5 always wrote zero and zero is "not muted", so
-        // the two load identically here.
+        // Both are 20 bytes. v5 wrote its last three bytes as zero padding, and
+        // zero is "not muted" in v6. Thus the two load the same.
         if (n != SETTINGS_V6_SIZE)
             return;
     }
     else if (s.version == 4)
     {
         if (n != SETTINGS_V4_SIZE)
-            return;                   // claims v4 but is not v4 shaped
+            return;                   // says v4, but is not v4 shaped
     }
     else if (s.version == 3)
     {
         if (n != SETTINGS_V3_SIZE)
-            return;                   // claims v3 but is not v3 shaped
+            return;                   // says v3, but is not v3 shaped
     }
     else
     {
-        return;                       // v2 or older, or from the future
+        return;                       // v2 or older, or from a newer version
     }
 
-    // Range-check rather than trust the file: a value out of range would index
-    // past the scale table in video.c.
+    // Check the range, and do not trust the file. A bad value would index past
+    // the scale table in video.c.
     if (s.topScale < CTR_TOP_SCALE_COUNT)
         Ctr3dsApplyTopScale((int)s.topScale);
 
-    // Any non-zero byte means on, so a corrupt value cannot be out of range.
+    // Any byte that is not zero means on, so a bad value cannot be out of
+    // range.
     Ctr3dsApplyShowAllTabs(s.showAllTabs != 0);
 
-    // Ctr3dsApplyTurboBind rejects anything that is not a valid binding, so a
-    // corrupt byte leaves that button on its default rather than being trusted.
+    // Ctr3dsApplyTurboBind refuses a value that is not a valid bind. A bad byte
+    // leaves that button at its default.
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         Ctr3dsApplyTurboBind(i, s.turbo[i]);
 
     // Zero for a migrated v3 file, which is the default for all four.
-    // Ctr3dsApplyLevelCap and Ctr3dsApplyBagSort reject an out-of-range mode,
-    // so a corrupt byte leaves that option off rather than being trusted.
+    // Ctr3dsApplyLevelCap and Ctr3dsApplyBagSort refuse a mode out of range, so
+    // a bad byte leaves that option off.
     Ctr3dsApplyExpAll(s.expAll != 0);
     Ctr3dsApplyLevelCap(s.levelCap);
     Ctr3dsApplyRandomizer(s.randomizer != 0);
     Ctr3dsApplyBagSort(s.bagSort);
 
-    // Zero for a migrated v3 or v4 file, which is CTR_FFAUDIO_NORMAL and also
-    // the default, so an older file loads as exactly what it meant.
+    // Zero for a migrated v3 or v4 file, which is CTR_FFAUDIO_NORMAL and the
+    // default.
     Ctr3dsApplyFfAudio(s.ffAudio);
 
-    // Zero for anything older than v8, which is "calls happen" -- vanilla, and
-    // what every file written before this option existed meant.
+    // Zero for a file older than v8, which means "calls occur", as in the
+    // original game.
     Ctr3dsApplyPhoneCallsOff(s.phoneCallsOff != 0);
 
-    // Zero for anything older than v9: the strip is shown, and no ball has been
-    // thrown yet. lastBall is passed through UNCHECKED, which is the one
-    // exception to this function's "range-check rather than trust" rule and is
-    // deliberate: the range is FIRST_BALL..LAST_BALL in
-    // include/constants/items.h, a game header this translation unit may not
-    // include, so the check belongs where those constants are. A corrupt byte
-    // reaches UiQuickBallItem(), fails its test, and the strip falls back to
-    // the first ball in the pocket -- which is what an empty memory does too.
+    // Zero for a file older than v9: the strip shows, and no ball was thrown.
+    //
+    // lastBall has no range check. This is the one exception to the rule of
+    // this function. The range is FIRST_BALL..LAST_BALL in
+    // include/constants/items.h, a game header that this file cannot include. A
+    // bad byte fails the test in UiQuickBallItem(), and the strip then offers
+    // the first ball in the pocket.
     Ctr3dsApplyQuickBallOff(s.quickBallOff != 0);
     Ctr3dsApplyLastBall(s.lastBall);
 
-    // Zero for anything older than v10 -- the short read above left it that way
-    // -- which is "animate", the behaviour those files had.
+    // Zero for a file older than v10 (the short read above keeps it zero),
+    // which means "animate".
     Ctr3dsApplyBattleAnimOff(s.battleAnimOff != 0);
 
-    // Zero for anything older than v6, which is "not muted" for all three.
+    // Zero for a file older than v6, which means "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 }
 
-// The snapshot of every setting, taken on the main thread because that is where
-// all of the values live. Nothing here touches the card.
+// The snapshot of every setting. Take it on the main thread, where the values
+// are. Nothing here touches the card.
 static void settings_build(struct CtrSettings *s)
 {
-    // Zeroed first so the padding above is written as zero rather than as
-    // whatever the stack held.
+    // Clear it first, so the padding is written as zero, not as old stack data.
     memset(s, 0, sizeof(*s));
 
     s->magic    = SETTINGS_MAGIC;
@@ -406,12 +352,13 @@ static void settings_build(struct CtrSettings *s)
         s->audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
 }
 
-// The card half. Runs on the I/O thread in play and on the main thread only when
-// there is no I/O thread or the game is closing, always under sFileLock.
+// The card part. It runs on the I/O thread during play, and on the main thread
+// only when there is no I/O thread or the game closes. It always holds
+// sFileLock.
 //
-// It reports a slow write with a plain CtrLog rather than CtrLogSlow, because
-// CtrLogSlow's table is main-thread only (3ds/host/log.c). settings_open()'s own
-// CtrLogSlow calls are safe here: they run only on its first call, which is
+// It reports a slow write with CtrLog, not CtrLogSlow, because CtrLogSlow's
+// table is for the main thread only (3ds/host/log.c). The CtrLogSlow calls in
+// settings_open() are safe: they run only on the first call, from
 // CtrSettingsLoad() at boot.
 static void settings_put(const struct CtrSettings *s)
 {
@@ -419,19 +366,19 @@ static void settings_put(const struct CtrSettings *s)
 
     FILE *f = settings_open();
     if (f == NULL)
-        return;                       // read-only card, full card: not fatal
+        return;                       // read-only card or full card: not fatal
 
     t0 = CtrTimeNowMs();
 
-    // In place, over whatever is already there. The struct only ever grows
-    // across versions and the version field gates every read, so a shorter
-    // older file is simply extended and a longer newer one could only come from
-    // a downgrade, where the version check rejects it before the tail matters.
+    // Write in place, over the old data. The struct only grows between
+    // versions, and the version field gates every read. A shorter old file is
+    // extended. A longer file can only come from a downgrade, and the version
+    // check refuses it.
     if (fseek(f, 0, SEEK_SET) == 0) {
         size_t n = fwrite(s, 1, sizeof(*s), f);
 
-        // fflush, not fclose: the handle outlives this call. This is the same
-        // thing log.c relies on to get a line onto the card before a crash.
+        // fflush, not fclose: the handle stays open after this call. log.c uses
+        // the same method to get a line onto the card before a crash.
         if (n != sizeof(*s) || fflush(f) != 0)
             CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
                    (unsigned)n, (unsigned)sizeof(*s));
@@ -442,17 +389,16 @@ static void settings_put(const struct CtrSettings *s)
         CtrLog("emerald3ds: slow settings.write %u ms\n", elapsed);
 }
 
-// The write waiting for the I/O thread, and the two locks around it.
+// The write that waits for the I/O thread, and its two locks.
 //
-// Two locks, because they protect against different things. sPendingLock is
-// only ever held for a struct copy, so the main thread can hand over a write
-// without ever waiting on the card. sFileLock is held across the whole write,
-// taking the pending struct included, which is what keeps the order right: a
-// forced write on the closing path waits for a background write already in
-// flight, then writes the newest settings, and an older struct can never land
-// on top of a newer one.
+// The two locks protect different things. The main thread holds sPendingLock
+// only for a struct copy, so it never waits on the card. The writer holds
+// sFileLock for the full write, the take of the pending struct too. That keeps
+// the order correct. A forced write on the close path waits for a background
+// write, then writes the newest settings. An older struct never overwrites a
+// newer one.
 //
-// Both are initialised statically to 1, which is what LightLock_Init() writes.
+// Both start as 1, which is what LightLock_Init() writes.
 static LightLock          sPendingLock = 1;
 static LightLock          sFileLock = 1;
 static struct CtrSettings sPending;
@@ -479,24 +425,20 @@ void CtrSettingsDrain(void)
     LightLock_Unlock(&sFileLock);
 }
 
-// Write the queued change out, if the player has stopped changing things.
+// Write the queued change, if the player has stopped changing things.
 //
-// Called from Rp2350PresentFrame() beside CtrSaveFlush(), and with force from
-// the close path.
+// Rp2350PresentFrame() calls this next to CtrSaveFlush(). The close path calls
+// it with force.
 //
-// In play this no longer writes anything itself. It snapshots the settings and
-// hands them to the I/O thread (3ds/host/io_thread.c), because this call sits
-// in the frame loop and a settings write lands at the worst moment there is:
-// the last ball thrown is a setting, so it fell about a second after the throw,
-// in the middle of the catch animation. The close path is the exception, since
-// the process may be gone before a background write happens, so a forced flush
-// writes here and now.
+// During play, this does not write. It takes a snapshot and gives it to the I/O
+// thread (3ds/host/io_thread.c), because a write in the frame loop stops the
+// game. For example, the last ball thrown is a setting, and its write would
+// occur during the catch animation. The close path is the exception: the
+// process can end before a background write, so a forced flush writes now.
 //
-// sDirty is cleared whether or not the write succeeded, which is the one place
-// this deliberately differs from save.c. Losing a save is worth retrying every
-// frame for; losing a display preference is not, and a read-only card would
-// otherwise turn one tap into an FS attempt on every frame for the rest of the
-// session. This matches what the old write-on-the-tap code did: one attempt.
+// Clear sDirty even if the write failed. This is the one difference from
+// save.c. A lost save is worth a retry on each frame. A lost display preference
+// is not, and a read-only card would cause an FS attempt on every frame.
 void CtrSettingsFlush(int force)
 {
     unsigned int t0;
@@ -516,8 +458,8 @@ void CtrSettingsFlush(int force)
         queued = 1;
     }
 
-    // Checked even when nothing new was queued: a forced flush must also land a
-    // write the I/O thread was handed and has not reached yet.
+    // Check this even when nothing new was queued. A forced flush must also
+    // complete a write that the I/O thread has not reached yet.
     if (force || !CtrIoRunning()) {
         t0 = CtrTimeNowMs();
         CtrSettingsDrain();
