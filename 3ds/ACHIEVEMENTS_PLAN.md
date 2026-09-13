@@ -1,7 +1,10 @@
 # Achievements plan
 
-**Status: proposed, not started.** Written 2026-09-12 against `04aebdd`. Every
-line reference below was read against that tree; re-check them before starting.
+**Status: proposed, not started.** Written 2026-09-12 against `04aebdd`, and
+re-checked 2026-09-13 against `480dc6b`, after the second-screen animation
+stages ([SECOND_SCREEN_ANIMATION_PLAN.md](SECOND_SCREEN_ANIMATION_PLAN.md)).
+Every line reference below was read against that tree; re-check them before
+starting.
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists
@@ -179,13 +182,38 @@ once, on the debug page.
   on its own** after about 240 displayed frames (counted in `UiAchToastTick()`
   calls, the `UiHold` idiom, so it lasts the same time under fast-forward). While
   the TROPHY tab is on screen VIEW is neither drawn nor tappable.
-- It is static, with no animation, so it costs one repaint to appear and one to
-  go.
+- **What it costs depends on the path.** The toast itself is static: one repaint
+  to appear and one to go. Over the PARTY grid on the second-core path, though,
+  `CtrBottomUpdate` turns every party step into a full repaint while any overlay
+  is up (cheatsheet section 5), so a 4-second toast there is about 40 full
+  repaints. The cheatsheet's "What a repaint costs on the second-core path"
+  measured that case at `59a0ba6`: about 4.1 ms of paint plus 1.6 ms of upload,
+  finishing about 1 ms past the join, with no missed VBlank. On the single-core
+  path the party is frozen under the toast instead, and nothing repaints for it.
+- **Optional, second-core path only: open with the notice's glint.** `DrawSweep`
+  would take a rect instead of the `NOTICE_IN_*` constants, and the toast would
+  follow `NoticeTick`'s rule: a full repaint on each glint frame plus one more
+  after the last, so the band leaves the snapshot (cheatsheet section 7). The
+  single-core path skips it, since a sweep cannot survive the 12-frame clock.
 - Shell wiring in `bottom_screen.c`:
   - `UiOverlayActive()` also returns TRUE for the toast, because the party grid's
-    top icons sit under it.
+    top-row icons sit inside y 0..40 (`CellTop(0)` is 0, or 24 with the cheat
+    tag strip). `DrawCell` then bakes them via `OverlayIconFrame()`
+    (`tab_party.c:323`).
   - `DrawAnimatedLayer` skips the party redraw while the toast is up, the same as
-    for the strip.
+    for the strip: the party branch at `bottom_screen.c:887` gains
+    `!UiAchToastActive()`.
+  - The single-core branch in `CtrBottomUpdate`, `else if (!UiQuickBallActive())`
+    at `bottom_screen.c:1044`, gains `!UiAchToastActive()` too. Otherwise it asks
+    for cheap redraws that draw nothing for the party and upload an unchanged
+    screen. The second-core branch at `:1031` needs no change, because it
+    already asks `UiOverlayActive()`.
+  - The toast inherits the single-core path's stalled bar: a bar that starts
+    sliding under an overlay stalls until the next full repaint (the "How it
+    landed" note in the animation plan). Here that lasts at most the toast's 4
+    seconds, since its expiry repaints. That note's suggested fix, one full
+    repaint when a slide under an overlay finishes, would cover the toast as
+    well.
   - `Redraw` draws it after the notice. `CtrBottomUpdate` adds a hit-test branch
     beside the notice and strip, and calls `AchTick()` then `UiAchToastTick()`
     every frame while `sInGame`.
@@ -227,8 +255,12 @@ changes). Commit after each verified step, following AGENTS.md.
 
 ## Verification
 
-- Builds: `make tools && make generated`, `3ds/build_objs.sh`, `make -C 3ds`. CI
-  (`build-3ds.yml`) stays green.
+- Builds: devkitPro is not installed on the development Mac, so the `build-3ds`
+  CI workflow is the build check and has to stay green. Syntax-check game-side
+  files on the Mac with the clang command in the animation plan's Verification
+  section. Host files (`3ds/host/*.c`) need CI. Build
+  `make -C 3ds CTR_PPU_THREAD=0` once wherever the CIA is built, because CI does
+  not build the single-core variant.
 - Azahar, then the New 3DS XL:
   - **Existing save with badges:** loading it gives one "N unlocked from your
     save" toast, the TROPHY tab shows them unlocked with NEW tags, and the tags
@@ -239,14 +271,21 @@ changes). Commit after each verified step, following AGENTS.md.
   - **New Game over an existing save:** the old save's unlocks must NOT carry
     over (this checks the adoption gate). Soft reset and Continue: the old record
     comes back.
-  - **Overlay stacking:** a shiny (EXTRA shiny test) plus the quick-throw strip
-    plus a toast (ACH TEST during action selection) must show three panels with
-    no border overlap, and the party icons must not punch through.
+  - **Overlay stacking:** on the PARTY tab in a wild battle, a shiny (EXTRA shiny
+    test) plus the quick-throw strip plus a toast (ACH TEST during action
+    selection) must show three panels with no border overlap. On the
+    second-core path the icons keep moving under all three. With
+    `CTR_PPU_THREAD=0` they hold still at frame 0. On both paths nothing
+    punches through a panel.
   - **Persistence:** unlocks and NEW tags survive a relaunch. A corrupted or
     truncated `achievements.bin` boots with defaults.
-  - **Performance:** with `CTR_DEBUG_MENU` on, `log.txt` prof lines show no rise
-    in `frame`/`ppu.wait`, and there are no `slow` lines on unlock (the write
-    happens on the I/O thread).
+  - **Performance,** read against the animation plan's
+    [Measured](SECOND_SCREEN_ANIMATION_PLAN.md#measured) baseline at
+    `59a0ba6`. With `CTR_DEBUG_MENU` on and the stacking case above running,
+    `log.txt` must show `frame` worst about 16.77 ms, no "missed VBlank" lines,
+    and `ppu.wait` well above zero. There must be no `slow` lines on unlock (the
+    write happens on the I/O thread). Read the upload on the console: Azahar at
+    300% shows it at about a sixth of its real cost.
 - Randomiser on: the legend and badge achievements still unlock.
 
 ## Sources
