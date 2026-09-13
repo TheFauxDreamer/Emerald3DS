@@ -134,8 +134,8 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 Game side outside `ui/`: [achievements.c](achievements.c) /
 [.h](achievements.h) hold what each achievement is, when it unlocks, and the
 provider interface the TROPHY tab and the toast read through. They also note
-every map section the player stands in, because the save keeps no record of
-routes. One consequence for UI code: an `AchView`'s `desc` can be a buffer the
+every map section the player stands in, because the save's record of routes
+is only what was found or fought on them. One consequence for UI code: an `AchView`'s `desc` can be a buffer the
 next `get()` rewrites, so use it before asking for another row. See
 [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md).
 

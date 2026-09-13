@@ -20,17 +20,21 @@
 //   The shiny catch, the one hook: src/ gains exactly one fenced line for it.
 //
 //   Where the player has been, read on every overworld frame (NotePlace) and
-//   needing no hook at all. The save keeps the towns but not the routes, so
-//   the store keeps every map section the player has stood in.
+//   needing no hook at all. The save keeps the towns, and of the routes only
+//   what was found or fought on them, so the store keeps every map section
+//   the player has stood in.
 
 #include "global.h"
+#include "battle_setup.h"             // GetTrainerFlagFromScriptPointer
 #include "event_data.h"               // FlagGet
 #include "item.h"                     // CheckBagHasItem
 #include "main.h"                     // gMain
-#include "overworld.h"                // CB2_Overworld, GetGameStat
+#include "overworld.h"                // CB2_Overworld, GetGameStat, Overworld_GetMapHeaderByGroupAndId
 #include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag
 #include "pokemon.h"                  // GetMonData, IsMonShiny
 #include "region_map.h"               // Ctr3dsGetMapSecType
+#include "constants/event_bg.h"
+#include "constants/event_objects.h"
 #include "constants/flags.h"
 #include "constants/game_stat.h"
 #include "constants/items.h"
@@ -38,6 +42,7 @@
 #include "constants/maps.h"
 #include "constants/region_map_sections.h"
 #include "constants/species.h"
+#include "constants/trainer_types.h"
 
 #include "bridge.h"
 #include "achievements.h"
@@ -659,8 +664,9 @@ static void UnlockEvent(u16 event)
 }
 
 // Where the player is standing, on every overworld frame rather than on the
-// round-robin: a map can be crossed in less than one lap of the rows, and
-// neither of these can be read back out of the save afterwards.
+// round-robin: a map can be crossed in less than one lap of the rows. The tide
+// cannot be read back out of the save afterwards, and nor can a route crossed
+// without finding or fighting anything on it.
 //
 // Overworld frames only, so never partway through a map load. By the first one
 // on a new map its ON_TRANSITION script has run, and in Shoal Cave that is the
@@ -688,8 +694,8 @@ static void NotePlace(void)
 // The towns the save already knows about, for a playthrough older than the
 // place bits. The game sets FLAG_VISITED_* on arriving in each, and asking
 // through the fly map's own question keeps this from carrying a copy of that
-// list. Routes have no such flag: they count from the first frame this code
-// sees the player on them. Returns whether anything was new.
+// list. Routes have no such flag; SeedRoutes finds what it can of them.
+// Returns whether anything was new.
 static bool8 SeedTowns(void)
 {
     bool8 changed = FALSE;
@@ -700,6 +706,94 @@ static bool8 SeedTowns(void)
             continue;
 
         BitSet(sPlaces, m);
+        changed = TRUE;
+    }
+
+    return changed;
+}
+
+// The two routes with nothing on them to find or fight. Each has a story flag
+// that is only ever set there, or somewhere reached only through there.
+static const struct { u16 flag; u8 mapsec; } sRouteStoryFlags[] =
+{
+    // Birch's bag is on Route 101 (Route101/scripts.inc).
+    { FLAG_SYS_POKEMON_GET,          MAPSEC_ROUTE_101 },
+    // Set on Mt. Pyre's summit (MtPyre_Summit/scripts.inc), a story step
+    // before the eighth badge. Mt. Pyre's only way in is from Route 122.
+    { FLAG_RECEIVED_RED_OR_BLUE_ORB, MAPSEC_ROUTE_122 },
+};
+
+// Whether the save shows the player was on this map: an item ball picked up, a
+// trainer beaten or a hidden item found. These are the game's own tests for
+// which to show and who still wants a battle (src/trainer_see.c,
+// src/item_use.c). No script sets an item flag without the pickup, and none
+// sets a route trainer's flag without the battle.
+//
+// Item balls only among the objects with flags: every other object's flag is a
+// FLAG_HIDE_* that scripts set from anywhere. A trainer object's script starts
+// with its trainerbattle, which is what GetTrainerFlagFromScriptPointer reads.
+static bool8 MapShowsVisit(const struct MapEvents *events)
+{
+    for (u32 i = 0; i < events->objectEventCount; i++)
+    {
+        const struct ObjectEventTemplate *obj = &events->objectEvents[i];
+
+        if (obj->graphicsId == OBJ_EVENT_GFX_ITEM_BALL && FlagGet(obj->flagId))
+            return TRUE;
+
+        if (obj->trainerType != TRAINER_TYPE_NONE && obj->script != NULL
+            && GetTrainerFlagFromScriptPointer(obj->script))
+            return TRUE;
+    }
+
+    for (u32 i = 0; i < events->bgEventCount; i++)
+    {
+        const struct BgEvent *bg = &events->bgEvents[i];
+
+        if (bg->kind == BG_EVENT_HIDDEN_ITEM
+            && FlagGet(bg->bgUnion.hiddenItem.hiddenItemId + FLAG_HIDDEN_ITEMS_START))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+// The route maps are one run in one group (data/maps/map_groups.json). Each
+// counts towards its own header's section, the one NotePlace would have noted,
+// so nothing here assumes which route a map is.
+STATIC_ASSERT(MAP_GROUP(MAP_ROUTE134) == MAP_GROUP(MAP_ROUTE101), RouteMapsShareGroup);
+STATIC_ASSERT(MAP_NUM(MAP_ROUTE134) == MAP_NUM(MAP_ROUTE101) + 33, RouteMapsInOrder);
+
+// The routes the save already knows about, for a playthrough older than the
+// place bits: the same backfill as SeedTowns, from what the player found or
+// fought on each route map, and from sRouteStoryFlags. A route crossed without
+// either leaves nothing to find, and counts from the first frame this code
+// sees the player on it. A few hundred flag reads, once per adoption. Returns
+// whether anything was new.
+static bool8 SeedRoutes(void)
+{
+    bool8 changed = FALSE;
+
+    for (u16 num = MAP_NUM(MAP_ROUTE101); num <= MAP_NUM(MAP_ROUTE134); num++)
+    {
+        const struct MapHeader *header = Overworld_GetMapHeaderByGroupAndId(MAP_GROUP(MAP_ROUTE101), num);
+        u8 mapsec = header->regionMapSectionId;
+
+        if (mapsec >= PLACE_LIMIT || BitGet(sPlaces, mapsec) || !MapShowsVisit(header->events))
+            continue;
+
+        BitSet(sPlaces, mapsec);
+        changed = TRUE;
+    }
+
+    for (u32 i = 0; i < ARRAY_COUNT(sRouteStoryFlags); i++)
+    {
+        u8 mapsec = sRouteStoryFlags[i].mapsec;
+
+        if (BitGet(sPlaces, mapsec) || !FlagGet(sRouteStoryFlags[i].flag))
+            continue;
+
+        BitSet(sPlaces, mapsec);
         changed = TRUE;
     }
 
@@ -761,8 +855,9 @@ static void Adopt(u32 id)
 
     known = CtrAchStoreLoad(id, sUnlocked, sUnseen, sPlaces) != 0;
 
-    // Before the catch-up, so it counts the towns.
+    // Before the catch-up, so it counts what they find.
     seeded = SeedTowns();
+    seeded |= SeedRoutes();
 
     // A record that is missing, or older than the save (a write lost to a
     // closed lid, say), is caught up the same way. CatchUp() first: it has to
@@ -1035,8 +1130,9 @@ void AchDebugTestToast(void)
     sNext = (u8)((sNext + 1) % mainGroups);
 }
 
-// sPlaces is kept. The places are facts about the playthrough that nothing can
-// work out again, and CatchUp() re-derives Seasoned Traveller from them.
+// sPlaces is kept. SeedTowns and SeedRoutes can only work some of the places
+// out again (a route crossed without finding or fighting anything leaves no
+// trace in the save), and CatchUp() re-derives Seasoned Traveller from them.
 void AchDebugResync(void)
 {
     if (!Current())

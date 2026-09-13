@@ -333,8 +333,8 @@ int  Ctr3dsGetShinyTest(void);
 //
 // Beside them, CTR_ACH_PLACE_BYTES of the map sections the player has stood
 // in, section s at bit (s % 8) of byte s / 8. The save records the towns
-// (FLAG_VISITED_*) but not the routes, so this is the only place a route visit
-// is kept.
+// (FLAG_VISITED_*), and of the routes only what was found or fought on them,
+// so this is the only complete record of where the player has been.
 //
 // Load fills all three arrays and returns 1 if the playthrough has a record,
 // and zeroes them and returns 0 if it has none. Save copies them in and queues

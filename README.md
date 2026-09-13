@@ -90,7 +90,8 @@ getting the Bike through the eight badges, the HMs, the Master Ball and the
 Champion, plus the legends, Pokédex milestones, contests and a few odder ones
 (use Splash, hit a jackpot, catch a shiny, walk into Shoal Cave at low tide).
 Seasoned Traveller asks for every route and town in Hoenn, and once three or
-fewer are left it names them. The event islands count too: after the Hall of
+fewer are left it names them. A save from an earlier build already counts the
+routes where it found an item or beat a trainer. The event islands count too: after the Hall of
 Fame, Dad hands over the Eon, Aurora and Mystic Tickets and the Old Sea Map,
 opening Southern Island, Faraway Island, Birth Island and Navel Rock. On a save
 already past that scene, any S.S. Tidal ferry attendant hands them over

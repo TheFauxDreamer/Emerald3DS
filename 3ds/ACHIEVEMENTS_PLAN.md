@@ -106,8 +106,9 @@ the save does not:
   sets a bit for `gMapHeader.regionMapSectionId` on every overworld frame
   (every frame, because a map can be crossed in less than one lap of the
   round-robin). Adoption backfills the towns from the fly map's own question,
-  `Ctr3dsGetMapSecType`. Routes visited before this build cannot be recovered
-  and count from the first time it sees the player on them.
+  `Ctr3dsGetMapSecType`. Routes visited before this build could not be
+  recovered and counted from the first time it saw the player on them, until
+  the tenth commit recovered most of them.
 - **Low tide is the layout, not the map.** Shoal Cave's entrance is one map
   whose `ON_TRANSITION` script picks a high- or low-tide layout with
   `setmaplayoutindex`, which writes `gSaveBlock1Ptr->mapLayoutId` and leaves
@@ -156,6 +157,35 @@ the save does not:
 - **A row can carry a hint,** shown in place of its description until it is
   earned. New Adventures Await's says "Ask any ferry attendant for the rest",
   for the saves that were already past Dad's scene when this build arrived.
+
+**A tenth commit** gave older saves their routes back:
+
+- **Adoption backfills the routes as well as the towns.** A save from before
+  the place bits had only its towns seeded, so Seasoned Traveller made it walk
+  every route again. `SeedRoutes()` reads the 34 route maps' own event lists: a
+  route counts once one of its item balls has been picked up, one of its hidden
+  items found or one of its trainers beaten. These are the game's own tests
+  (`GetTrainerFlagFromScriptPointer`, as `src/trainer_see.c` calls it, and the
+  hidden-item test in `src/item_use.c`), so there is no table of flags to keep
+  in step with the maps. Each map counts towards its own header's section, the
+  one `NotePlace()` would have noted.
+- **The flags can be trusted.** Nothing sets a `FLAG_ITEM_*` or
+  `FLAG_HIDDEN_ITEM_*` except the pickup, `settrainerflag` is used only on gym
+  and Trainer Hill trainers, and every trainer object on a route map has a
+  script that starts with `trainerbattle`. Among objects with flags only item
+  balls are read, because every other object's flag is a `FLAG_HIDE_*` that
+  scripts set from elsewhere.
+- **Two routes have nothing to find or fight,** so each has a story flag:
+  `FLAG_SYS_POKEMON_GET` for Route 101, where Birch's bag is, and
+  `FLAG_RECEIVED_RED_OR_BLUE_ORB` for Route 122. That one is set on Mt. Pyre's
+  summit, and Mt. Pyre's only way in is from Route 122.
+- **It fills gaps rather than replacing `NotePlace()`.** A route crossed
+  without finding or fighting anything leaves no trace in the save. Flags alone
+  would turn the achievement into "clear something on every route", and
+  "Still to visit" would name routes the player has walked. The place bits stay
+  the complete record and the store format is unchanged. The backfill runs on
+  every adoption, like the towns', which is harmless because the evidence only
+  grows.
 
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
