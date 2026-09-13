@@ -14,8 +14,8 @@
 // persisted per playthrough.
 //
 // Almost every achievement is a STATE -- a badge flag, a count that has passed
-// a goal -- so it is polled rather than hooked. Two things leave no state
-// behind, and are watched as they happen instead:
+// a goal -- so it is polled rather than hooked. Three things leave no lasting
+// state behind, and are watched as they happen instead:
 //
 //   The shiny catch, the one hook: src/ gains exactly one fenced line for it.
 //
@@ -23,14 +23,21 @@
 //   needing no hook at all. The save keeps the towns, and of the routes only
 //   what was found or fought on them, so the store keeps every map section
 //   the player has stood in.
+//
+//   A White or Black Flute, whose flag lasts only until the next map load, so
+//   it is read on every frame (NoteFlute) rather than on the round-robin.
+//
+// 3ds/ACHIEVEMENTS.md lists every achievement. Change it in the same commit as
+// the tables below; CI (check_achievements_md.py) fails when the two disagree.
 
 #include "global.h"
 #include "battle_setup.h"             // GetTrainerFlagFromScriptPointer
 #include "event_data.h"               // FlagGet
-#include "item.h"                     // CheckBagHasItem
+#include "item.h"                     // CheckBagHasItem, CheckPCHasItem
+#include "mail.h"                     // ItemIsMail
 #include "main.h"                     // gMain
 #include "overworld.h"                // CB2_Overworld, GetGameStat, Overworld_GetMapHeaderByGroupAndId
-#include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag
+#include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag, HasAllMons
 #include "pokemon.h"                  // GetMonData, IsMonShiny
 #include "region_map.h"               // Ctr3dsGetMapSecType
 #include "constants/event_bg.h"
@@ -57,8 +64,10 @@ enum
     ACH_ITEM_LIST,     // how many of the `count` items in `list` are in the bag
     ACH_STAT,          // GetGameStat(arg)
     ACH_DEX_HOENN,     // kinds owned in the Hoenn Pokedex
+    ACH_DEX_COMPLETE,  // the National Pokedex complete, by the game's own test
     ACH_CAUGHT,        // owns species `arg` or, if set, species `arg2`
     ACH_SECRET_BASE,   // the player's own base exists
+    ACH_MAIL,          // any Mail, in the bag, the PC or the mail slots
     ACH_PARTY_COUNT,   // Pokemon in the party, eggs not counted
     ACH_PARTY_LEVEL,   // the highest level in the party
     ACH_PLACES,        // how many of the `count` map sections from `arg` the player has stood in
@@ -68,6 +77,7 @@ enum
 // ACH_EVENT ids, for whatever sees the moment to find their entry by.
 #define ACH_EVENT_SHINY    1          // Ctr3dsAchOnCaught
 #define ACH_EVENT_LOW_TIDE 2          // NotePlace
+#define ACH_EVENT_FLUTE    3          // NoteFlute
 
 struct AchDef
 {
@@ -101,10 +111,14 @@ struct AchDef
     { .id = i, .title = t, .desc = d, .kind = ACH_STAT, .arg = s, .goal = g }
 #define DEX_HOENN(i, t, d, g) \
     { .id = i, .title = t, .desc = d, .kind = ACH_DEX_HOENN, .goal = g }
+#define DEX_COMPLETE(i, t, d) \
+    { .id = i, .title = t, .desc = d, .kind = ACH_DEX_COMPLETE, .goal = 1 }
 #define CAUGHT(i, t, d, a, b) \
     { .id = i, .title = t, .desc = d, .kind = ACH_CAUGHT, .arg = a, .arg2 = b, .goal = 1 }
 #define SECRET_BASE(i, t, d) \
     { .id = i, .title = t, .desc = d, .kind = ACH_SECRET_BASE, .goal = 1 }
+#define MAIL(i, t, d) \
+    { .id = i, .title = t, .desc = d, .kind = ACH_MAIL, .goal = 1 }
 #define PARTY_COUNT(i, t, d, g) \
     { .id = i, .title = t, .desc = d, .kind = ACH_PARTY_COUNT, .goal = g }
 #define PARTY_LEVEL(i, t, d, g) \
@@ -132,6 +146,17 @@ static const u16 sHmFlags[] =
     FLAG_RECEIVED_HM_WATERFALL, FLAG_RECEIVED_HM_DIVE,
 };
 
+// The three Braille puzzles that open the Regis' chambers: Rock Smash in the
+// Desert Ruins, Flash in the Ancient Tomb and a lap around the Island Cave's
+// walls (src/braille_puzzles.c, IslandCave/scripts.inc). Each flag is set once
+// and never cleared, since the chamber stays open.
+static const u16 sRegiPuzzleFlags[] =
+{
+    FLAG_SYS_REGIROCK_PUZZLE_COMPLETED,
+    FLAG_SYS_BRAILLE_REGICE_COMPLETED,
+    FLAG_SYS_REGISTEEL_PUZZLE_COMPLETED,
+};
+
 // The four event items, in the order they are handed over: Dad gives them after
 // the Hall of Fame, or any S.S. Tidal ferry attendant does for a save already
 // past that scene (data/scripts/ctr3ds_event_tickets.inc). They are key items,
@@ -149,7 +174,7 @@ static const u16 sEventItems[] =
 // filed wrong. sGroups below lists them MAIN first, and within a page they
 // read as colour blocks in that order.
 //
-// IDS ARE PERMANENT. The next new achievement takes the next unused id (75 at
+// IDS ARE PERMANENT. The next new achievement takes the next unused id (83 at
 // the time of writing); a retired one leaves its id unused forever. Rows move
 // between groups freely, because only the id is stored. The debug page counts
 // duplicate or out-of-range ids, since C cannot check that at compile time.
@@ -158,10 +183,13 @@ static const u16 sEventItems[] =
 // (TROPHY_TITLE_MAX_W, TROPHY_DESC_MAX_W in 3ds/ui/tab_trophy.c). There is no
 // clipping on this screen, so the debug page counts any that do not fit.
 //
-// Everything here can be earned in this port as it stands. That rules out the
+// Everything here can be earned in this port as it stands, with one deliberate
+// exception: An Impossible Task, which its title owns up to. That rules out the
 // complete Hoenn Pokedex and anything past about 200 in the National one: both
 // need trade evolutions, and trading waits on the Cable Club
 // (local-wireless branch).
+//
+// Every row is also listed in 3ds/ACHIEVEMENTS.md, in the same order.
 
 // MAIN, Story (gold): the journey in the order Emerald hands it out, with each
 // badge where it falls in it.
@@ -204,6 +232,7 @@ static const struct AchDef sMainStory[] =
 static const struct AchDef sMainLegends[] =
 {
     FLAG(11, "Sky High",           "Face Rayquaza atop Sky Pillar",   FLAG_DEFEATED_RAYQUAZA),
+    FLAG_LIST(76, "Puzzle Master", "Complete all three Regi puzzles", sRegiPuzzleFlags, 3),
     FLAG(14, "Rock Solid",         "Face Regirock in the Desert Ruins", FLAG_DEFEATED_REGIROCK),
     FLAG(15, "Cold Snap",          "Face Regice in the Island Cave",  FLAG_DEFEATED_REGICE),
     FLAG(16, "Iron Will",          "Face Registeel in the Ancient Tomb", FLAG_DEFEATED_REGISTEEL),
@@ -214,6 +243,13 @@ static const struct AchDef sMainPokemon[] =
 {
     STAT(23, "Gotcha!",            "Catch your first wild " POKEMON,  GAME_STAT_POKEMON_CAPTURES, 1),
     STAT(57, "It's Evolving!",     "Evolve a " POKEMON " for the first time", GAME_STAT_EVOLVED_POKEMON, 1),
+    // Hoenn's ten one-time tutors, the first in Slateport's Fan Club, whose
+    // FLAG_MOVE_TUTOR_TAUGHT_* flags are one run, each set only once a move is
+    // taught (data/scripts/move_tutors.inc). The Battle Frontier's two tutors
+    // charge Battle Points and set no flag, so they leave nothing to read.
+    FLAGS(78, "Teaching an Old Dog New Tricks", "Use any move tutor",
+          FLAG_MOVE_TUTOR_TAUGHT_SWAGGER,
+          FLAG_MOVE_TUTOR_TAUGHT_EXPLOSION - FLAG_MOVE_TUTOR_TAUGHT_SWAGGER + 1, 1, 1),
     STAT(66, "In Good Hands",      "Leave a " POKEMON " at the Day Care", GAME_STAT_USED_DAYCARE, 1),
     PARTY_COUNT(56, "Full House",  "Have six " POKEMON " in your party", 6),
     STAT(26, "Hatchling",          "Hatch an Egg",                    GAME_STAT_HATCHED_EGGS, 1),
@@ -243,10 +279,23 @@ static const struct AchDef sMainBattle[] =
 // roughly in the order the game opens them up.
 static const struct AchDef sMainExtras[] =
 {
+    // Any flag in the hidden items' run, the last named one ending it. Nothing
+    // sets one but the pickup (see MapShowsVisit). Route 104 alone hides five.
+    FLAGS(80, "What Do We Have Here!", "Find any hidden item",
+          FLAG_HIDDEN_ITEMS_START,
+          FLAG_HIDDEN_ITEM_ROUTE_105_BIG_PEARL - FLAG_HIDDEN_ITEMS_START + 1, 1, 1),
+    // Petalburg's Mart is the first to sell it, and three of the in-game
+    // trades come with a letter from their old trainer.
+    MAIL(79, "You've Got Mail!",   "Receive any mail"),
+    // The questionnaire on any Mart's counter, once the player has a Pokedex
+    // (data/scripts/questionnaire.inc).
+    FLAG(81, "Mystery Communication", "Enable Mystery Gift",          FLAG_SYS_MYSTERY_GIFT_ENABLE),
     STAT(33, "Cable Car",          "Ride the cable car up Mt. Chimney", GAME_STAT_RODE_CABLE_CAR, 1),
     STAT(34, "Hot Springs",        "Soak in the Lavaridge hot springs", GAME_STAT_ENTERED_HOT_SPRINGS, 1),
     SECRET_BASE(38, "Home Base",   "Set up a Secret Base"),
     STAT(36, "Green Thumb",        "Plant 25 berries",                GAME_STAT_PLANTED_BERRIES, 25),
+    // The Glass Workshop on Route 113 blows both, for volcanic ash.
+    EVENT(77, "Play Me a Tune",    "Use the White or Black Flute",    ACH_EVENT_FLUTE),
     STAT(40, "Jackpot!",           "Hit a jackpot at the Game Corner", GAME_STAT_SLOT_JACKPOTS, 1),
     STAT(35, "On Safari",          "Enter the Safari Zone",           GAME_STAT_ENTERED_SAFARI_ZONE, 1),
     STAT(37, "Blender",            "Make 25 " POKEBLOCKS,             GAME_STAT_POKEBLOCKS, 25),
@@ -281,6 +330,9 @@ static const struct AchDef sPostStory[] =
     // until they talk to a ferry attendant: the hint says so.
     ITEM_LIST(74, "New Adventures Await", "Get all three tickets and the Old Sea Map",
               "Ask any ferry attendant for the rest", sEventItems, 4),
+    // The Frontier Pass, handed over in the reception gate on the first visit
+    // (BattleFrontier_ReceptionGate/scripts.inc) and never taken back.
+    FLAG(75, "A New Frontier",     "Unlock the Battle Frontier",      FLAG_SYS_FRONTIER_PASS),
 };
 
 // Sudowoodo is a special encounter rather than a legendary, but it is faced
@@ -303,6 +355,16 @@ static const struct AchDef sPostLegends[] =
     FLAG(72, "Rainbow Wing",       "Catch Ho-Oh atop Navel Rock",     FLAG_CAUGHT_HO_OH),
     FLAG(73, "Silver Wing",        "Catch Lugia deep in Navel Rock",  FLAG_CAUGHT_LUGIA),
     FLAG(18, "Odd Tree",           "Deal with the tree by the Frontier", FLAG_DEFEATED_SUDOWOODO),
+};
+
+// The one row that cannot be earned yet, and says so in its title. "Complete"
+// is the game's own test, the one the Pokedex diploma uses: every kind except
+// Mew, Lugia, Ho-Oh, Celebi, Jirachi and Deoxys (HasAllMons, src/pokedex.c).
+// The rest still includes the Kanto and Johto starters and legends, which only
+// a trade can bring.
+static const struct AchDef sPostPokemon[] =
+{
+    DEX_COMPLETE(82, "An Impossible Task", "Complete the National " POKEDEX),
 };
 
 // The Battle Frontier. The seven Silver flags run from FLAG_SYS_TOWER_SILVER
@@ -338,6 +400,7 @@ static const struct AchGroup sGroups[] =
     GROUP(ACH_SECTION_MAIN,     ACH_CAT_CONTEST, sMainContests),
     GROUP(ACH_SECTION_POSTGAME, ACH_CAT_STORY,   sPostStory),
     GROUP(ACH_SECTION_POSTGAME, ACH_CAT_LEGEND,  sPostLegends),
+    GROUP(ACH_SECTION_POSTGAME, ACH_CAT_POKEMON, sPostPokemon),
     GROUP(ACH_SECTION_POSTGAME, ACH_CAT_BATTLE,  sPostBattle),
 };
 
@@ -594,11 +657,29 @@ static u32 Value(const struct AchDef *d)
     case ACH_DEX_HOENN:
         return GetHoennPokedexCount(FLAG_GET_CAUGHT);
 
+    // Cheap while it is out of reach: HasAllMons stops at the first kind
+    // missing, and Bulbasaur, the first it asks about, needs a trade.
+    case ACH_DEX_COMPLETE:
+        return HasAllMons() ? 1 : 0;
+
     case ACH_CAUGHT:
         return (Owns(d->arg) || Owns(d->arg2)) ? 1 : 0;
 
     case ACH_SECRET_BASE:
         return gSaveBlock1Ptr->secretBases[0].secretBaseId != 0 ? 1 : 0;
+
+    // A blank Mail in the bag or the PC's item storage, or a written one: held
+    // by a party Pokemon or filed in the PC mailbox, both of which live in the
+    // save's mail slots. ClearMail empties a slot to ITEM_NONE, and a New Game
+    // clears them all. The Mail items are one run, so ItemIsMail ends the loop.
+    case ACH_MAIL:
+        for (u16 item = FIRST_MAIL_INDEX; ItemIsMail(item); item++)
+            if (CheckBagHasItem(item, 1) || CheckPCHasItem(item, 1))
+                return 1;
+        for (u32 i = 0; i < MAIL_COUNT; i++)
+            if (gSaveBlock1Ptr->mail[i].itemId != ITEM_NONE)
+                return 1;
+        return 0;
 
     case ACH_PARTY_COUNT:
         if (InBattleFactory())
@@ -689,6 +770,18 @@ static void NotePlace(void)
         && gSaveBlock1Ptr->location.mapNum == MAP_NUM(MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
         && gSaveBlock1Ptr->mapLayoutId == LAYOUT_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
         UnlockEvent(ACH_EVENT_LOW_TIDE);
+}
+
+// Playing the White or Black Flute sets one of these two flags and clears the
+// other, and nothing else sets either (ItemUseOutOfBattle_BlackWhiteFlute,
+// src/item_use.c). The next map load clears both (ClearTempFieldEventData,
+// src/event_data.c), which under fast-forward can come sooner than one lap of
+// the rows, so they are read on every frame. Any frame, not just overworld
+// ones: the flute is played from the bag.
+static void NoteFlute(void)
+{
+    if (FlagGet(FLAG_SYS_ENC_UP_ITEM) || FlagGet(FLAG_SYS_ENC_DOWN_ITEM))
+        UnlockEvent(ACH_EVENT_FLUTE);
 }
 
 // The towns the save already knows about, for a playthrough older than the
@@ -886,7 +979,9 @@ void AchTick(void)
     if (gMain.callback2 == CB2_Overworld)
         NotePlace();
 
-    // One definition a frame: about seventy frames for both tables, and a
+    NoteFlute();
+
+    // One definition a frame: about eighty frames for every row, and a
     // constant cost per frame however many there are.
     if (sCursor >= ACH_COUNT)
         sCursor = 0;

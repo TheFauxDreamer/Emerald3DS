@@ -20,6 +20,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 3ds/ACHIEVEMENTS.md lists every achievement, and this fails when it no
+  # longer matches the tables in 3ds/achievements.c. A job of its own, so a
+  # stale list shows as its own red check and never holds up the build.
+  achievements-list:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ACHIEVEMENTS.md against achievements.c
+        run: python3 3ds/check_achievements_md.py
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60

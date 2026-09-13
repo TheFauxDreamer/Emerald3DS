@@ -187,6 +187,45 @@ the save does not:
   every adoption, like the towns', which is harmless because the evidence only
   grows.
 
+**An eleventh commit** added eight achievements and the full list:
+
+- **83 achievements: 65 main, 18 post-game.** A New Frontier [75] is the
+  Frontier Pass (`FLAG_SYS_FRONTIER_PASS`), in post-game Story. Puzzle Master
+  [76] counts the three Braille puzzle flags, in main Legendary before the
+  Regis. Teaching an Old Dog New Tricks [78], in main Pokémon, is any of the
+  ten `FLAG_MOVE_TUTOR_TAUGHT_*` flags, one run. Three Extras open the main
+  page's blue block: What Do We Have Here! [80] (any `FLAG_HIDDEN_ITEM_*`),
+  You've Got Mail! [79] and Mystery Communication [81]
+  (`FLAG_SYS_MYSTERY_GIFT_ENABLE`). Play Me a Tune [77] is Extras too.
+- **Two new condition kinds.** `ACH_MAIL` finds any Mail: a blank one in the
+  bag or the PC's item storage (`CheckBagHasItem`, `CheckPCHasItem`), or a
+  written one in the save's mail slots, which hold both what party Pokémon are
+  carrying and the PC mailbox. `ACH_DEX_COMPLETE` is `HasAllMons()`, the
+  test the Pokédex diploma uses, which leaves out Mew, Lugia, Ho-Oh, Celebi,
+  Jirachi and Deoxys.
+- **An Impossible Task [82] cannot be earned yet, on purpose.** It asks for
+  the complete National Pokédex, which needs the Kanto and Johto starters and
+  legends and so a trade. It has a group of its own, post-game Pokémon. The
+  table comment's rule that everything can be earned now names it as the one
+  exception.
+- **The flute is the third event.** Playing the White or Black Flute sets
+  `FLAG_SYS_ENC_UP_ITEM` or `FLAG_SYS_ENC_DOWN_ITEM`, and the next map load
+  clears both. A lap of the round-robin is about 80 displayed frames, which
+  under fast-forward can be longer than it takes to close the bag and walk
+  through a door. So `NoteFlute()` reads the two flags on every frame, on any
+  callback, since the flute is played from the bag. `src/` still has one
+  fenced line.
+- **Two limits, both from what the save keeps.** The Battle Frontier's two
+  move tutors charge Battle Points and set no flag, so only the ten Hoenn
+  tutors count. The flute, like the shiny and the tide, cannot be recovered
+  for a save older than this build.
+- **[ACHIEVEMENTS.md](ACHIEVEMENTS.md) lists every achievement,** by page and
+  category in display order, with how each unlocks.
+  `3ds/check_achievements_md.py` checks each row's page, category, position,
+  id, title and description against the tables, plus the totals, and that ids
+  are unique and fit the store. It runs as the `achievements-list` job in
+  `build-3ds.yml`, apart from the build, so a stale list never holds up a CIA.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists
