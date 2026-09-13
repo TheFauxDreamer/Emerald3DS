@@ -7,6 +7,8 @@
 
 #include "../bridge.h"
 #include "ui_draw.h"
+#include "ui_text.h"
+#include "ui_shell.h"               // UI_COL_DIM, UI_COL_SHADOW
 #include "ui_title.h"
 
 // The lettering of graphics/title_screen/press_start.png, the banner's own art:
@@ -81,9 +83,37 @@ static u32 PromptState(void)
     return ((clock + TITLE_BLINK_OFFSET) & TITLE_BLINK_FRAMES) ? PROMPT_LIT : PROMPT_DARK;
 }
 
+// The build id (Ctr3dsBuildId, ../bridge.h) in the bottom-right corner, so a
+// player can check which build is installed. The title screen is the only
+// place it appears: it is read once, not looked at while playing.
+//
+// In the game's small font and the UI's dim grey, so it stays out of the
+// prompt's way, and in BOTH halves of the blink: it is not part of the prompt,
+// and a readout that blinks is harder to read. The margin leaves the letters
+// about five pixels from each edge (the small font's ink sits in rows 4-11 of
+// its 13).
+#define BUILD_ID_MARGIN 4
+
+static void DrawBuildId(void)
+{
+    u8 id[40];
+
+    UiAscii(id, Ctr3dsBuildId(), sizeof(id));
+    UiTextSmall(UI_W - BUILD_ID_MARGIN - UiTextSmallWidth(id),
+                UI_H - BUILD_ID_MARGIN - UI_GLYPH_SMALL_H,
+                id, UI_COL_DIM, UI_COL_SHADOW);
+}
+
 void UiTitleDraw(void)
 {
-    if (PromptState() != PROMPT_LIT)
+    u32 state = PromptState();
+
+    if (state == PROMPT_NONE)
+        return;
+
+    DrawBuildId();
+
+    if (state != PROMPT_LIT)
         return;
 
     if (!sPalLoaded)

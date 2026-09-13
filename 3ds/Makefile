@@ -76,8 +76,11 @@ CTR_PPU_THREAD ?= 1
 
 # Regenerated on every make, so the boot log can never report a stale build.
 # The git description is what identifies WHICH build; the timestamp is what
-# distinguishes two builds of the same tree.
-BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(shell git describe --always --dirty 2>/dev/null || echo nogit)
+# distinguishes two builds of the same tree. The description on its own is
+# CTR_BUILD_ID, which the title screen shows in the bottom screen's corner
+# (Ctr3dsBuildId in ../bridge.h).
+BUILD_ID    := $(shell git describe --always --dirty 2>/dev/null || echo nogit)
+BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(BUILD_ID)
 
 # -MMD -MP is load bearing, not hygiene. Without it these objects depend only on
 # their own .c file, so an edit to ../bridge.h -- the whole seam between the two
@@ -92,6 +95,7 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
             -DCTR_PPU_THREAD=$(CTR_PPU_THREAD) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
+            -DCTR_BUILD_ID='"$(BUILD_ID)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 

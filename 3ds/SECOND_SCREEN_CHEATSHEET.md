@@ -118,7 +118,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 1198 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 247 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1043 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 369 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 409 / 63 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/tab_party.c](ui/tab_party.c) | 1256 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 697 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 209 / 44 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
@@ -128,7 +128,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
-| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 128 / 35 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
+| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 158 / 39 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
 | [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 193 / 56 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
 
@@ -820,12 +820,19 @@ whole 256-entry BG palette, not a 16-colour bank.
 
 ## 9. Text
 
-**There is one font and one size.** `gFontNormalLatinGlyphs` at `UI_GLYPH_H` 15
-is all the ROM has; the game never needed another on a 240px screen. For a
-headline that must be read rather than looked for, `UiTextBig` scales those same
-glyphs 2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four
-times the fill per glyph, so it is not a general-purpose call. Pair it with
+**Everything that is read uses one font at one size.** `gFontNormalLatinGlyphs`
+at `UI_GLYPH_H` 15. There is no larger Latin font in the ROM, so for a headline
+that must be read rather than looked for, `UiTextBig` scales those same glyphs
+2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four times the
+fill per glyph, so it is not a general-purpose call. Pair it with
 `UiTextBigWidth` for centring, and `UI_GLYPH_BIG_H` (30) for row pitch.
+
+There IS a smaller one: the game's `FONT_SMALL` (`gFontSmallLatinGlyphs`), 7px
+letters on a 5px advance against the normal font's 9 on 6, in the same glyph
+format. `UiTextSmall` / `UiTextSmallWidth` draw with it, at `UI_GLYPH_SMALL_H`
+13. It is for incidental text that must not compete with the screen, and its
+one user is the title screen's build id. Anything a player has to read during
+play stays in `UiText`.
 
 **Strings are game-encoded (`charmap.txt`), EOS-terminated, not ASCII.**
 `GetSpeciesName()`, `GetItemName()`, `gMoveNames[]`, `gRegionMapEntries[].name`
