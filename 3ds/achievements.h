@@ -114,7 +114,8 @@ void Ctr3dsAchOnCaught(struct Pokemon *mon);
 // next group, so a few presses show every category's colours.
 void AchDebugTestToast(void);
 // Forget this playthrough's unlocks and derive them again from the save, which
-// is the backfill path a first load takes. The shiny, being an event, is lost.
+// is the backfill path a first load takes. The events (the shiny, the low tide
+// and the flute) are lost.
 void AchDebugResync(void);
 // How many definitions have an id that is repeated or will not fit the store.
 // C cannot check that at compile time, so the debug page reports it.

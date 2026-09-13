@@ -370,6 +370,7 @@ directory.
 | `3ds/gba_mem.c` | The `gGbaMem` block and the save-flash backing (game side). |
 | `3ds/tweaks.c` | EXP All, level cap, randomiser, bag sort, phone calls (game side). |
 | `3ds/achievements.c` | What each achievement is and when it unlocks, and the provider the TROPHY tab reads (game side). |
+| `3ds/ACHIEVEMENTS.md`, `3ds/check_achievements_md.py` | Every achievement listed, and the CI check that the list still matches `achievements.c`. |
 | `3ds/build_objs.sh` | Game sources to `libpokeemerald.a` (ARM11). |
 | `3ds/Makefile`, `3ds/emerald3ds.rsf` | Host sources, link, and makerom packaging. |
 | `3ds/meta/` | Icon, banner art and banner audio for the CIA. |
@@ -394,7 +395,8 @@ Working documents live beside the code they describe, all under `3ds/`:
 - [ACHIEVEMENTS_PLAN.md](3ds/ACHIEVEMENTS_PLAN.md), built-in achievements on a
   sixth bottom-screen tab with an unlock toast over any tab, plus why real
   RetroAchievements is not the first step. Implemented, not yet tested on a
-  console.
+  console. [ACHIEVEMENTS.md](3ds/ACHIEVEMENTS.md) lists every achievement and
+  how it unlocks, and has to change with the tables (CI checks).
 
 The RP2350 and WASM targets still build (`make wasm`, and see
 [docs/BUILD.md](docs/BUILD.md)). The WASM build is deliberately kept:

@@ -713,15 +713,17 @@ run (published as the `emerald3ds-elf` artifact alongside `emerald3ds.map`).
 
 # Part E: Achievements (built in; RetroAchievements later, maybe)
 
-The built-in set is done: 75 achievements on MAIN and POST-GAME pages (the
+The built-in set is done: 83 achievements on MAIN and POST-GAME pages (the
 post-game ones hidden until the Hall of Fame), the TROPHY tab and the unlock
-toast. [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record. What
-is left:
+toast. [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record and
+[ACHIEVEMENTS.md](ACHIEVEMENTS.md) the full list. What is left:
 
 - **Trade-dependent goals.** The complete Hoenn Pokedex and anything much past
   200 in the National one need trade evolutions, so they were left out rather
-  than shipped unearnable. They can be added, each with the next unused id
-  (ids are permanent, row order is free), once the Cable Club from Part C works.
+  than shipped unearnable. The one exception is An Impossible Task, the
+  complete National Pokedex, which is there on purpose and says so in its
+  title. The rest can be added, each with the next unused id (ids are
+  permanent, row order is free), once the Cable Club from Part C works.
 - **A RetroAchievements provider.** The TROPHY tab and the toast read only
   through `AchActive()` (`3ds/achievements.h`), so a second provider replaces
   the built-in one without touching either. Casual (softcore) unlocks are

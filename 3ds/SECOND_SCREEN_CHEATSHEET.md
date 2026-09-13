@@ -137,7 +137,9 @@ provider interface the TROPHY tab and the toast read through. They also note
 every map section the player stands in, because the save's record of routes
 is only what was found or fought on them. One consequence for UI code: an `AchView`'s `desc` can be a buffer the
 next `get()` rewrites, so use it before asking for another row. See
-[ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md).
+[ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md), and
+[ACHIEVEMENTS.md](ACHIEVEMENTS.md) for the full list, which has to change with
+the tables (CI checks).
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
@@ -1208,7 +1210,8 @@ appears.
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | A playthrough gets another save's achievements | Conditions were read while the save in memory belonged to someone else. A New Game sets the trainer ID in Birch's speech while the old save's flags are still loaded, until `NewGameInitData()` clears them; a soft reset reloads the card's save under whatever was being played. So a playthrough is adopted only on a `CB2_Overworld` frame, and nothing is evaluated unless the save block's trainer ID matches it ([achievements.c](achievements.c), `Current` and `Adopt`). |
-| Saved achievements come back as the wrong ones | An achievement's id was changed or reused. The id is its bit in `achievements.bin`, so ids are permanent: a new achievement takes the next unused id, and a retired one's id is never handed out again. Row order is free. The EXTRA debug row counts duplicate ids. |
+| Saved achievements come back as the wrong ones | An achievement's id was changed or reused. The id is its bit in `achievements.bin`, so ids are permanent: a new achievement takes the next unused id, and a retired one's id is never handed out again. Row order is free. The EXTRA debug row counts duplicate ids, and so does `3ds/check_achievements_md.py`. |
+| The `achievements-list` CI check fails | [ACHIEVEMENTS.md](ACHIEVEMENTS.md) no longer matches the tables in [achievements.c](achievements.c): a row was added, moved or reworded in one and not the other, or the totals line is stale. The diff it prints names the rows. Change both in the same commit. |
 | Mon icons punch through an overlay every few frames | The tab redrew them on the shell's animated layer, which paints over a snapshot that already contains the overlay. Fold the overlay into `UiOverlayActive()` so the tab paints the icons into its own paint instead (live on the second-core path, which then repaints fully for each step; still on the single-core path). |
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
