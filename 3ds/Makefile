@@ -52,7 +52,7 @@ APP_BANNER_WAV  := meta/banner.wav
 # takes the GBA region pointers at runtime via ppu_set_memory(). That is what
 # lets the same byte-exact rasteriser serve both this port and the RP2350 one.
 HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c \
-             host/log.c host/io_thread.c
+             host/log.c host/io_thread.c host/achievements.c
 OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 
 # Must match 3ds/build_objs.sh's ARCH exactly, or the game archive and libctru

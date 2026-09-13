@@ -314,6 +314,33 @@ int  Ctr3dsGetBattleAnimOff(void);
 void Ctr3dsSetShinyTest(int on);
 int  Ctr3dsGetShinyTest(void);
 
+// ---- achievements store ----------------------------------------------------
+//
+// Which achievements a playthrough has unlocked, and which of those the player
+// has not looked at yet, kept in sdmc:/3ds/emerald3ds/achievements.bin by
+// 3ds/host/achievements.c. What an achievement IS, and when it unlocks, is
+// game-side (3ds/achievements.c), because every condition is a game accessor.
+// This side only keeps the bits it is handed.
+//
+// Keyed on the save's full 32-bit trainer ID, so each playthrough keeps its own
+// list and a new game starts an empty one. The file holds CTR_ACH_RECORDS of
+// them and a new playthrough replaces the least recently used.
+//
+// Both bitsets are CTR_ACH_BYTES long, achievement i at bit (i % 8) of byte
+// i / 8. An achievement's bit is its position in the game-side table, which is
+// why that table is append-only: reordering it would move saved unlocks.
+//
+// Load fills both arrays and returns 1 if the playthrough has a record, and
+// zeroes them and returns 0 if it has none. Save copies them in and queues a
+// write exactly the way a settings change does, so nothing touches the card
+// from inside a frame (see 3ds/host/settings.c's header). Main thread only.
+#define CTR_ACH_BYTES    16   // room for 128 achievements
+#define CTR_ACH_RECORDS  8
+
+int  CtrAchStoreLoad(uint32_t playerId, uint8_t *unlocked, uint8_t *unseen);
+void CtrAchStoreSave(uint32_t playerId, const uint8_t *unlocked,
+                     const uint8_t *unseen);
+
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
 // this instead (under PLATFORM_3DS). That file is game-side and includes this

@@ -38,6 +38,8 @@ void CtrSaveLoad(void);
 void CtrSaveFlush(int force);
 void CtrSettingsLoad(void);
 void CtrSettingsFlush(int force);
+void CtrAchStoreInit(void);
+void CtrAchFlush(int force);
 #if CTR_BOOT_DIAG
 void CtrDiagSplash(void);
 #endif
@@ -668,6 +670,7 @@ void Rp2350PresentFrame(void)
         // it would look exactly like the setting not persisting at all.
         CtrSaveFlush(1);
         CtrSettingsFlush(1);
+        CtrAchFlush(1);
         longjmp(sQuitJmp, 1);
     }
 
@@ -740,6 +743,7 @@ void Rp2350PresentFrame(void)
         // CtrVideoPresent() has presented the frame.
         CtrSaveFlush(0);
         CtrSettingsFlush(0);
+        CtrAchFlush(0);
     } else {
         sSubFrame++;
     }
@@ -770,6 +774,10 @@ int main(int argc, char **argv)
     // Display preferences. Before CtrVideoInit() so the very first frame is
     // already at the scale the player chose, with no visible snap.
     CtrSettingsLoad();
+
+    // Which achievements each playthrough has, read once so the game side's
+    // first lookup is served from memory rather than from the card mid-frame.
+    CtrAchStoreInit();
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
@@ -837,6 +845,7 @@ int main(int argc, char **argv)
     // line of defence for writes that arrived outside a save.
     CtrSaveFlush(1);
     CtrSettingsFlush(1);
+    CtrAchFlush(1);
     // Before the other exits, so their own lines are written synchronously
     // rather than queued for a writer that is about to stop.
     CtrIoExit();

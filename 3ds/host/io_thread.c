@@ -48,6 +48,7 @@ static void io_main(void *arg)
 
         CtrLogDrain();
         CtrSettingsDrain();
+        CtrAchDrain();
 
         // After the pass, not before it: whatever was queued alongside the
         // request to stop still reaches the card.
@@ -107,9 +108,10 @@ void CtrIoExit(void)
 
     // Anything queued after the writer's last pass. With sRunning clear, any
     // later write takes the synchronous path, so nothing can slip in behind
-    // these two.
+    // these.
     CtrLogDrain();
     CtrSettingsDrain();
+    CtrAchDrain();
 }
 
 int CtrIoRunning(void)
