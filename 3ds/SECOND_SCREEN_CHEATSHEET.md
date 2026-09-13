@@ -132,7 +132,10 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 Game side outside `ui/`: [achievements.c](achievements.c) /
 [.h](achievements.h) hold what each achievement is, when it unlocks, and the
-provider interface the TROPHY tab and the toast read through. See
+provider interface the TROPHY tab and the toast read through. They also note
+every map section the player stands in, because the save keeps no record of
+routes. One consequence for UI code: an `AchView`'s `desc` can be a buffer the
+next `get()` rewrites, so use it before asking for another row. See
 [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md).
 
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
@@ -140,7 +143,7 @@ every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
 and the rasteriser's worker thread that runs alongside the paint),
 [host/settings.c](host/settings.c) (persistence), and
 [host/achievements.c](host/achievements.c) (the per-playthrough achievement
-bits, written the way settings are).
+and place bits, written the way settings are).
 
 ---
 
