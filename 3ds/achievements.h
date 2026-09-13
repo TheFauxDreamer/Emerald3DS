@@ -52,6 +52,9 @@ enum
 struct AchView
 {
     const char *title;
+    // Usually a string literal, but it may point at a buffer the next get()
+    // rewrites (Seasoned Traveller's "Still to visit: ..."), so use it before
+    // asking for another row.
     const char *desc;
     u32   progress;   // how far along, clamped to goal
     u32   goal;       // above 1: a counter the UI may draw while locked

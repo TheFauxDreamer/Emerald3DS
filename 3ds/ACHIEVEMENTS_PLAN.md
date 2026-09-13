@@ -93,6 +93,40 @@ MAIN and POST-GAME:
 - **TEST cycles the categories:** each press queues the first achievement of
   the next MAIN group, so six presses show every colour.
 
+**An eighth commit** added two Extras and the first thing the store keeps that
+the save does not:
+
+- **69 achievements: 59 main, 10 post-game.** Seasoned Traveller [67] is every
+  route and town: map sections `MAPSEC_LITTLEROOT_TOWN` to `MAPSEC_ROUTE_134`,
+  one contiguous run of 50, all reachable before the Hall of Fame. Tide's Out
+  [68] is walking into Shoal Cave at low tide. "Seasoned" [30] became "Battle
+  Hardened" so the two do not read alike; its id is unchanged.
+- **Where the player has been is tracked, not derived.** The save keeps
+  `FLAG_VISITED_*` for the towns and nothing for the routes, so `NotePlace()`
+  sets a bit for `gMapHeader.regionMapSectionId` on every overworld frame
+  (every frame, because a map can be crossed in less than one lap of the
+  round-robin). Adoption backfills the towns from the fly map's own question,
+  `Ctr3dsGetMapSecType`. Routes visited before this build cannot be recovered
+  and count from the first time it sees the player on them.
+- **Low tide is the layout, not the map.** Shoal Cave's entrance is one map
+  whose `ON_TRANSITION` script picks a high- or low-tide layout with
+  `setmaplayoutindex`, which writes `gSaveBlock1Ptr->mapLayoutId` and leaves
+  `gMapHeader.mapLayoutId` alone. So the check is the save's layout id, on an
+  overworld frame, after the script has run. It is an `ACH_EVENT` fired from
+  `NotePlace()` rather than a hook, so `src/` still has one fenced line. Low
+  tide is 03:00-08:59 and 15:00-20:59 on the game's clock.
+- **The last three places are named.** With 3 or fewer left, Seasoned
+  Traveller's description becomes "Still to visit: Route 105, Route 134", town
+  names without "Town"/"City". The widest possible line measures 261px of the
+  268 available. `AchView.desc` may therefore point at a buffer the next `get()`
+  rewrites.
+- **The store is version 2:** each record gains 16 bytes of place bits, one per
+  map section below 128, which covers all of Hoenn so a later "every cave" needs
+  no new format. The file grows from 332 to 460 bytes. Version 1 files are read
+  and carried over with nowhere visited, including one with a stale tail from
+  an in-place rewrite. RESYNC keeps the places, since nothing can re-derive
+  them.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists
@@ -216,7 +250,9 @@ once, on the debug page.
 
 - File `sdmc:/3ds/emerald3ds/achievements.bin`: header {magic `'E3AC'`, version,
   count}, then up to 8 records {u32 playerId, u32 lastUsed, u8 unlocked[16], u8
-  unseen[16]}, replacing the least recently used. About 330 bytes, **every byte
+  unseen[16]}, replacing the least recently used. (Version 2 adds u8 places[16]
+  to each record and the bridge calls gained a `places` array; see the eighth
+  commit above.) About 330 bytes, **every byte
   spoken for with explicit padding** (the settings.c rule). It is opened once and
   rewritten in place, with no temp-and-rename (the same one-sector reasoning as
   `settings.c`). A bad magic or version means "no records". It is never fatal.

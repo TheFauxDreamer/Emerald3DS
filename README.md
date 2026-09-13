@@ -85,10 +85,12 @@ caption when they apply:
   than a spoiler for it. It follows the randomiser when that is on, and it
   follows you from room to room inside a cave.
 
-**TROPHY.** 67 achievements, earned by playing, from choosing your starter and
+**TROPHY.** 69 achievements, earned by playing, from choosing your starter and
 getting the Bike through the eight badges, the HMs, the Master Ball and the
 Champion, plus the legends, Pokédex milestones, contests and a few odder ones
-(use Splash, hit a jackpot, catch a shiny). Each kind has its own colour, on
+(use Splash, hit a jackpot, catch a shiny, walk into Shoal Cave at low tide).
+Seasoned Traveller asks for every route and town in Hoenn, and once three or
+fewer are left it names them. Each kind has its own colour, on
 the list and on the toast: story gold, legendary green, Pokémon red, battle
 purple, extras blue and contests pink. Two buttons split them into MAIN and
 POST-GAME. The post-game ones stay "Hidden Achievement" until you enter the Hall

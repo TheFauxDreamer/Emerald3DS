@@ -13,8 +13,14 @@
 // persisted per playthrough.
 //
 // Almost every achievement is a STATE -- a badge flag, a count that has passed
-// a goal -- so it is polled rather than hooked, and src/ gains exactly one
-// fenced line: the shiny catch, the one EVENT that leaves no state behind.
+// a goal -- so it is polled rather than hooked. Two things leave no state
+// behind, and are watched as they happen instead:
+//
+//   The shiny catch, the one hook: src/ gains exactly one fenced line for it.
+//
+//   Where the player has been, read on every overworld frame (NotePlace) and
+//   needing no hook at all. The save keeps the towns but not the routes, so
+//   the store keeps every map section the player has stood in.
 
 #include "global.h"
 #include "event_data.h"               // FlagGet
@@ -22,9 +28,12 @@
 #include "overworld.h"                // CB2_Overworld, GetGameStat
 #include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag
 #include "pokemon.h"                  // GetMonData, IsMonShiny
+#include "region_map.h"               // Ctr3dsGetMapSecType
 #include "constants/flags.h"
 #include "constants/game_stat.h"
+#include "constants/layouts.h"
 #include "constants/maps.h"
+#include "constants/region_map_sections.h"
 #include "constants/species.h"
 
 #include "bridge.h"
@@ -43,11 +52,13 @@ enum
     ACH_SECRET_BASE,   // the player's own base exists
     ACH_PARTY_COUNT,   // Pokemon in the party, eggs not counted
     ACH_PARTY_LEVEL,   // the highest level in the party
-    ACH_EVENT,         // unlocked only by a hook; `arg` says which
+    ACH_PLACES,        // how many of the `count` map sections from `arg` the player has stood in
+    ACH_EVENT,         // unlocked only as it happens; `arg` says which
 };
 
-// ACH_EVENT ids, for the hooks to find their entry by.
-#define ACH_EVENT_SHINY 1
+// ACH_EVENT ids, for whatever sees the moment to find their entry by.
+#define ACH_EVENT_SHINY    1          // Ctr3dsAchOnCaught
+#define ACH_EVENT_LOW_TIDE 2          // NotePlace
 
 struct AchDef
 {
@@ -84,6 +95,8 @@ struct AchDef
     { .id = i, .title = t, .desc = d, .kind = ACH_PARTY_COUNT, .goal = g }
 #define PARTY_LEVEL(i, t, d, g) \
     { .id = i, .title = t, .desc = d, .kind = ACH_PARTY_LEVEL, .goal = g }
+#define PLACES(i, t, d, first, n) \
+    { .id = i, .title = t, .desc = d, .kind = ACH_PLACES, .arg = first, .count = n, .goal = n }
 #define EVENT(i, t, d, e) \
     { .id = i, .title = t, .desc = d, .kind = ACH_EVENT, .arg = e, .goal = 1 }
 
@@ -110,7 +123,7 @@ static const u16 sHmFlags[] =
 // filed wrong. sGroups below lists them MAIN first, and within a page they
 // read as colour blocks in that order.
 //
-// IDS ARE PERMANENT. The next new achievement takes the next unused id (67 at
+// IDS ARE PERMANENT. The next new achievement takes the next unused id (69 at
 // the time of writing); a retired one leaves its id unused forever. Rows move
 // between groups freely, because only the id is stored. The debug page counts
 // duplicate or out-of-range ids, since C cannot check that at compile time.
@@ -197,7 +210,7 @@ static const struct AchDef sMainPokemon[] =
 static const struct AchDef sMainBattle[] =
 {
     STAT(31, "Nothing Happened",   "Use Splash in battle",            GAME_STAT_USED_SPLASH, 1),
-    STAT(30, "Seasoned",           "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
+    STAT(30, "Battle Hardened",    "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
 };
 
 // MAIN, Extras (blue): the things to do around Hoenn besides the story,
@@ -212,7 +225,14 @@ static const struct AchDef sMainExtras[] =
     STAT(35, "On Safari",          "Enter the Safari Zone",           GAME_STAT_ENTERED_SAFARI_ZONE, 1),
     STAT(37, "Blender",            "Make 25 " POKEBLOCKS,             GAME_STAT_POKEBLOCKS, 25),
     STAT(39, "Lucky Number",       "Win the Lilycove lottery",        GAME_STAT_WON_POKEMON_LOTTERY, 1),
+    // Low tide is 03:00-08:59 and 15:00-20:59 on the game's clock
+    // (UpdateShoalTideFlag, src/time_events.c).
+    EVENT(68, "Tide's Out",        "Enter Shoal Cave at low tide",    ACH_EVENT_LOW_TIDE),
     STAT(32, "Marathon",           "Walk 100,000 steps",              GAME_STAT_STEPS, 100000),
+    // The sixteen towns and cities, then Routes 101 to 134: one contiguous run
+    // of map sections, all reachable before the Hall of Fame.
+    PLACES(67, "Seasoned Traveller", "Visit every route and town in Hoenn",
+           MAPSEC_LITTLEROOT_TOWN, MAPSEC_ROUTE_134 - MAPSEC_LITTLEROOT_TOWN + 1),
 };
 
 // MAIN, Contests (pink).
@@ -285,9 +305,39 @@ static const struct AchGroup sGroups[] =
 // number of rows, so the id check is the capacity check.
 #define ACH_ID_LIMIT (CTR_ACH_BYTES * 8)
 
+// One bit per map section. BitGet and BitSet guard with ACH_ID_LIMIT, which is
+// only right for the place bits too while the two arrays are the same size.
+#define PLACE_LIMIT (CTR_ACH_PLACE_BYTES * 8)
+STATIC_ASSERT(PLACE_LIMIT == ACH_ID_LIMIT, PlaceBitsMatchIdBits);
+
 // What a post-game row says until it is revealed.
 #define HIDDEN_TITLE "Hidden Achievement"
 #define HIDDEN_DESC  "Progress to discover"
+
+// With this many places left or fewer, an ACH_PLACES row names them in place
+// of its description: the last few are the hard ones to find, and the counter already
+// says what the goal is. Three is what fits. The widest three, "Still to
+// visit: Ever Grande, Verdanturf, Sootopolis", measure 261px of the 268 the
+// description line has (TROPHY_DESC_MAX_W), and the debug page measures the
+// line whenever it is showing.
+#define PLACES_NAMED 3
+
+// The towns' names for that line, in map-section order. Without "Town" and
+// "City", which is what lets three fit. The game's own names are no use here:
+// they are upper case and in its own character set.
+static const char *const sTownNames[] =
+{
+    "Littleroot", "Oldale",     "Dewford",   "Lavaridge",
+    "Fallarbor",  "Verdanturf", "Pacifidlog", "Petalburg",
+    "Slateport",  "Mauville",   "Rustboro",  "Fortree",
+    "Lilycove",   "Mossdeep",   "Sootopolis", "Ever Grande",
+};
+
+// AppendPlaceName relies on the towns coming first and the routes straight
+// after, in number order.
+STATIC_ASSERT(ARRAY_COUNT(sTownNames) == MAPSEC_EVER_GRANDE_CITY + 1, TownNamesCoverTowns);
+STATIC_ASSERT(MAPSEC_ROUTE_101 == MAPSEC_EVER_GRANDE_CITY + 1, RoutesFollowTowns);
+STATIC_ASSERT(MAPSEC_ROUTE_134 == MAPSEC_ROUTE_101 + 33, RoutesInOrder);
 
 // The groups flattened into provider order once, on first use, so that every
 // per-frame question about achievement i is an array index rather than a walk.
@@ -356,6 +406,7 @@ static u8 CategoryAt(u16 i)
 
 static u8    sUnlocked[CTR_ACH_BYTES];
 static u8    sUnseen[CTR_ACH_BYTES];
+static u8    sPlaces[CTR_ACH_PLACE_BYTES];   // map sections stood in (NotePlace)
 static u32   sPlayerId;
 static bool8 sLive;        // a playthrough has been adopted
 static u16   sCursor;      // the next definition AchTick evaluates
@@ -431,7 +482,7 @@ static void QueueToast(u16 index, u16 batch)
 
 static void Store(void)
 {
-    CtrAchStoreSave(sPlayerId, sUnlocked, sUnseen);
+    CtrAchStoreSave(sPlayerId, sUnlocked, sUnseen, sPlaces);
 }
 
 // ---- evaluation -----------------------------------------------------------
@@ -529,6 +580,12 @@ static u32 Value(const struct AchDef *d)
         }
         return n;
 
+    case ACH_PLACES:
+        for (u16 i = 0; i < d->count; i++)
+            if (BitGet(sPlaces, d->arg + i))
+                n++;
+        return n;
+
     default:                          // ACH_EVENT: nothing to read
         return 0;
     }
@@ -545,6 +602,67 @@ static void Unlock(u16 i)
     BitSet(sUnseen, DefAt(i)->id);
     QueueToast(i, 1);
     Store();
+}
+
+// Every EVENT row for `event` that is still locked. Only ever called while
+// Current().
+static void UnlockEvent(u16 event)
+{
+    for (u16 i = 0; i < ACH_COUNT; i++)
+    {
+        const struct AchDef *d = DefAt(i);
+
+        if (d->kind == ACH_EVENT && d->arg == event && !BitGet(sUnlocked, d->id))
+            Unlock(i);
+    }
+}
+
+// Where the player is standing, on every overworld frame rather than on the
+// round-robin: a map can be crossed in less than one lap of the rows, and
+// neither of these can be read back out of the save afterwards.
+//
+// Overworld frames only, so never partway through a map load. By the first one
+// on a new map its ON_TRANSITION script has run, and in Shoal Cave that is the
+// script that picks the tide.
+static void NotePlace(void)
+{
+    u8 mapsec = gMapHeader.regionMapSectionId;
+
+    if (mapsec < PLACE_LIMIT && !BitGet(sPlaces, mapsec))
+    {
+        BitSet(sPlaces, mapsec);
+        Store();
+    }
+
+    // One map, two layouts: the entrance room's ON_TRANSITION swaps in the
+    // high-tide one with setmaplayoutindex. That changes the save's
+    // mapLayoutId (SetCurrentMapLayout, src/overworld.c) and not gMapHeader's,
+    // so the save's is the one that says which tide the player walked in on.
+    if (gSaveBlock1Ptr->location.mapGroup == MAP_GROUP(MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
+        && gSaveBlock1Ptr->location.mapNum == MAP_NUM(MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
+        && gSaveBlock1Ptr->mapLayoutId == LAYOUT_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
+        UnlockEvent(ACH_EVENT_LOW_TIDE);
+}
+
+// The towns the save already knows about, for a playthrough older than the
+// place bits. The game sets FLAG_VISITED_* on arriving in each, and asking
+// through the fly map's own question keeps this from carrying a copy of that
+// list. Routes have no such flag: they count from the first frame this code
+// sees the player on them. Returns whether anything was new.
+static bool8 SeedTowns(void)
+{
+    bool8 changed = FALSE;
+
+    for (u8 m = MAPSEC_LITTLEROOT_TOWN; m <= MAPSEC_EVER_GRANDE_CITY; m++)
+    {
+        if (BitGet(sPlaces, m) || Ctr3dsGetMapSecType(m) != MAPSECTYPE_CITY_CANFLY)
+            continue;
+
+        BitSet(sPlaces, m);
+        changed = TRUE;
+    }
+
+    return changed;
 }
 
 // Every definition at once, unlocking whatever is already true without a
@@ -589,7 +707,7 @@ static u16 CatchUp(void)
 // block is the new game's, whichever way it was reached.
 static void Adopt(u32 id)
 {
-    bool8 known;
+    bool8 known, seeded;
 
     sPlayerId = id;
     sLive = TRUE;
@@ -600,11 +718,15 @@ static void Adopt(u32 id)
     sToastHead = 0;
     sToastLen = 0;
 
-    known = CtrAchStoreLoad(id, sUnlocked, sUnseen) != 0;
+    known = CtrAchStoreLoad(id, sUnlocked, sUnseen, sPlaces) != 0;
+
+    // Before the catch-up, so it counts the towns.
+    seeded = SeedTowns();
 
     // A record that is missing, or older than the save (a write lost to a
-    // closed lid, say), is caught up the same way.
-    if (CatchUp() > 0 || !known)
+    // closed lid, say), is caught up the same way. CatchUp() first: it has to
+    // run whatever the rest says.
+    if (CatchUp() > 0 || !known || seeded)
         Store();
 }
 
@@ -625,6 +747,9 @@ void AchTick(void)
     // stateKey, so the post-game page repaints the frame it is revealed.
     sRevealed = FlagGet(FLAG_SYS_GAME_CLEAR) != 0;
 
+    if (gMain.callback2 == CB2_Overworld)
+        NotePlace();
+
     // One definition a frame: about seventy frames for both tables, and a
     // constant cost per frame however many there are.
     if (sCursor >= ACH_COUNT)
@@ -642,14 +767,7 @@ void Ctr3dsAchOnCaught(struct Pokemon *mon)
     if (!Current() || mon == NULL || !IsMonShiny(mon))
         return;
 
-    for (u16 i = 0; i < ACH_COUNT; i++)
-    {
-        const struct AchDef *d = DefAt(i);
-
-        if (d->kind == ACH_EVENT && d->arg == ACH_EVENT_SHINY
-            && !BitGet(sUnlocked, d->id))
-            Unlock(i);
-    }
+    UnlockEvent(ACH_EVENT_SHINY);
 }
 
 // ---- the provider ---------------------------------------------------------
@@ -672,6 +790,64 @@ static bool8 LocalUnlocked(u16 i)
 static bool8 LocalUnseen(u16 i)
 {
     return sLive && BitGet(sUnseen, DefAt(i)->id);
+}
+
+// Appends to buf, never past its last byte, and keeps it terminated.
+static void Append(char *buf, u32 size, u32 *len, const char *s)
+{
+    while (*s != '\0' && *len + 1 < size)
+        buf[(*len)++] = *s++;
+
+    buf[*len] = '\0';
+}
+
+// Towns and routes only. LocalGet never asks for anything else.
+static void AppendPlaceName(char *buf, u32 size, u32 *len, u8 mapsec)
+{
+    u32 route;
+    char num[4];
+
+    if (mapsec <= MAPSEC_EVER_GRANDE_CITY)
+    {
+        Append(buf, size, len, sTownNames[mapsec]);
+        return;
+    }
+
+    route = 101 + (mapsec - MAPSEC_ROUTE_101);
+    num[0] = (char)('0' + route / 100);
+    num[1] = (char)('0' + route / 10 % 10);
+    num[2] = (char)('0' + route % 10);
+    num[3] = '\0';
+
+    Append(buf, size, len, "Route ");
+    Append(buf, size, len, num);
+}
+
+// "Still to visit: Route 105, Route 134". The buffer is rewritten on every
+// call, which AchView.desc allows for: the caller uses it before asking again.
+static const char *PlacesLeftText(const struct AchDef *d)
+{
+    static char sText[64];
+    u32 len = 0;
+    bool8 first = TRUE;
+
+    Append(sText, sizeof(sText), &len, "Still to visit: ");
+
+    for (u16 i = 0; i < d->count; i++)
+    {
+        u8 mapsec = d->arg + i;
+
+        if (BitGet(sPlaces, mapsec))
+            continue;
+
+        if (!first)
+            Append(sText, sizeof(sText), &len, ", ");
+
+        AppendPlaceName(sText, sizeof(sText), &len, mapsec);
+        first = FALSE;
+    }
+
+    return sText;
 }
 
 static void LocalGet(u16 i, struct AchView *out)
@@ -705,6 +881,13 @@ static void LocalGet(u16 i, struct AchView *out)
         value = Value(d);
 
     out->progress = value > d->goal ? d->goal : value;
+
+    // The last few places are the hard ones to find. Only rows inside the
+    // towns and routes, the places AppendPlaceName can name.
+    if (d->kind == ACH_PLACES && !out->unlocked && Current()
+        && value < d->goal && d->goal - value <= PLACES_NAMED
+        && d->arg + d->count - 1 <= MAPSEC_ROUTE_134)
+        out->desc = PlacesLeftText(d);
 }
 
 // Both of these walk the tables rather than the raw bytes, so a bit with no
@@ -807,6 +990,8 @@ void AchDebugTestToast(void)
     sNext = (u8)((sNext + 1) % mainGroups);
 }
 
+// sPlaces is kept. The places are facts about the playthrough that nothing can
+// work out again, and CatchUp() re-derives Seasoned Traveller from them.
 void AchDebugResync(void)
 {
     if (!Current())
