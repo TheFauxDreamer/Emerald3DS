@@ -16,11 +16,9 @@
 #include "battle.h"             // struct DisableStruct, for the headers below
 #include "main.h"              // gMain.inBattle, for the battle-anim switch
 #include "battle_main.h"
-#include "party_menu.h"         // GetMonAilment
 #include "pokemon_summary_screen.h"
 #include "constants/species.h"
 #include "constants/pokemon.h"
-#include "constants/party_menu.h"
 
 #include "../bridge.h"
 #include "../tweaks.h"      // Ctr3dsCurrentLevelCap
@@ -28,6 +26,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "matchup.h"
+#include "status_tags.h"
 
 #define COLS      2
 #define ROWS      3
@@ -109,6 +108,13 @@
 #define BACK_W          38
 #define BACK_H          22
 
+// The detail view's status badge, on the HP row between the max HP and the
+// bar. Named for the same reason BACK is: DrawDetail paints it under an
+// overlay and UiPartyRedrawAnimated paints it otherwise, and the two have to
+// land on the same 32x8.
+#define DETAIL_STATUS_X 120
+#define DETAIL_STATUS_Y 54
+
 // The IV/EV toggle, on the level line and clear of everything already there:
 // the longest species name ends near x=170 and BACK starts at 274, so 196..252
 // has margin on both sides. y=26..48 sits under BACK and above the HP row at 52.
@@ -182,6 +188,7 @@ static u8    sIconFrame;
 static bool8 sTabVisible;
 static bool8 sIconStepped;   // the icon frame flipped this tick
 static bool8 sHpMoving;      // a bar slid this tick
+static bool8 sTagFlipped;    // a badge on screen changed tag this tick
 
 // Adopt what the party actually holds, with no animation. Used on arrival at
 // the tab: a bar that slides on the frame the player switches to PARTY is
@@ -201,11 +208,30 @@ static void SnapBars(void)
     }
 }
 
+// Whether this frame's tag flip changes anything on screen: in the detail view,
+// only if the one mon shown has two tags; on the grid, if any of them does.
+// A flip nobody can see would be a repaint of an unchanged picture.
+static bool8 TagFlipVisible(void)
+{
+    if (!UiStatusTagsFlipped())
+        return FALSE;
+
+    if (sDetailOpen)
+        return UiStatusTagCycles(UiSelectedMon());
+
+    for (u8 i = 0; i < PARTY_SIZE; i++)
+        if (UiStatusTagCycles(i))
+            return TRUE;
+
+    return FALSE;
+}
+
 bool8 UiPartyTick(bool8 visible)
 {
     bool8 moving = FALSE;
 
     sHpMoving = FALSE;
+    sTagFlipped = FALSE;
 
     // Nothing on another tab is watching either of these, and a tick that
     // returns TRUE off screen is a full 76,800-pixel repaint of a view nobody
@@ -237,11 +263,19 @@ bool8 UiPartyTick(bool8 visible)
     //
     // Only in battle. Out in the field the animation is free: nothing is
     // competing for the frame.
+    //
+    // The one thing that still asks for a repaint is a status badge changing
+    // tag, because that is information rather than motion: a mon that is both
+    // poisoned and confused shows the two in turn, and a badge frozen on one of
+    // them would hide the other for the whole battle, which is the only place
+    // confusion exists. It costs one cheap step a second, and only while a mon
+    // on screen carries two tags.
     if (gMain.inBattle && Ctr3dsGetBattleAnimOff())
     {
         SnapBars();
         sIconStepped = FALSE;
-        return FALSE;
+        sTagFlipped = TagFlipVisible();
+        return sTagFlipped;
     }
 
     // Recorded rather than inferred: the HP loop below can also set `moving`,
@@ -254,6 +288,12 @@ bool8 UiPartyTick(bool8 visible)
         sIconFrame ^= 1;
         moving = TRUE;
     }
+
+    // Always on a step frame (UiStatusTagsTick), so with the icons running
+    // this rides the repaint they were asking for anyway.
+    sTagFlipped = TagFlipVisible();
+    if (sTagFlipped)
+        moving = TRUE;
 
     for (u32 i = 0; i < PARTY_SIZE; i++)
     {
@@ -295,7 +335,9 @@ bool8 UiPartyTick(bool8 visible)
 }
 
 // Whether everything that changed this tick lives on the animated layer: the
-// icon frame, a sliding bar, or both. The shell uses it to choose between
+// icon frame, a sliding bar, a badge changing tag, or any mix of them. The
+// badge is on that layer in the detail view as well as the grid, so a flip
+// there is still the cheap path. The shell uses it to choose between
 // putting a few rects back and rebuilding the whole 320x240. On the single-core
 // path that rebuild measured 4.9 ms against a 5.7 ms frame budget; with the
 // rasteriser on its own core it is 2.4 to 3.9 ms on a New 3DS XL and mostly
@@ -309,7 +351,7 @@ bool8 UiPartyAnimOnly(void)
     if (sDetailOpen && sHpMoving)
         return FALSE;
 
-    return sIconStepped || sHpMoving;
+    return sIconStepped || sHpMoving || sTagFlipped;
 }
 
 // The frame DrawCell and DrawDetail bake a mon icon at while an overlay has the
@@ -398,15 +440,16 @@ static int TagStripH(void) { return AnyTweakOn() ? TAG_STRIP_H : 0; }
 static int CellH(void)     { return AnyTweakOn() ? CELL_H_TIGHT : CELL_H_FULL; }
 static int CellTop(int i)  { return TagStripH() + (i / COLS) * CellH(); }
 
-// The icons, and nothing else: restore what the last full paint had under them
-// and draw the current frame back. Everything else in the cell -- the window
-// frame, the name, the HP bar, the status badge -- is already correct in the
-// snapshot and is not touched.
+// The pieces that move: restore what the last full paint had under them and
+// draw them back. That is each icon, each HP block and each status badge.
+// Everything else in the cell (the window frame, the name, the level) is
+// already correct in the snapshot and is not touched.
 void UiPartyRedrawAnimated(void)
 {
     const struct CellRows *rows = AnyTweakOn() ? &sRowsTight : &sRowsFull;
 
-    // The detail view covers the grid, and shows one icon of its own.
+    // The detail view covers the grid, and shows one icon and one badge of its
+    // own.
     if (sDetailOpen)
     {
         struct Pokemon *mon = &gPlayerParty[UiSelectedMon()];
@@ -417,6 +460,10 @@ void UiPartyRedrawAnimated(void)
             UiRestoreRect(12, 12, 32, 32);
             UiMonIconFrame(12, 12, (u16)species,
                            GetMonData(mon, MON_DATA_PERSONALITY), sIconFrame);
+
+            UiRestoreRect(DETAIL_STATUS_X, DETAIL_STATUS_Y, 32, 8);
+            UiStatusIcon(DETAIL_STATUS_X, DETAIL_STATUS_Y,
+                         UiStatusTag(UiSelectedMon()));
         }
         return;
     }
@@ -470,6 +517,18 @@ void UiPartyRedrawAnimated(void)
 
             DrawCellHp((int)i, cx, cy, rows);
         }
+
+        // ...and the status badge, for every slot, on the same terms as the
+        // HP block: DrawCell leaves it out of the snapshot, so this is the
+        // only place it is drawn. It is here because a mon with two tags
+        // alternates between them (status_tags.h), and a badge in the
+        // snapshot would have its old tag put back by every restore.
+        //
+        // One 32x8 under the icon, clear of it in both layouts (the icon is
+        // rows iconY..iconY+31 and the badge starts at iconY+32) and of the HP
+        // bar, which starts at CELL_TEXT_X.
+        UiRestoreRect(x, CellTop((int)i) + rows->statusY, 32, 8);
+        UiStatusIcon(x, CellTop((int)i) + rows->statusY, UiStatusTag((u8)i));
     }
 }
 
@@ -605,7 +664,12 @@ static void DrawCell(int index)
     // The 32x8 strip under the mon icon is otherwise empty, and the badge is
     // 32x8, so status lands next to the mon it belongs to without disturbing
     // anything. The HP bar starts at CELL_TEXT_X, well clear of it.
-    UiStatusIcon(cx + CELL_ICON_X, cy + rows->statusY, GetMonAilment(mon));
+    //
+    // Animated layer too, and for the same reason as the icon: a mon with two
+    // tags alternates between them. So it is baked here only under an overlay,
+    // at whichever tag is showing.
+    if (UiOverlayActive())
+        UiStatusIcon(cx + CELL_ICON_X, cy + rows->statusY, UiStatusTag((u8)index));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     nameW = UiText(cx + CELL_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());
@@ -933,7 +997,10 @@ static void DrawDetail(void)
     UiNum(86, y, (s32)GetMonData(mon, MON_DATA_MAX_HP), UiThemeText(), UiThemeShadow());
 
     // Status belongs on the HP row; the bar gives up 20px to make room for it.
-    UiStatusIcon(120, y + 2, GetMonAilment(mon));
+    // Like the icon, the badge is the animated layer's and is baked here only
+    // under an overlay. See DrawCell.
+    if (UiOverlayActive())
+        UiStatusIcon(DETAIL_STATUS_X, DETAIL_STATUS_Y, UiStatusTag(UiSelectedMon()));
     UiHpBar(160, y + 4, 140, sShownHp[UiSelectedMon()],
             GetMonData(mon, MON_DATA_MAX_HP));
 

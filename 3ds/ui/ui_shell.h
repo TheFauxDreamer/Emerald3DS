@@ -147,11 +147,14 @@ void UiSetSelectedMon(u8 index);
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);
 
-// Advances this tab's animations by one frame: the sliding HP bars and the mon
-// icons' two-frame cycle. Returns TRUE on the frames the picture actually
+// Advances this tab's animations by one frame: the sliding HP bars, the mon
+// icons' two-frame cycle, and a status badge alternating between two tags
+// (status_tags.h). Returns TRUE on the frames the picture actually
 // changed, which the shell turns into a repaint request -- the icons change
 // only on UiAnimStepped() frames, so an idle party grid asks for ten repaints a
-// second (five on the single-core path) rather than sixty.
+// second (five on the single-core path) rather than sixty. A badge flip lands
+// on one of those same frames. With BATTLE ANIM off in battle, the flip is the
+// only thing that still asks.
 //
 // Must be called once per frame, not once per redraw, or the animation stalls
 // whenever the screen happens not to be repainting.
@@ -162,17 +165,17 @@ void UiPartyTouch(const CtrTouchState *t);
 // than sliding for damage taken while it was hidden.
 bool8 UiPartyTick(bool8 visible);
 
-// TRUE when everything that moved lives on the animated layer -- the mon icons'
-// frame and/or a sliding HP bar -- so the shell can put a handful of rects back
-// instead of rebuilding all 76,800 pixels. FALSE only for the detail view,
-// whose HP readout is not on that layer.
+// TRUE when everything that moved lives on the animated layer (the mon icons'
+// frame, a sliding HP bar, a status badge changing tag), so the shell can put
+// a handful of rects back instead of rebuilding all 76,800 pixels. FALSE only
+// for an HP slide in the detail view, whose HP readout is not on that layer.
 bool8 UiPartyAnimOnly(void);
 
 // Redraw the moving pieces over the restored snapshot: on the grid, every
-// slot's icon, HP bar and HP number, sliding or not, since a full paint leaves
-// all of them out of the snapshot; in the detail view, its one icon. Only
-// valid immediately after UiPartyAnimOnly() returned TRUE, or as the last step
-// of a full paint.
+// slot's icon, HP bar, HP number and status badge, moving or not, since a full
+// paint leaves all of them out of the snapshot; in the detail view, its one
+// icon and its badge. Only valid immediately after UiPartyAnimOnly() returned
+// TRUE, or as the last step of a full paint.
 void UiPartyRedrawAnimated(void);
 
 // Cheap identity of what the PARTY tab is showing: the live level cap behind

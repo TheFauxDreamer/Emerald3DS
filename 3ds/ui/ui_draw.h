@@ -111,8 +111,16 @@ void UiFootprint(int x, int y, u16 species, u16 color);
 void UiTypeIcon(int x, int y, u8 type);
 
 // A status badge (PSN, SLP, BRN ...): 32x8, the party menu's own art. Takes an
-// AILMENT_* value, normally straight from GetMonAilment(). Draws nothing for
-// AILMENT_NONE or AILMENT_PKRS, which is what the party menu does too.
+// AILMENT_* value, or UI_STATUS_CNF below, normally from UiStatusTag()
+// (status_tags.h). Draws nothing for AILMENT_NONE or AILMENT_PKRS, which is
+// what the party menu does too.
+//
+// UI_STATUS_CNF is the one badge the game has no art for. Confusion is not a
+// stored status, so there is no AILMENT_* for it and nothing in the sheet; the
+// value sits past the sheet's range (AILMENT_FNT is 7, and index 7 of the
+// sheet is its blank) and the badge is drawn by hand in the sheet's style.
+#define UI_STATUS_CNF 8
+
 void UiStatusIcon(int x, int y, u8 ailment);
 
 // A solid triangle with a 1px outline, pointing up or down. Both dimensions are
