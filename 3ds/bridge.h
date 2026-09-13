@@ -326,20 +326,28 @@ int  Ctr3dsGetShinyTest(void);
 // list and a new game starts an empty one. The file holds CTR_ACH_RECORDS of
 // them and a new playthrough replaces the least recently used.
 //
-// Both bitsets are CTR_ACH_BYTES long, achievement i at bit (i % 8) of byte
-// i / 8. An achievement's bit is its position in the game-side table, which is
-// why that table is append-only: reordering it would move saved unlocks.
+// Both bitsets are CTR_ACH_BYTES long, the achievement with id i at bit
+// (i % 8) of byte i / 8. The id is the permanent one each row carries in the
+// game-side tables, never its position, so rows can move without moving a
+// saved unlock.
 //
-// Load fills both arrays and returns 1 if the playthrough has a record, and
-// zeroes them and returns 0 if it has none. Save copies them in and queues a
-// write exactly the way a settings change does, so nothing touches the card
+// Beside them, CTR_ACH_PLACE_BYTES of the map sections the player has stood
+// in, section s at bit (s % 8) of byte s / 8. The save records the towns
+// (FLAG_VISITED_*) but not the routes, so this is the only place a route visit
+// is kept.
+//
+// Load fills all three arrays and returns 1 if the playthrough has a record,
+// and zeroes them and returns 0 if it has none. Save copies them in and queues
+// a write exactly the way a settings change does, so nothing touches the card
 // from inside a frame (see 3ds/host/settings.c's header). Main thread only.
-#define CTR_ACH_BYTES    16   // room for 128 achievements
-#define CTR_ACH_RECORDS  8
+#define CTR_ACH_BYTES        16   // room for 128 achievements
+#define CTR_ACH_PLACE_BYTES  16   // every map section below 128: all of Hoenn's
+#define CTR_ACH_RECORDS      8
 
-int  CtrAchStoreLoad(uint32_t playerId, uint8_t *unlocked, uint8_t *unseen);
+int  CtrAchStoreLoad(uint32_t playerId, uint8_t *unlocked, uint8_t *unseen,
+                     uint8_t *places);
 void CtrAchStoreSave(uint32_t playerId, const uint8_t *unlocked,
-                     const uint8_t *unseen);
+                     const uint8_t *unseen, const uint8_t *places);
 
 // The console's real-time clock, standing in for the cartridge RTC. The GBA
 // carts carried an S-3511A; a 3DS has no cart, so src/siirtc.c is backed by
