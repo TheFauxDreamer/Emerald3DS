@@ -1,12 +1,10 @@
-// Readouts about the opposing mon. See matchup.h.
+// Information about the opposing mon. See matchup.h.
 //
-// The chart walk mirrors the authoritative one in src/battle_script_commands.c
-// (around line 1386), NOT the simplified copy in battle_ai_switch_items.c.
-// The difference matters: gTypeEffectiveness carries a TYPE_FORESIGHT marker
-// partway through, and the rows after it are the Ghost immunities. They apply
-// normally and are skipped only when the target is actually under Foresight.
-// Treating the marker as a plain terminator would report Normal moves as
-// hitting Ghosts.
+// The type chart walk copies the real one in src/battle_script_commands.c, not
+// the simple copy in battle_ai_switch_items.c. gTypeEffectiveness has a
+// TYPE_FORESIGHT marker. The rows after it are the Ghost immunities. They
+// apply, except when the target is under Foresight. Do not treat the marker as
+// the end of the table, or Normal moves hit Ghosts.
 
 #include "global.h"
 #include "battle.h"
@@ -42,8 +40,8 @@ static u16 TypeMultiplier(u8 atkType, u8 defType1, u8 defType2, bool8 foresighte
     {
         if (TYPE_EFFECT_ATK_TYPE(i) == TYPE_FORESIGHT)
         {
-            // Under Foresight the rows beyond the marker (the Ghost
-            // immunities) stop applying, which is what lets Normal hit Ghost.
+            // Under Foresight, the rows after the marker (the Ghost immunities)
+            // do not apply. Thus Normal can hit Ghost.
             if (foresighted)
                 break;
 
@@ -79,8 +77,7 @@ static u16 ComputeOffence(struct Pokemon *mon)
         if (move == MOVE_NONE)
             continue;
 
-        // A status move has no effectiveness to report, so judging the mon by
-        // one would be misleading.
+        // A status move has no effectiveness, so ignore it.
         if (gBattleMoves[move].power == 0)
             continue;
 
@@ -109,8 +106,8 @@ static u16 ComputeRisk(struct Pokemon *mon)
     ourType1 = gSpeciesInfo[species].types[0];
     ourType2 = gSpeciesInfo[species].types[1];
 
-    // Judged on the opponent's own types rather than its moves, which we cannot
-    // see. It is the same estimate a player makes before switching in.
+    // Use the opponent's types, not its moves, which the player cannot see. A
+    // player makes the same estimate before a switch.
     for (u32 i = 0; i < 2; i++)
     {
         u8 atkType = gBattleMons[foe].types[i];
@@ -130,22 +127,18 @@ static u16 ComputeRisk(struct Pokemon *mon)
 
 // ------------------------------------------------------------- memo --------
 //
-// A cache in front of the two walks above, not a replacement for them.
+// A cache in front of the two walks above.
 //
-// The PARTY grid asks for both readouts for all six cells on every repaint, and
-// each walk crosses gTypeEffectiveness -- roughly 12,000 iterations a repaint --
-// to produce an answer that only changes when the opponent switches, or this
-// mon's species or moves do. On a screen whose frame cost is measured in whole
-// VBlanks that is worth removing.
+// The PARTY grid asks for both values for six cells on each repaint. Each walk
+// crosses gTypeEffectiveness, but the answer changes only when the opponent
+// switches, or when this mon's species or moves change.
 //
-// Keyed on exactly the inputs the walks read: the opponent (species and both
-// types, via UiMatchupOpponentKey) plus this mon's species and four move ids.
-// Reading the moves still costs its GetMonData decrypts -- the saving is the
-// table walk, which is the expensive half.
+// The key is the walks' inputs: the opponent (species and both types, from
+// UiMatchupOpponentKey), and this mon's species and four move ids. The move
+// reads still decrypt. The cache saves the table walk, which costs more.
 //
-// Indexed by the mon's slot in gPlayerParty, derived from the pointer the caller
-// already passes. Anything outside that array bypasses the memo rather than
-// aliasing someone else's entry.
+// The index is the mon's slot in gPlayerParty, from the caller's pointer. A
+// pointer outside that array does not use the cache.
 #define MATCHUP_NO_SLOT (-1)
 
 static struct {
@@ -171,7 +164,7 @@ static u32 MemoKey(struct Pokemon *mon)
     return key;
 }
 
-// Both readouts share one key, so a miss fills both and the paired call hits.
+// Both values share one key, so a miss fills both and the second call hits.
 static void MatchupBoth(struct Pokemon *mon, u16 *off, u16 *risk)
 {
     s32 slot = MemoSlot(mon);
@@ -230,14 +223,12 @@ u32 UiMatchupOpponentKey(void)
 
 // ------------------------------------------------------- catchable check ---
 //
-// Battles the player cannot throw a ball in. BATTLE_TYPE_TRAINER covers far
-// more than it looks: the whole Battle Frontier, the Battle Tower, secret bases
-// and Trainer Hill all set it, so it is one test rather than seven. The rest
-// are the battles that are wild but still not yours to catch in -- Wally's
-// tutorial catch, Birch's bag on Route 101, and the replay paths, where the
-// player is not the one choosing actions at all.
+// The battles where the player cannot throw a ball. BATTLE_TYPE_TRAINER covers
+// the Battle Frontier, the Battle Tower, secret bases and Trainer Hill. The
+// other flags are wild battles that the player cannot catch in: Wally's
+// tutorial, Birch's bag on Route 101, and the replays.
 //
-// The Safari Zone is deliberately NOT here. Safari Balls are balls.
+// The Safari Zone is not in this list. Safari Balls are balls.
 #define UNCATCHABLE_BATTLE (BATTLE_TYPE_TRAINER          \
                           | BATTLE_TYPE_LINK             \
                           | BATTLE_TYPE_RECORDED         \
@@ -246,9 +237,8 @@ u32 UiMatchupOpponentKey(void)
                           | BATTLE_TYPE_WALLY_TUTORIAL   \
                           | BATTLE_TYPE_FIRST_BATTLE)
 
-// Split out of UiShinyOpponent rather than duplicated, because the quick-throw
-// strip asks the same question and two copies of this would drift. Every check
-// below records a bug; see the comments.
+// UiShinyOpponent and the quick-throw strip both use this, so there is one
+// copy. Each check below prevents a bug; see the comments.
 bool8 UiCatchableOpponent(void)
 {
     struct Pokemon *foe = &gEnemyParty[0];
@@ -259,29 +249,22 @@ bool8 UiCatchableOpponent(void)
     if (gBattleTypeFlags & UNCATCHABLE_BATTLE)
         return FALSE;
 
-    // The encounter is over the moment the game says so, however it ended:
-    // B_OUTCOME_CAUGHT, _WON (you knocked it out), _RAN, _MON_FLED, _LOST and
-    // the rest all land here. gBattleOutcome is 0 while the fight is live and
-    // is cleared by BattleStartClearSetData (src/battle_main.c:3149), so it is
-    // the game's own answer to "is there still something to catch", and a
-    // better one than gMain.inBattle, which stays true through the catch
-    // sequence, the nickname prompt and the fade out.
+    // The encounter ends when the game sets a result: caught, won, ran, fled,
+    // lost or another. The value of gBattleOutcome is 0 while the fight is
+    // live, and BattleStartClearSetData clears it. It is better than
+    // gMain.inBattle, which stays TRUE through the catch, the nickname prompt
+    // and the fade.
     if (gBattleOutcome != 0)
         return FALSE;
 
-    // gEnemyParty, not gBattleMons, and the difference is not cosmetic.
-    // BattleStartClearSetData() does not zero gBattleMons, so between
-    // gMain.inBattle going true (src/battle_main.c:708) and the intro's
-    // BattleIntroGetMonsData completing, that array still holds the PREVIOUS
-    // battle's mons. A stale type matchup during the transition is a shrug; a
-    // shiny alert for a mon that is no longer there is not, and neither is a
-    // ball offered against one. gEnemyParty is written before inBattle is set
-    // in both cases -- CreateWildMon during the encounter, CreateNPCTrainerParty
-    // on the line above it -- so it is correct from the first frame.
+    // Use gEnemyParty, not gBattleMons. BattleStartClearSetData() does not
+    // clear gBattleMons. Until BattleIntroGetMonsData runs, gBattleMons holds
+    // the previous battle's mons. A shiny alert for a mon that is not there is
+    // a bug. The game writes gEnemyParty before it sets inBattle, so it is
+    // correct from the first frame.
     //
-    // Slot 0 is the whole answer here because Emerald has no wild double
-    // battles: every battle with a second opponent is a trainer battle, and
-    // those returned above.
+    // Slot 0 is enough because the game has no wild double battles. A battle
+    // with a second opponent is a trainer battle, which returned above.
     return GetMonData(foe, MON_DATA_SANITY_HAS_SPECIES) != 0;
 }
 
@@ -293,10 +276,10 @@ bool8 UiShinyOpponent(u16 *species, u32 *identity)
     if (!UiCatchableOpponent())
         return FALSE;
 
-    // These two sit BEFORE MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h:8-19),
-    // so they answer from the plaintext header and cost no decryption. The
-    // shell polls this every frame, so that matters; the species read below
-    // does decrypt, which is why it is last and only reached for a real shiny.
+    // These two are before MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h), so
+    // they read the plain header and do not decrypt. The shell polls this every
+    // frame. The species read below decrypts, so it comes last and runs only
+    // for a real shiny.
     otId        = GetMonData(foe, MON_DATA_OT_ID);
     personality = GetMonData(foe, MON_DATA_PERSONALITY);
 
@@ -306,9 +289,9 @@ bool8 UiShinyOpponent(u16 *species, u32 *identity)
     if (species != NULL)
         *species = (u16)GetMonData(foe, MON_DATA_SPECIES);
 
-    // The personality alone, which is rerolled for every wild mon and is what
-    // the shininess above was computed from. Two encounters sharing one is as
-    // likely as two sharing a shiny, which is to say it does not happen.
+    // The personality alone. It is new for each wild mon, and it decides the
+    // shiny test above. Two encounters with the same value do not occur in
+    // practice.
     if (identity != NULL)
         *identity = personality;
 

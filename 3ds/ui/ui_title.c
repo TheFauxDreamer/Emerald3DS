@@ -1,5 +1,5 @@
-// TOUCH TO START. See ui_title.h for what this is and why it starts nothing
-// itself.
+// TOUCH TO START. See ui_title.h for what it is and why it does not start the
+// game itself.
 
 #include "global.h"
 #include "graphics.h"               // gTitleScreenPressStartPal
@@ -11,19 +11,19 @@
 #include "ui_shell.h"               // UI_COL_DIM, UI_COL_SHADOW
 #include "ui_title.h"
 
-// The lettering of graphics/title_screen/press_start.png, the banner's own art:
-// 2px strokes, a 1px black outline round every stroke, and each row a step of
-// one ramp, white over lavender over grey. The characters are indices into the
-// banner's palette and a space is transparent.
+// The letters of graphics/title_screen/press_start.png, the banner's own art.
+// It has 2px strokes and a 1px black outline around each stroke. Each row is
+// one step of a ramp (white, lavender, gray). The characters are indices into
+// the banner's palette. A space is transparent.
 //
-// START is copied from the art verbatim (x 83..124, rows 1..7), and TOUCH and TO
-// reuse its T. The art has no O, U, C or H, so those four are drawn to its
-// rule: every pixel touching a stroke is outline, a counter the stroke closes
-// is outline too, and anything further out is transparent. The gap between
-// words is the 7 columns the art leaves between PRESS and START.
+// START comes from the art exactly (x 83..124, rows 1..7), and TOUCH and TO use
+// its T. The art has no O, U, C or H. Those four follow its rule: a pixel next
+// to a stroke is outline, a closed counter is outline, and pixels further out
+// are transparent. The gap between words is 7 columns, as between PRESS and
+// START.
 //
-// Drawn in the art's own style rather than in the game's text font, because it
-// is the same prompt as the one on the top screen and ought to look it.
+// It uses the art's style, not the game's font, because it is the same prompt
+// as on the top screen.
 #define TITLE_ART_W  116
 #define TITLE_ART_H  7
 
@@ -38,18 +38,17 @@ static const char sArt[TITLE_ART_H][TITLE_ART_W + 1] =
     "   1111  1111111111111111111111111111 1111          1111  111111111       111111111  1111 11111111111111111  1111   ",
 };
 
-// Doubled, because the top screen shows the banner at 1.5x by default and the
-// bottom one has no fractional scale to match it with: 1x would be half its
-// size, and 2x is 232x14, centred on the whole screen. There is no tab bar
-// before the game, so the content area's floor does not apply.
+// Doubled. The top screen shows the banner at 1.5x by default, and the bottom
+// screen has no fractional scale. At 2x the art is 232x14, centered on the full
+// screen. There is no tab bar before the game, so the content area does not
+// apply.
 #define TITLE_SCALE  2
 #define TITLE_X      ((UI_W - TITLE_ART_W * TITLE_SCALE) / 2)   // 44
 #define TITLE_Y      ((UI_H - TITLE_ART_H * TITLE_SCALE) / 2)   // 113
 
-// The palette's first six entries are the only ones the art uses: transparent,
-// the black outline and the four steps of the ramp. Converted once, on first
-// draw, from the game's own palette rather than hardcoded, so the prompt is the
-// banner's colours by construction.
+// The art uses only the first six palette entries: transparent, the black
+// outline and the four ramp steps. They are converted once from the game's own
+// palette, so the prompt always has the banner's colors.
 #define TITLE_PAL_COUNT  6
 
 static u16   sPal[TITLE_PAL_COUNT];
@@ -59,15 +58,14 @@ static bool8 sPalLoaded;
 // while bit 4 of its frame count is set, so 16 frames lit and 16 dark.
 #define BANNER_BLINK_FRAMES  16
 
-// This one blinks at half that rate, 32 lit and 32 dark. The banner's pace
-// suits its size up there, but the prompt here is bigger and read closer to,
-// where the same pace looks busy. It is timed off the banner's frame count, not
-// a count kept here, and a power of two, because what is tested is one bit of
-// that count.
+// This prompt blinks at half that rate: 32 frames lit and 32 dark. It is larger
+// and closer to the eye, where the banner's pace looks busy. It uses the
+// banner's frame count, not its own, and a power of two, because it tests one
+// bit of that count.
 //
-// The offset makes it light on a frame the banner lights on, every time. The
-// banner first lights at count 16, and without the offset this would not light
-// until 32, so the bottom would come up half a second after the top did.
+// The offset makes it light on a frame when the banner lights. The banner first
+// lights at count 16. Without the offset, this would light at 32, half a second
+// after the top screen.
 #define TITLE_BLINK_FRAMES   32
 #define TITLE_BLINK_OFFSET   (TITLE_BLINK_FRAMES - BANNER_BLINK_FRAMES)
 
@@ -84,14 +82,12 @@ static u32 PromptState(void)
 }
 
 // The build id (Ctr3dsBuildId, ../bridge.h) in the bottom-right corner, so a
-// player can check which build is installed. The title screen is the only
-// place it appears: it is read once, not looked at while playing.
+// player can check which build is installed. It shows only on the title screen.
 //
-// In the game's small font and the UI's dim grey, so it stays out of the
-// prompt's way, and in BOTH halves of the blink: it is not part of the prompt,
-// and a readout that blinks is harder to read. The margin leaves the letters
-// about five pixels from each edge (the small font's ink sits in rows 4-11 of
-// its 13).
+// It uses the game's small font and the UI's dim gray, so it does not compete
+// with the prompt. It shows in both halves of the blink, because it is not part
+// of the prompt and blinking text is harder to read. The letters are about 5px
+// from each edge (the small font's ink is in rows 4-11 of its 13).
 #define BUILD_ID_MARGIN 4
 
 static void DrawBuildId(void)
@@ -122,8 +118,8 @@ void UiTitleDraw(void)
         sPalLoaded = TRUE;
     }
 
-    // 622 pixels at 2x2, once every 32 frames and only on the title screen.
-    // TITLE_X is even, so every one of these is a single paired store per row.
+    // 622 pixels at 2x2, once every 32 frames, only on the title screen.
+    // TITLE_X is even, so each rect is one paired store for each row.
     for (int row = 0; row < TITLE_ART_H; row++)
     {
         for (int col = 0; col < TITLE_ART_W; col++)
@@ -139,10 +135,9 @@ void UiTitleDraw(void)
     }
 }
 
-// Acting on release, as every control on this screen does. The whole screen is
-// the control here, which the cheatsheet's "tap anywhere" warning does not
-// cover: that is about a panel read mid-game, where a stray touch loses
-// something. A stray touch on the title only does what START does.
+// Act on release, like every control on this screen. Here the full screen is
+// the control. A stray touch on the title only does what START does, so there
+// is nothing to lose.
 void UiTitleTouch(const CtrTouchState *t)
 {
     if (t == NULL || !t->justReleased)

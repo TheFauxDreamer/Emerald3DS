@@ -1,17 +1,19 @@
 // TROPHY tab: the achievements list.
 //
-// Always available, like BAG and EXTRA: there is nothing to unlock before the
-// list itself is worth reading, and a locked list is a list of goals.
+// Always available, like BAG and EXTRA. A locked list is a list of goals, so
+// there is nothing to unlock first.
 //
-// It reads everything through AchActive() (3ds/achievements.h) and nothing
-// else, so it does not know or care which provider is behind it. Nothing here
-// writes game state; the one thing it changes is the provider's "seen" bits.
+// It reads everything through AchActive() (3ds/achievements.h), so it works
+// with any provider. Nothing here writes game state. It changes only the
+// provider's "seen" bits.
 //
-// One window over the whole content area: two page buttons, MAIN and
-// POST-GAME, each with its own count, a gold progress bar for the page on
-// screen, four two-line rows, and the DEX tab's paging arrows underneath. The
-// provider says which page each achievement belongs on, and which are hidden;
-// before the Hall of Fame that is the whole post-game page.
+// One window over the full content area. It contains:
+// - two page buttons (MAIN and POST-GAME) with their counts
+// - a gold progress bar for the page
+// - four rows of two lines
+// - the DEX tab's paging arrows
+// The provider tells the page of each achievement and which ones are hidden.
+// Before the Hall of Fame, the full post-game page is hidden.
 
 #include "global.h"
 
@@ -23,66 +25,66 @@
 
 // ---------------------------------------------------------------- layout ---
 //
-// 40x24 tiles, interior x 8..312, y 8..184. Text keeps an 8px margin inside
-// that, so it runs from x 16 to x 304.
+// 40x24 tiles, with the interior at x 8..312, y 8..184. The text has an 8px
+// margin inside that, from x 16 to x 304.
 #define TROPHY_TW      (CTR_BOTTOM_WIDTH / 8)
 #define TROPHY_TH      (UI_CONTENT_H / 8)
 
 #define IN_L           16
 #define IN_R           (CTR_BOTTOM_WIDTH - 16)          // 304
 
-// The two page buttons on the top line, 140px each with 8 between, spanning
-// exactly IN_L..IN_R. 17px tall at y 8 is the EXTRA tab's pager height, and
-// ends at 24, clear of the bar below.
+// The two page buttons on the top line: 140px each with 8px between, from IN_L
+// to IN_R. They are 17px tall at y 8, like the EXTRA pager, and end at 24,
+// clear of the bar.
 #define SEC_Y          8
 #define SEC_H          17
 #define SEC_W          140
 #define SEC_GAP        8
 #define SEC_X(s)       (IN_L + (s) * (SEC_W + SEC_GAP))  // 16, 164
 
-// A 4px bar under the buttons, 26..30, which leaves the first row a clear 3px.
+// A 4px bar under the buttons, at 26..30, which leaves 3px above the first row.
 #define BAR_X          IN_L
 #define BAR_Y          26
 #define BAR_W          (IN_R - IN_L)                    // 288
 #define BAR_H          4
 
-// Four rows of two lines, 31px apart: 33, 64, 95 and 126, the last ending at
-// 157, which clears the paging arrows at 160. A fifth would need 186.
+// Four rows of two lines, 31px apart: 33, 64, 95 and 126. The last ends at 157,
+// clear of the paging arrows at 160. A fifth row would need 186.
 #define LIST_Y         33
 #define ROW_H          31
 #define VISIBLE_ROWS   4
 #define DESC_DY        15
 
-// The marker column, then the text. The marker is the big sparkle frame for an
-// unlocked row (16x14 around its axis), a small hollow square for a locked
-// one, and a question mark for a hidden one, all centred on MARK_CX.
+// The marker column, then the text. All markers are centered on MARK_CX:
+// - unlocked: the big sparkle
+// - locked: a small hollow square
+// - hidden: a question mark
 #define MARK_CX        (IN_L + 8)                       // 24
 #define TEXT_X         (IN_L + 20)                      // 36
 
-// The right end of the title line carries either a counter ("37/50") while
-// locked or a NEW tag once unlocked, never both, so they share one column.
+// The right end of the title line shows a counter ("37/50") while locked, or a
+// NEW tag after the unlock. Never both, so they share one column.
 #define TAG_COL_W      56
 
-// Exported limits for the achievement text, checked on the debug page because
-// there is no clipping on this screen (SECOND_SCREEN_CHEATSHEET.md section 9).
+// Limits for the achievement text. The debug page checks them, because nothing
+// on this screen clips (SECOND_SCREEN_CHEATSHEET.md section 9).
 #define TROPHY_TITLE_MAX_W  (IN_R - TAG_COL_W - TEXT_X)  // 212
 #define TROPHY_DESC_MAX_W   (IN_R - TEXT_X)              // 268
 
-// A counter is drawn only for goals short enough to be worth counting towards.
-// A 100,000-step goal would print a number that moves on every step, and the
-// state key below would repaint the tab for each one.
+// Show a counter only for small goals. A 100,000-step goal would change on each
+// step, and the state key would repaint the tab each time.
 #define COUNTER_MAX    999
 
-// The DEX tab's arrows, at the same size, centred under the list. 160 + 22
-// ends at 182, inside the 184 floor.
+// The DEX tab's arrows, at the same size, centered under the list. They are
+// 22px tall at y 160 and end at 182, inside the 184 floor.
 #define PAGE_Y         160
 #define PAGE_W         52
 #define PAGE_H         22
 #define PAGE_UP_X      (CTR_BOTTOM_WIDTH / 2 - 12 - PAGE_W)   // 96
 #define PAGE_DN_X      (CTR_BOTTOM_WIDTH / 2 + 12)            // 172
 
-// The NEW mask is a bitset over the first MAX_TRACKED entries, which is what the
-// host store can hold anyway (bridge.h).
+// The NEW mask is a bitset over the first MAX_TRACKED entries. That is the
+// capacity of the host store (bridge.h).
 #define MAX_TRACKED    (CTR_ACH_BYTES * 8)
 
 #define NO_ROW         0xFFFF
@@ -93,9 +95,9 @@ static const char *const sSectionNames[ACH_SECTION_COUNT] =
     [ACH_SECTION_POSTGAME] = "POST-GAME",
 };
 
-// Each category's colours (ui_shell.h has why every ramp has this shape).
-// Story keeps the shiny gold every achievement was before there were
-// categories, so a provider that has none still looks the way it did.
+// The colors of each category (ui_shell.h tells why each ramp has this shape).
+// Story keeps the shiny gold, so a provider with no categories looks the same
+// as before.
 static const struct UiRamp sCategoryRamps[ACH_CAT_COUNT] =
 {
     [ACH_CAT_STORY]   = { UI_COL_SHINY_PALE,      UI_COL_SHINY,      UI_COL_SHINY_EDGE      },
@@ -113,16 +115,16 @@ const struct UiRamp *UiAchCategoryRamp(u8 category)
 
 // ----------------------------------------------------------------- state ---
 
-// The page on screen, and where each page's list was left. UI state only, like
-// EXTRA's page; the tab moves itself to whichever page has something new.
+// The page on the screen, and the scroll position of each page. This is UI
+// state, like EXTRA's page. The tab moves to the page that has something new.
 static u8     sSection;
 static u16    sScroll[ACH_SECTION_COUNT];
 static UiHold sHoldUp, sHoldDn;
 
-// What was unseen when the tab came on screen, plus anything unlocked while it
-// stayed there, by provider index. The provider's own unseen bits are cleared
-// the moment the tab shows (markAllSeen), so the tags have to live here: they
-// last the visit, and a visit ends when the tab is left.
+// What was unseen when the tab came on the screen, and what unlocked while it
+// stayed there, by provider index. The provider clears its own unseen bits when
+// the tab shows (markAllSeen), so the tags live here. They last until the
+// player leaves the tab.
 static u8    sNewMask[CTR_ACH_BYTES];
 static bool8 sVisible;
 
@@ -139,9 +141,9 @@ static void MaskSet(u16 i)
 
 // ---- pages ------------------------------------------------------------------
 //
-// Linear scans over the provider's cheap section() and unlocked(), which read
-// only its own bits. At 67 achievements that is nothing, and it keeps the page
-// structure entirely the provider's business.
+// Linear scans over the provider's section() and unlocked(), which read only
+// the provider's bits. The cost is small, and the page structure stays the
+// provider's business.
 
 static u16 SectionCount(u8 s)
 {
@@ -167,7 +169,7 @@ static u16 SectionUnlocked(u8 s)
     return n;
 }
 
-// The provider index of row k of page s, or NO_ROW past its end.
+// The provider index of row k on page s, or NO_ROW after the end.
 static u16 SectionIndex(u8 s, u16 k)
 {
     const struct AchProvider *p = AchActive();
@@ -185,7 +187,7 @@ static u16 SectionIndex(u8 s, u16 k)
     return NO_ROW;
 }
 
-// Which row of its page provider index i is.
+// The row on its page of provider index i.
 static u16 RowInSection(u16 i)
 {
     const struct AchProvider *p = AchActive();
@@ -244,8 +246,8 @@ static int FractionWidth(s32 a, s32 b)
          + UiNumWidth(b);
 }
 
-// "a/b", right-aligned at xRight, as one block so the pair stays together as
-// the numbers change width.
+// "a/b", right-aligned at xRight, as one block, so the pair stays together when
+// the digit count changes.
 static void DrawFraction(int xRight, int y, s32 a, s32 b, u16 fg)
 {
     u8 slash[4];
@@ -260,9 +262,9 @@ static void DrawFraction(int xRight, int y, s32 a, s32 b, u16 fg)
     UiNum(x, y, a, fg, UiThemeShadow());
 }
 
-// A page button: its name and its own count, centred as one block. The active
-// one gets EXTRA's doubled inset outline and accent text (DrawButtonH in
-// tab_extra.c), because colour alone is easy to miss on the lighter frames.
+// A page button: its name and its count, centered as one block. The active
+// button gets EXTRA's double inset outline and accent text (DrawButtonH in
+// tab_extra.c), because color alone is not clear on the light frames.
 static void DrawSectionButton(u8 s)
 {
     u8 name[16];
@@ -296,10 +298,9 @@ static void DrawHeader(void)
     for (u8 s = 0; s < ACH_SECTION_COUNT; s++)
         DrawSectionButton(s);
 
-    // The shiny notice's gold, so an achievement reads as the same kind of
-    // thing on every part of this screen. Two tones for the same reason the HP
-    // bar has two: a flat fill reads as a block, a highlight reads as a bar.
-    // It measures the page on screen, like the list under it.
+    // The shiny notice's gold, so achievements look the same everywhere on this
+    // screen. Two tones, like the HP bar, so the fill looks like a bar. It
+    // measures the page on the screen, like the list.
     UiFillRect(BAR_X, BAR_Y, BAR_W, BAR_H, UI_COL_HP_BACK);
 
     fill = of ? (BAR_W * got) / of : 0;
@@ -323,10 +324,10 @@ static void DrawRow(u16 index, int y)
 
     if (v.unlocked)
     {
-        // The category's own sparkle, and its title in the body colour over the
-        // dark edge: the notice headline's idiom, legible on every frame. The
-        // description stays in the frame's text colour, so the colour marks the
-        // achievement rather than making the row harder to read.
+        // The category's own sparkle, and the title in the body color over the
+        // dark edge, as in the notice headline. This is legible on every frame.
+        // The description stays in the frame's text color, so it stays easy to
+        // read.
         UiSparkleRamp(MARK_CX, y + 7, UI_SPARKLE_SIZES - 1,
                       ramp->pale, ramp->body, ramp->edge);
         titleFg = ramp->body;
@@ -335,8 +336,7 @@ static void DrawRow(u16 index, int y)
     }
     else if (v.hidden)
     {
-        // No colour at all. It would say what kind of thing is hidden, which
-        // is the one thing a hidden row must not.
+        // No color. A color would tell what kind of achievement is hidden.
         UiAscii(text, "?", sizeof(text));
         UiText(MARK_CX - UiTextWidth(text) / 2, y, text, UI_COL_DIM, UiThemeShadow());
         titleFg = descFg = UI_COL_DIM;
@@ -344,9 +344,9 @@ static void DrawRow(u16 index, int y)
     }
     else
     {
-        // Locked: the category shows on the empty marker, and the text stays
-        // dim, so a row still reads as not yet earned first and as its colour
-        // second.
+        // Locked: the category color shows on the empty marker, and the text
+        // stays dim. The row reads first as "not earned" and then as its
+        // category.
         UiRect(MARK_CX - 4, y + 3, 9, 9, ramp->body);
         titleFg = descFg = UI_COL_DIM;
         titleShadow = UiThemeShadow();
@@ -404,10 +404,10 @@ void UiTrophyDraw(void)
 
 void UiTrophyTouch(const CtrTouchState *t)
 {
-    // Ahead of the justReleased guard, so a held arrow runs the list. A page
-    // at a time: the MAIN list is fifteen pages, which a hold crosses in about
-    // a second. An arrow that is not drawn is at the end of the list, where
-    // Scroll() clamps to no change and asks for nothing.
+    // Before the justReleased guard, so a held arrow scrolls the list, one page
+    // at a time. The MAIN list has fifteen pages, which a hold crosses in about
+    // a second. An arrow that does not show is at the end of the list, where
+    // Scroll() does nothing.
     if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         Scroll(-VISIBLE_ROWS);
@@ -440,8 +440,8 @@ void UiTrophyTouch(const CtrTouchState *t)
 // ------------------------------------------------------------------ shell --
 
 // Copy the provider's unseen bits into the NEW mask, then mark them seen.
-// Returns the first index that was unseen, or NO_ROW if none was. Providers
-// list MAIN before POST-GAME, so "first" prefers the main page.
+// Returns the first unseen index, or NO_ROW. Providers list MAIN before
+// POST-GAME, so the first index prefers the main page.
 static u16 AdoptUnseen(void)
 {
     const struct AchProvider *p = AchActive();
@@ -465,7 +465,7 @@ void UiTrophyTick(bool8 visible)
 {
     if (!visible)
     {
-        // The visit is over, and so are its NEW tags.
+        // The visit ends, and its NEW tags go.
         if (sVisible)
         {
             for (u32 b = 0; b < CTR_ACH_BYTES; b++)
@@ -481,9 +481,8 @@ void UiTrophyTick(bool8 visible)
 
         sVisible = TRUE;
 
-        // Open on what was just unlocked, on whichever page it is, rather than
-        // wherever the list was left, so VIEW on the toast lands on the thing
-        // it announced.
+        // Open on the latest unlock, on its page, not where the list was. Thus
+        // VIEW on the toast shows the achievement that it announced.
         if (first != NO_ROW)
         {
             sSection = AchActive()->section(first);
@@ -493,8 +492,8 @@ void UiTrophyTick(bool8 visible)
 
         UiMarkDirty();
     }
-    // Unlocked while the tab was already showing: tag it too, and mark it seen
-    // so the tab bar's dot does not appear for something on screen.
+    // An unlock while the tab shows: tag it, and mark it seen, so the tab bar
+    // dot does not appear for something on the screen.
     else if (AchActive()->anyUnseen())
     {
         AdoptUnseen();
@@ -502,10 +501,11 @@ void UiTrophyTick(bool8 visible)
     }
 }
 
-// The page and its scroll, and the visible rows' counters, which move with no
-// touch on this tab (a catch, a hatch, a trainer battle). Unlocks and the
-// post-game reveal are the shell's own top[8]; the NEW tags, the page and the
-// scroll position otherwise only change through code that marks dirty.
+// The page, its scroll position, and the counters of the visible rows. The
+// counters change without a touch on this tab (a catch, a hatch, a trainer
+// battle). Unlocks and the post-game reveal are the shell's top[8]. The NEW
+// tags, the page and the scroll change only through code that marks the screen
+// dirty.
 u32 UiTrophyStateKey(void)
 {
     const struct AchProvider *p = AchActive();
@@ -527,9 +527,9 @@ u32 UiTrophyStateKey(void)
     return key;
 }
 
-// Every achievement's real text, hidden or not, since what the post-game page
-// will say after the reveal has to fit as well; and each row as it stands, which
-// covers the placeholder text of the hidden ones.
+// Check the real text of every achievement, hidden or not, because the
+// post-game page must fit after the reveal. Also check each row as it is now,
+// which covers the placeholder text of hidden rows.
 u16 UiTrophyTooWide(void)
 {
     const struct AchProvider *p = AchActive();

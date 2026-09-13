@@ -1,4 +1,4 @@
-// Emerald-font text for the bottom screen. See text.h.
+// Text in the game's font for the bottom screen. See ui_text.h.
 
 #include "global.h"
 #include "fonts.h"
@@ -8,24 +8,22 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 
-// Font decoding, done here rather than through the game's DecompressGlyphTile().
+// This file decodes the font itself. Do not use the game's
+// DecompressGlyphTile().
 //
-// That function looks pure but is not: it expands 2bpp through
-// sFontHalfRowLookupTable, a static table the text engine REGENERATES at
-// runtime from whatever fg/bg/shadow palette indices it is currently printing
-// with (GenerateFontHalfRowLookupTable, src/text.c:363). Calling it from here
-// produced whatever indices the game last happened to set -- frequently 0,
-// which reads as transparent, i.e. invisible text.
+// That function expands 2bpp through sFontHalfRowLookupTable. The text engine
+// rebuilds that table from the colors that it prints with at the time
+// (GenerateFontHalfRowLookupTable, src/text.c). A call from here uses those
+// colors, often 0, which is transparent: the text is invisible.
 //
-// The underlying format is simple enough to read directly, so we do, and share
-// no mutable state with the text engine at all.
+// The format is simple to read directly, so this file does that and shares no
+// state with the text engine.
 //
-// Layout, from DecompressGlyph_Normal (src/text.c:1853), in u16 units:
+// The layout, from DecompressGlyph_Normal (src/text.c), in u16 units:
 //     0x00..0x07  top-left tile        0x08..0x0F  top-right
 //     0x10..0x17  bottom-left          0x18..0x1F  bottom-right
-// One u16 per row = 8 pixels at 2bpp, pixel 0 in the MOST significant bits.
-// (Derived from sFontHalfRowOffsets packing pixel 0 into the high nibble.)
-// Values: 0 = background, 1 = foreground, 2 = shadow, 3 aliases to background.
+// One u16 is one row of 8 pixels at 2bpp, pixel 0 in the most significant bits.
+// Values: 0 background, 1 foreground, 2 shadow, 3 the same as background.
 static u32 GlyphPixel(const u16 *glyph, int x, int y)
 {
     int idx = ((y >= 8) ? 0x10 : 0x00) + ((x >= 8) ? 0x08 : 0x00) + (y & 7);
@@ -33,17 +31,17 @@ static u32 GlyphPixel(const u16 *glyph, int x, int y)
     return (v == 3) ? 0 : v;
 }
 
-// The two Latin fonts this screen draws with: the game's normal one, which is
-// almost everything, and its small one (FONT_SMALL) for incidental text. They
-// share the glyph format and the 16x16 cell layout above (DecompressGlyph_Small
-// reads the same four tiles, src/text.c), so only the tables and the height
-// differ. Both width tables have all 512 slots, like the glyph sheets.
+// The two Latin fonts of this screen: the game's normal font for almost all
+// text, and its small font (FONT_SMALL) for minor text. Both use the glyph
+// format and 16x16 cell layout above (DecompressGlyph_Small reads the same four
+// tiles). Only the tables and the height are different. Both width tables have
+// 512 slots.
 struct UiFont
 {
     const u16 *glyphs;
     const u8  *widths;
-    u8 height;          // rows drawn per glyph
-    u8 lineH;           // a newline's advance
+    u8 height;          // rows drawn for each glyph
+    u8 lineH;           // the advance for a new line
 };
 
 static const struct UiFont sFontNormal = {
@@ -53,17 +51,15 @@ static const struct UiFont sFontSmall = {
     gFontSmallLatinGlyphs, gFontSmallLatinGlyphWidths, UI_GLYPH_SMALL_H, UI_GLYPH_SMALL_H + 1,
 };
 
-// u16, not u8: CHAR_EXTRA_SYMBOL selects glyph `operand | 0x100` out of the same
-// tables (src/text.c:1455). latin_normal.png is 256x512, so all 512 slots exist.
-// `scale` turns one source pixel into a scale x scale block. Nearest-neighbour
-// rather than a second font, because there is no larger Latin font in the ROM
-// to reach for: the game only ever needed one size on a 240px screen.
+// The id is a u16: CHAR_EXTRA_SYMBOL selects glyph `operand | 0x100` from the
+// same tables. The glyph sheets have 512 slots. `scale` turns one source pixel
+// into a scale x scale block. There is no larger Latin font in the ROM, so this
+// scales the normal font.
 //
-// The loop is nested so the destination row pointer is still hoisted once per
-// DESTINATION row and GlyphPixel is still called once per SOURCE pixel, which
-// is what keeps the scale-1 path -- every other caller in the UI -- costing
-// what it did before. Bounds are tested per destination pixel, so a string may
-// safely run off any edge.
+// The loop gets the destination row pointer once for each destination row and
+// calls GlyphPixel once for each source pixel. Thus the scale-1 path (all other
+// callers) costs the same as before. Each destination pixel has a bounds test,
+// so a string can go off any edge safely.
 static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
                       u16 fg, u16 shadow, int scale)
 {
@@ -91,7 +87,7 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
                 u16 colour;
 
                 if (v == 0)
-                    continue;                   // background: leave it alone
+                    continue;                   // background: do not change it
 
                 colour = (v == 2) ? shadow : fg;
 
@@ -109,11 +105,10 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
     }
 }
 
-// How far past `str` an EXT_CTRL_CODE_BEGIN sequence runs, matching
-// SkipExtCtrlCode() (src/string_util.c:694): the 0xFC byte, then the length the
-// game reports for the code, which already counts the code byte itself.
-// GetExtCtrlCodeLength returns 0 for a code it does not know, which would stall
-// the walk, so floor it at 1.
+// The length of an EXT_CTRL_CODE_BEGIN sequence, as in SkipExtCtrlCode()
+// (src/string_util.c). It is the 0xFC byte, then the length that the game gives
+// for the code, which includes the code byte. GetExtCtrlCodeLength returns 0
+// for an unknown code, which would stop the walk, so the minimum is 1.
 static int CtrlCodeSpan(const u8 *str)
 {
     u8 len = GetExtCtrlCodeLength(str[1]);
@@ -121,25 +116,21 @@ static int CtrlCodeSpan(const u8 *str)
     return 1 + (len ? len : 1);
 }
 
-// A two-byte sequence whose second byte is the terminator is a malformed
-// string, and stepping over it would walk past the EOS. The iteration guard
-// would eventually stop that, but only after drawing rubbish.
+// A two-byte sequence whose second byte is the terminator is a bad string. A
+// step over it would go past the EOS.
 static bool8 Truncated(const u8 *str)
 {
     return str[1] == EOS;
 }
 
-// Emerald's strings are not plain byte streams. Three control codes move the
-// pen without printing (src/text.c:1063-1085), and CHAR_EXTRA_SYMBOL escapes
-// into the upper half of the glyph table. Without these the Pokedex prints
-// "{NO}" and "??'??" as garbage, and every other game string is one control
-// code away from doing the same.
+// The game's strings are not plain bytes. Three control codes move the pen with
+// no print, and CHAR_EXTRA_SYMBOL selects the upper half of the glyph table.
+// Without them, the Pokedex prints garbage for "{NO}" and "??'??".
 //
-// TextWidth below MUST stay in step with this: centring compares the two.
+// TextWidth below must agree with this function, because centering uses both.
 //
-// Every pen movement scales with the glyphs -- the three control codes that
-// move without printing, and the newline's line height -- so a scaled string
-// lays out as the same shape, just larger.
+// Every pen movement scales with the glyphs, so a scaled string has the same
+// shape at a larger size.
 static int DrawText(const struct UiFont *font, int x, int y, const u8 *str,
                     u16 fg, u16 shadow, int scale)
 {
@@ -149,8 +140,8 @@ static int DrawText(const struct UiFont *font, int x, int y, const u8 *str,
     if (str == NULL)
         return 0;
 
-    // Bounded: these strings come from game tables, and a missing EOS would
-    // otherwise walk off the end of one and draw whatever follows it.
+    // Limited: these strings come from game tables. A missing EOS would
+    // otherwise walk past the end of the string.
     while (*str != EOS && guard-- > 0)
     {
         if (*str == EXT_CTRL_CODE_BEGIN)
@@ -168,16 +159,16 @@ static int DrawText(const struct UiFont *font, int x, int y, const u8 *str,
             case EXT_CTRL_CODE_CLEAR:    x += arg * scale;                    break;
             case EXT_CTRL_CODE_SKIP:     x  = startX + arg * scale;           break;
             case EXT_CTRL_CODE_CLEAR_TO: if (startX + arg * scale > x) x = startX + arg * scale; break;
-            default: break;   // colours, pauses, sounds: nothing to draw here
+            default: break;   // colors, pauses, sounds: nothing to draw
             }
 
             str += CtrlCodeSpan(str);
             continue;
         }
 
-        // Two bytes, and the second is the payload. The keypad icons live in
-        // their own sheet we do not load, so that one is skipped rather than
-        // drawn as a wrong glyph.
+        // Two bytes, and the second is the value. The keypad icons are in a
+        // sheet that this file does not load, so skip that one. Do not draw a
+        // wrong glyph.
         if (*str == CHAR_EXTRA_SYMBOL || *str == CHAR_KEYPAD_ICON)
         {
             if (Truncated(str))
@@ -243,8 +234,8 @@ int UiTextWidth(const u8 *str)
     return TextWidth(&sFontNormal, str);
 }
 
-// Mirrors DrawText, and mirrors GetStringWidth's handling of the three pen
-// codes (src/text.c:1425-1435): CLEAR adds, SKIP assigns, CLEAR_TO takes the
+// The same walk as DrawText, and the same handling of the three pen codes as
+// GetStringWidth (src/text.c): CLEAR adds, SKIP sets, CLEAR_TO takes the
 // maximum.
 static int TextWidth(const struct UiFont *font, const u8 *str)
 {
@@ -351,9 +342,8 @@ int UiNumRight(int xRight, int y, s32 value, u16 fg, u16 shadow)
     return UiTextRight(xRight, y, buf, fg, shadow);
 }
 
-// How wide UiNum() would draw this value, for laying out around it. Goes
-// through the same NumToStr as the drawing calls rather than counting digits,
-// so it cannot disagree with what actually lands on screen.
+// The width that UiNum() draws for this value. It uses the same NumToStr as the
+// draw calls, so it always agrees with the screen.
 int UiNumWidth(s32 value)
 {
     u8 buf[16];
@@ -364,7 +354,7 @@ int UiNumWidth(s32 value)
 u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
 {
     // Separate source and destination positions, because the e-acute below is
-    // two bytes in and one glyph out.
+    // two bytes of input and one glyph of output.
     int i = 0, o = 0;
 
     if (dstSize <= 0)
@@ -388,12 +378,12 @@ u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
         else if (c == '%')             out = CHAR_PERCENT;
         else if (c == '+')             out = CHAR_PLUS;
         else if (c == '!')             out = CHAR_EXCL_MARK;
-        // Feet and inches, for the Pokedex height readout.
+        // Feet and inches, for the Pokedex height.
         else if (c == '\'')            out = CHAR_SGL_QUOTE_RIGHT;
         else if (c == '"')             out = CHAR_DBL_QUOTE_RIGHT;
         else if (c == '\n')            out = CHAR_NEWLINE;
-        // The UTF-8 e-acute (C3 A9), so a literal can spell POKéMON the way
-        // the game does. The achievement text is the first to need it.
+        // The UTF-8 e-acute (C3 A9), so a literal can spell POKéMON as the game
+        // does.
         else if ((u8)c == 0xC3 && (u8)ascii[i + 1] == 0xA9)
         {
             out = CHAR_e_ACUTE;

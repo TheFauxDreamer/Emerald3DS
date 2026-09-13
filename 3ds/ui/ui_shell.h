@@ -1,7 +1,7 @@
 // Shared state and layout for the bottom-screen views (game side).
 //
-// bottom_screen.c owns the tab bar, the view stack and the redraw policy; each
-// tab_*.c owns its own content area and touch handling.
+// bottom_screen.c owns the tab bar, the view stack and the redraw policy. Each
+// tab_*.c owns its content area and its touch handling.
 
 #ifndef CTR_UI_SHELL_H
 #define CTR_UI_SHELL_H
@@ -9,18 +9,18 @@
 #include "global.h"
 #include "../bridge.h"
 
-// The tab bar sits along the bottom; everything above it is the content area.
-// Kept to whole 8px tiles so the window frames land on tile boundaries.
+// The tab bar is along the bottom. Everything above it is the content area.
+// Both are whole 8px tiles, so the window frames land on tile boundaries.
 #define UI_TABBAR_H   48
 #define UI_CONTENT_H  (CTR_BOTTOM_HEIGHT - UI_TABBAR_H)   // 192 = 24 tiles
 
-// Which of these are actually shown depends on what the player has unlocked;
-// bottom_screen.c mirrors BuildNormalStartMenu() (src/start_menu.c).
+// The tabs that show depend on what the player has unlocked. bottom_screen.c
+// follows BuildNormalStartMenu() (src/start_menu.c).
 //
-// Six is the cap. The bar divides 320px between the visible tabs, and six is
-// 53px each, about the floor for a fingertip (SECOND_SCREEN_CHEATSHEET.md,
-// "Adding a tab"). TROPHY sits before EXTRA so the port's settings stay at the
-// right-hand end.
+// Six tabs is the maximum. The bar divides 320px between the visible tabs, and
+// 53px is about the minimum for a finger (SECOND_SCREEN_CHEATSHEET.md, "Adding
+// a tab"). TROPHY comes before EXTRA, so the port's settings stay at the right
+// end.
 enum UiTab
 {
     UI_TAB_PARTY,
@@ -32,19 +32,17 @@ enum UiTab
     UI_TAB_COUNT
 };
 
-// Emerald's menu palette is loaded per-window; for our own chrome these are
-// fixed RGB565 approximations of it.
+// The game loads its menu palette for each window. For the port's own UI, these
+// are fixed RGB565 values near it.
 #define UI_COL_TEXT     0xFFFF   // white
-#define UI_COL_SHADOW   0x2124   // dark, for the font's shadow pixels
+#define UI_COL_SHADOW   0x2124   // dark, for the shadow pixels of the font
 #define UI_COL_DIM      0x8410
 #define UI_COL_ACCENT   0x07FF
 #define UI_COL_BG       0x18C3
-// The game's own HP bar colours, taken from graphics/battle_interface/hpbar.png
-// (palette indices 10-15). Each state has a light and a dark shade and the real
-// bar uses both, which is what gives it depth rather than looking like a flat
-// block. Hardcoded from the art rather than read from the palette at runtime,
-// because the healthbox palette is only loaded during battle and this bar is
-// shown outside battle too.
+// The game's HP bar colors, from graphics/battle_interface/hpbar.png (palette
+// indices 10-15). Each state has a light and a dark shade, and the bar uses
+// both. The values are fixed, because the healthbox palette loads only in
+// battle and this bar also shows outside battle.
 #define UI_COL_HP_HIGH    0x5EB0   // RGB( 90,213,131)
 #define UI_COL_HP_HIGH_L  0x77F5   // RGB(115,255,172)
 #define UI_COL_HP_MID     0xCD61   // RGB(205,172,  8)
@@ -52,31 +50,26 @@ enum UiTab
 #define UI_COL_HP_LOW     0xAA09   // RGB(172, 65, 74)
 #define UI_COL_HP_LOW_L   0xFAC7   // RGB(255, 90, 57)
 #define UI_COL_HP_BACK    0x1082
-// The shiny sparkle's gold, read out of
-// graphics/battle_anims/sprites/gold_stars.png -- ANIM_TAG_GOLD_STARS, the
-// sprite TryShinyAnimation (src/battle_anim_throw.c) spins around a shiny when
-// the encounter opens. Taking the notice's colours from that exact art is the
-// point: the panel is a second telling of a thing the game already said, so it
-// should be the same gold rather than a yellow chosen to look like it.
+// The gold of the shiny sparkle, from
+// graphics/battle_anims/sprites/gold_stars.png (ANIM_TAG_GOLD_STARS, which
+// TryShinyAnimation shows around a shiny). The notice tells the same news as
+// the game, so it uses the same gold.
 //
-// The art is a ramp, not one colour -- white core, cream highlight, gold body,
-// orange edge -- and the notice uses three steps of it for the same reason the
-// sprite does: a single flat yellow reads as a warning, a ramp reads as metal.
+// The art is a ramp, not one color: a white core, a cream highlight, a gold
+// body and an orange edge. The notice uses three steps of it. A flat yellow
+// looks like a warning. A ramp looks like metal.
 //
-// Hardcoded from the art for exactly the reason the HP bar colours above are.
-// The anim palette is only in VRAM while that battle animation is running, and
-// this panel is drawn whenever the bottom screen repaints.
+// The values are fixed, for the same reason as the HP bar colors. The animation
+// palette is in VRAM only while that animation runs.
 #define UI_COL_SHINY       0xFE24   // RGB(255,197, 32) gold body,  pal index 7
 #define UI_COL_SHINY_PALE  0xFEF3   // RGB(255,222,156) highlight,  pal index 5
 #define UI_COL_SHINY_EDGE  0xFB02   // RGB(255, 98, 16) orange edge, pal index 9
 
-// The achievement categories (ACH_CAT_* in 3ds/achievements.h), one ramp each
-// in the gold one's shape: a pale core, a mid-tone body and a dark edge. That
-// shape is what makes them safe on a window frame. The sparkle art takes any of
-// them (UiSparkleRamp), and a title in the body colour with the edge as its
-// shadow reads on the lightest frame (the edge outlines it) and the darkest (the
-// body carries it), the way the shiny notice's gold headline does on its own
-// dark ground. Story is that gold itself, so it has no constants of its own.
+// The achievement categories (ACH_CAT_* in 3ds/achievements.h). Each has a ramp
+// with the shape of the gold one: a pale core, a middle body and a dark edge.
+// That shape makes them safe on a window frame. The sparkle art takes any of
+// them (UiSparkleRamp). A title in the body color with the edge as its shadow
+// is legible on the lightest and the darkest frame. Story uses the gold itself.
 #define UI_COL_ACH_GREEN_PALE   0xBFF7   // RGB(190,255,190)  Legendary
 #define UI_COL_ACH_GREEN        0x468C   // RGB( 64,208, 96)
 #define UI_COL_ACH_GREEN_EDGE   0x1386   // RGB( 16,112, 48)
@@ -98,59 +91,55 @@ struct UiRamp
     u16 pale, body, edge;
 };
 
-// The ramp for an ACH_CAT_* value, and gold for anything it does not know, which
-// is what every achievement looked like before categories. Defined in
-// tab_trophy.c; the achievement toast shares it.
+// The ramp for an ACH_CAT_* value. Gold for any value that it does not know.
+// Defined in tab_trophy.c. The achievement toast uses it too.
 const struct UiRamp *UiAchCategoryRamp(u8 category);
 
-// A battle partner's Pokemon (Steven at the Space Center, the Battle Frontier's
-// multi partners), in the colour the game's own party menu gives them: the
-// PARTY_PAL_MULTI_ALT boxes, graphics/party_menu/bg.png indices 68-70
-// (sPartyBoxMultiPalIds1, src/data/party_menu.h). Hardcoded from the art for
-// the same reason the HP bar colours are. The ground is index 68, the box's own
-// fill, washed 45% over white so the theme's dark text still reads on it: every
-// one of the 20 window frames has a white interior. See ui_team.h.
+// The colors of a battle partner's Pokemon (Steven at the Space Center, the
+// Battle Frontier's multi partners). They come from the game's party menu: the
+// PARTY_PAL_MULTI_ALT boxes, graphics/party_menu/bg.png indices 68-70. The
+// values are fixed, as for the HP bar. The ground is index 68, the box fill, at
+// 45% over white. All 20 window frames have a white interior, so the dark theme
+// text is legible on it. See ui_team.h.
 #define UI_COL_ALLY        0xC523   // RGB(197,164, 24) pal index 69
 #define UI_COL_ALLY_EDGE   0x9CE4   // RGB(156,156, 32) pal index 70
 #define UI_COL_ALLY_GROUND 0xEF36   // RGB(236,229,181) index 68 over white
 
-// Poke Ball marker. Fixed rather than themed: the ball is recognisable by its
-// colours, and it carries its own dark outline on every window frame.
+// The Poke Ball marker. The colors are fixed, not themed: a ball is known by
+// its colors, and it has its own dark outline on every window frame.
 #define UI_COL_BALL_TOP    0xE104   // red
 #define UI_COL_BALL_BOTTOM 0xFFFF   // white
 
-// Any view calls this after changing something the screen depends on. The host
-// only re-uploads the 320x240 texture when the screen is dirty.
+// Each view calls this after it changes something that the screen shows. The
+// host uploads the 320x240 texture only when the screen is dirty.
 void UiMarkDirty(void);
 
-// TRUE on the frames animations are allowed to advance on: every sixth frame
-// with the rasteriser on its own core, every twelfth without one.
+// TRUE on the frames when animations can advance: every sixth frame with a
+// second core, every twelfth without.
 //
-// On the single-core path every animated thing on this screen asks this rather
-// than counting frames itself, so that two of them moving at once still cost
-// one repaint per step instead of two -- and there a repaint costs a whole
-// VBlank, so that is the difference between about 55fps and about 51. With a
-// second core a repaint costs the frame nothing, so the party's icons use this
-// at the game's own pace and the shiny notice counts frames of its own. See
-// the note above UI_ANIM_STEP_FRAMES in bottom_screen.c.
+// On the single-core path, every animation on this screen uses this and does
+// not count frames itself. Two moving things then cost one repaint for each
+// step, not two. There, each repaint costs a VBlank. With a second core, a
+// repaint costs the frame nothing. The party icons then use this at the game's
+// pace, and the shiny notice counts its own frames. See UI_ANIM_STEP_FRAMES in
+// bottom_screen.c.
 bool8 UiAnimStepped(void);
 
 // TRUE while an overlay (the shiny notice, the quick-throw strip or the
-// achievement toast) is covering the tab. A tab that defers part of its
-// drawing to the shell's animated layer must draw that part into its own
-// paint while this is TRUE: the overlay owns that layer while it is up, so
-// the deferred piece is otherwise not drawn at all -- and it cannot simply be
-// drawn there anyway, because the animated layer paints over a snapshot that
-// already contains the panel. On the second-core path the shell repaints
-// fully for every step while an overlay is up, so what the tab draws there may
-// move; on the single-core path it does not, so draw a still.
+// achievement toast) covers the tab.
+//
+// A tab that puts parts of its drawing on the shell's animated layer must draw
+// those parts into its own paint while this is TRUE. The overlay owns that
+// layer, which paints over a snapshot that contains the panel. On the
+// second-core path, the shell repaints fully for each step, so those parts can
+// move. On the single-core path, draw them still.
 bool8 UiOverlayActive(void);
 
-// The tab on screen, one of enum UiTab. For an overlay that has to know, the
-// way the achievement toast drops its VIEW button on the TROPHY tab itself.
+// The tab on the screen, one of enum UiTab. For an overlay that must know: the
+// achievement toast has no VIEW button on the TROPHY tab.
 u8 UiActiveTab(void);
 
-// The party slot the BAG tab will act on. Set by the party grid.
+// The party slot that the BAG tab acts on. The party grid sets it.
 u8   UiSelectedMon(void);
 void UiSetSelectedMon(u8 index);
 
@@ -158,101 +147,97 @@ void UiSetSelectedMon(u8 index);
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);
 
-// Advances this tab's animations by one frame: the sliding HP bars, the mon
-// icons' two-frame cycle, and a status badge alternating between two tags
-// (status_tags.h). Returns TRUE on the frames the picture actually
-// changed, which the shell turns into a repaint request -- the icons change
-// only on UiAnimStepped() frames, so an idle party grid asks for ten repaints a
-// second (five on the single-core path) rather than sixty. A badge flip lands
-// on one of those same frames. With BATTLE ANIM off in battle, the flip is the
-// only thing that still asks.
+// Advances this tab's animations by one frame: the sliding HP bars, the
+// two-frame icon cycle, and a status badge that alternates between two tags
+// (status_tags.h). Returns TRUE on the frames where the picture changed. The
+// shell then asks for a repaint. The icons change only on UiAnimStepped()
+// frames. A badge flip occurs on one of those frames. With BATTLE ANIM off in
+// battle, only the flip asks for a repaint.
 //
-// Must be called once per frame, not once per redraw, or the animation stalls
-// whenever the screen happens not to be repainting.
+// Call it once each frame, not once for each redraw. Otherwise the animation
+// stops when the screen does not repaint.
 //
-// `visible` is whether the PARTY tab is the one on screen. FALSE returns
-// immediately without asking for anything, so no other tab pays for this; the
-// bars adopt the party's real values on the frame the tab comes back rather
-// than sliding for damage taken while it was hidden.
+// `visible` tells if the PARTY tab is on the screen. FALSE returns at once, so
+// no other tab pays for this. When the tab comes back, the bars take the real
+// values and do not slide.
 bool8 UiPartyTick(bool8 visible);
 
-// TRUE when everything that moved lives on the animated layer (the mon icons'
-// frame, a sliding HP bar, a status badge changing tag), so the shell can put
-// a handful of rects back instead of rebuilding all 76,800 pixels. FALSE only
-// for an HP slide in the detail view, whose HP readout is not on that layer.
+// TRUE when everything that moved is on the animated layer (the icon frame, a
+// sliding HP bar, a badge flip). The shell then restores a few rects and does
+// not repaint all 76,800 pixels. FALSE only for an HP slide in the detail view,
+// where the HP readout is not on that layer.
 bool8 UiPartyAnimOnly(void);
 
-// Redraw the moving pieces over the restored snapshot: on the grid, every
-// slot's icon, HP bar, HP number and status badge, moving or not, since a full
-// paint leaves all of them out of the snapshot; in the detail view, its one
-// icon and its badge. Only valid immediately after UiPartyAnimOnly() returned
-// TRUE, or as the last step of a full paint.
+// Draw the moving parts again over the restored snapshot. On the grid, these
+// are the icon, HP bar, HP number and status badge of every slot. A full paint
+// leaves all of them out of the snapshot. In the detail view, they are its icon
+// and its badge. Valid only just after UiPartyAnimOnly() returned TRUE, or as
+// the last step of a full paint.
 void UiPartyRedrawAnimated(void);
 
-// Cheap identity of what the PARTY tab is showing: the live level cap behind
-// the cheat tags, plus the selected mon's EV total while the IV/EV panel is up.
-// Walks save data (badge flags), so the shell only asks while the tab is on
-// screen and there is a save block to read.
+// A key for what the PARTY tab shows. It holds the live level cap of the cheat
+// tags, and the selected mon's EV total while the IV/EV panel is up. It reads
+// save data (badge flags), so the shell asks only while the tab shows and a
+// save exists.
 u32 UiPartyStateKey(void);
 
 void UiBagDraw(void);
 void UiBagTouch(const CtrTouchState *t);
 
-// TRUE while the target picker is up: the one BAG view that shows party HP and
-// status, so the shell folds the party into its repaint hash for it. The flag
-// survives a tab switch (the modal-flag bug in the cheatsheet), so ask only
-// while BAG is the tab on screen.
+// TRUE while the target picker is up. It is the one BAG view that shows party
+// HP and status, so the shell folds the party into its hash for it. The flag
+// stays after a tab switch (the modal-flag bug in the cheatsheet), so ask only
+// while BAG is on the screen.
 bool8 UiBagPickerOpen(void);
 
 void UiMapDraw(void);
 void UiMapTouch(const CtrTouchState *t);
 
-// Cheap identity of where the player is on the region map, for the shell's
-// repaint hash. Nothing else in that hash tracks the player's location, so
-// without this the map would go stale while they walk.
+// A key for the player's position on the region map, for the shell's repaint
+// hash. Nothing else in the hash tracks the position, so without this the map
+// goes stale while the player walks.
 u32 UiMapStateKey(void);
 
 void UiDexDraw(void);
 void UiDexTouch(const CtrTouchState *t);
 
-// Port features that are not part of the original game. Two pages: page 1 is
-// host-side only and touches no game state, page 2 is the gameplay tweaks and
-// deliberately does.
+// Port features that are not part of the original game. Page 1 is host side
+// only and changes no game state. Page 2 has the gameplay tweaks, which do.
 void UiExtraDraw(void);
 void UiExtraTouch(const CtrTouchState *t);
 
-// Cheap identity of the tweak toggles and the live level-cap readout, for the
-// shell's repaint hash. The cap moves when a badge is earned, which happens
-// nowhere near this tab.
+// A key for the tweak toggles and the live level-cap value, for the shell's
+// repaint hash. The cap changes when the player gets a badge, away from this
+// tab.
 u32 UiExtraStateKey(void);
 
-// The tweak state on its own, without EXTRA's page number. The PARTY tab shows
-// the same settings as cheat tags, so it needs the same key. Defined in
-// tab_extra.c, next to the controls that set them.
+// The tweak state without EXTRA's page number. The PARTY tab shows the same
+// settings as cheat tags, so it needs the same key. Defined in tab_extra.c,
+// next to the controls.
 u32 UiTweakStateKey(void);
 
-// Cheap identity of the dex counts, for the shell's repaint hash. Walks the
-// whole dex, so the shell only asks while the DEX tab is on screen.
+// A key for the dex counts, for the shell's repaint hash. It walks the full
+// dex, so the shell asks only while the DEX tab shows.
 u32 UiDexStateKey(void);
 
-// The achievements list (tab_trophy.c). It reads everything through
-// AchActive() in 3ds/achievements.h, so it works the same for any provider.
+// The achievements list (tab_trophy.c). It reads everything through AchActive()
+// in 3ds/achievements.h, so it works the same for any provider.
 void UiTrophyDraw(void);
 void UiTrophyTouch(const CtrTouchState *t);
 
-// Per frame, on UiPartyTick's terms: `visible` is whether TROPHY is the tab on
-// screen. On the frame it comes on screen this copies what is unseen into the
-// tab's own NEW tags and marks it all seen; on the frame it goes, the tags go.
-// Must run every frame, before the state hash, or a tab switch would paint the
-// list before it knew which rows are new.
+// Call each frame, like UiPartyTick. `visible` tells if TROPHY is on the
+// screen. When the tab comes on the screen, this copies the unseen rows into
+// the tab's NEW tags and marks them seen. When the tab goes, the tags go. It
+// must run before the state hash, or a tab switch paints the list before it
+// knows the new rows.
 void UiTrophyTick(bool8 visible);
 
-// Cheap identity of the visible rows' counters, for the shell's repaint hash.
-// They move with no touch on this tab: a catch, a hatch, a trainer battle.
+// A key for the counters of the visible rows, for the shell's repaint hash.
+// They change without a touch on this tab: a catch, a hatch, a trainer battle.
 u32 UiTrophyStateKey(void);
 
-// How many achievements have a title or a description too wide for the list,
-// for the debug page's check. Nothing on this screen clips text.
+// The number of achievements with a title or a description that is too wide for
+// the list, for the debug page. Nothing on this screen clips text.
 u16 UiTrophyTooWide(void);
 
 #endif // CTR_UI_SHELL_H

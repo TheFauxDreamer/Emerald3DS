@@ -1,12 +1,12 @@
-// Readouts about the mon on the other side of a battle (game side).
+// Information about the mon on the other side of a battle (game side).
 //
-// Two of them: the type matchup the party grid draws its arrows from, and
-// whether what you are facing is a shiny you could actually catch. Both are
-// only meaningful while a battle is running, both are pure reads, and both
-// answer for the OPPOSING side, which is why they share a file.
+// It gives two answers: the type matchup for the party grid's arrows, and
+// whether the opponent is a shiny that the player can catch. Both apply only in
+// battle. Both only read. Both are about the opposing side, so they share a
+// file.
 //
-// Multipliers are returned on the game's own x10 scale (TYPE_MUL_NORMAL is 10),
-// so 20 is super effective, 5 is resisted and 0 is immune.
+// Multipliers use the game's x10 scale (TYPE_MUL_NORMAL is 10): 20 is super
+// effective, 5 is resisted and 0 is immune.
 
 #ifndef CTR_UI_MATCHUP_H
 #define CTR_UI_MATCHUP_H
@@ -14,46 +14,43 @@
 #include "global.h"
 #include "pokemon.h"
 
-// No damaging move to judge by, so nothing to show.
+// No damaging move, so nothing to show.
 #define UI_MATCHUP_NA 0xFFFF
 
-// TRUE when there is a battle with a live opponent to compare against.
+// TRUE when a battle has a live opponent.
 bool8 UiMatchupActive(void);
 
-// Best multiplier among the mon's DAMAGING moves against the current opponent.
-// UI_MATCHUP_NA if it knows none.
+// The best multiplier of the mon's damaging moves against the opponent, or
+// UI_MATCHUP_NA if it has none.
 u16 UiMatchupOffence(struct Pokemon *mon);
 
-// Worst multiplier the opponent's own types achieve against this mon, i.e. how
-// dangerous it is to send this one in.
+// The worst multiplier of the opponent's types against this mon: the risk of a
+// switch to it.
 u16 UiMatchupRisk(struct Pokemon *mon);
 
-// Cheap identity of the current opponent, for the shell's repaint hash: the
-// badges must refresh when the other side switches.
+// A key for the current opponent, for the shell's repaint hash. The badges must
+// update when the opponent switches.
 u32 UiMatchupOpponentKey(void);
 
-// TRUE when there is a mon on the other side that the player could actually
-// throw a ball at: a live wild encounter that is theirs to catch, still
-// undecided.
+// TRUE when the player can throw a ball at the opponent: a live wild encounter
+// that the player can catch, with no result yet.
 //
-// Goes FALSE the moment the encounter is decided -- caught, knocked out, fled
-// from or run from -- so anything drawn from it clears itself without needing
-// to be told the battle ended.
+// It becomes FALSE when the encounter ends (caught, knocked out, fled or ran),
+// so anything that uses it clears itself.
 //
-// Does NOT ask whether a ball can be thrown RIGHT NOW; that is a question about
-// the player's controller, and Ctr3dsPlayerIsChoosingAction() answers it.
+// It does not tell if a ball can be thrown now. Ctr3dsPlayerIsChoosingAction()
+// tells that.
 bool8 UiCatchableOpponent(void);
 
-// TRUE when the mon on the other side is shiny AND the player could actually
-// throw a ball at it, which is the only case worth interrupting them for.
+// TRUE when the opponent is shiny and the player can throw a ball at it. Only
+// this case interrupts the player.
 //
-// Goes FALSE the moment the encounter is decided -- caught, knocked out, fled
-// from or run from -- so anything drawn from it clears itself without needing
-// to be told the battle ended.
+// It becomes FALSE when the encounter ends (caught, knocked out, fled or ran),
+// so anything that uses it clears itself.
 //
-// `species` receives what it is and `identity` a value that changes with the
-// encounter, so a dismissed notice cannot carry over to the next one. Either
-// may be NULL; neither is written unless the answer is TRUE.
+// `species` gets the species. `identity` gets a value that changes with the
+// encounter, so a dismissal does not apply to the next encounter. Either can be
+// NULL. They are written only when the result is TRUE.
 bool8 UiShinyOpponent(u16 *species, u32 *identity);
 
 #endif // CTR_UI_MATCHUP_H
