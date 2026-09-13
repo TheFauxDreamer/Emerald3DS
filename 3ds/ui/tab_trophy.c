@@ -93,6 +93,24 @@ static const char *const sSectionNames[ACH_SECTION_COUNT] =
     [ACH_SECTION_POSTGAME] = "POST-GAME",
 };
 
+// Each category's colours (ui_shell.h has why every ramp has this shape).
+// Story keeps the shiny gold every achievement was before there were
+// categories, so a provider that has none still looks the way it did.
+static const struct UiRamp sCategoryRamps[ACH_CAT_COUNT] =
+{
+    [ACH_CAT_STORY]   = { UI_COL_SHINY_PALE,      UI_COL_SHINY,      UI_COL_SHINY_EDGE      },
+    [ACH_CAT_LEGEND]  = { UI_COL_ACH_GREEN_PALE,  UI_COL_ACH_GREEN,  UI_COL_ACH_GREEN_EDGE  },
+    [ACH_CAT_POKEMON] = { UI_COL_ACH_RED_PALE,    UI_COL_ACH_RED,    UI_COL_ACH_RED_EDGE    },
+    [ACH_CAT_BATTLE]  = { UI_COL_ACH_PURPLE_PALE, UI_COL_ACH_PURPLE, UI_COL_ACH_PURPLE_EDGE },
+    [ACH_CAT_EXTRA]   = { UI_COL_ACH_BLUE_PALE,   UI_COL_ACH_BLUE,   UI_COL_ACH_BLUE_EDGE   },
+    [ACH_CAT_CONTEST] = { UI_COL_ACH_PINK_PALE,   UI_COL_ACH_PINK,   UI_COL_ACH_PINK_EDGE   },
+};
+
+const struct UiRamp *UiAchCategoryRamp(u8 category)
+{
+    return &sCategoryRamps[category < ACH_CAT_COUNT ? category : ACH_CAT_STORY];
+}
+
 // ----------------------------------------------------------------- state ---
 
 // The page on screen, and where each page's list was left. UI state only, like
@@ -295,31 +313,48 @@ static void DrawHeader(void)
 static void DrawRow(u16 index, int y)
 {
     const struct AchProvider *p = AchActive();
+    const struct UiRamp *ramp;
     struct AchView v;
     u8 text[64];
-    u16 fg;
+    u16 titleFg, titleShadow, descFg;
 
     p->get(index, &v);
-
-    fg = v.unlocked ? UiThemeText() : UI_COL_DIM;
+    ramp = UiAchCategoryRamp(v.category);
 
     if (v.unlocked)
     {
-        UiSparkle(MARK_CX, y + 7, UI_SPARKLE_SIZES - 1);
+        // The category's own sparkle, and its title in the body colour over the
+        // dark edge: the notice headline's idiom, legible on every frame. The
+        // description stays in the frame's text colour, so the colour marks the
+        // achievement rather than making the row harder to read.
+        UiSparkleRamp(MARK_CX, y + 7, UI_SPARKLE_SIZES - 1,
+                      ramp->pale, ramp->body, ramp->edge);
+        titleFg = ramp->body;
+        titleShadow = ramp->edge;
+        descFg = UiThemeText();
     }
     else if (v.hidden)
     {
+        // No colour at all. It would say what kind of thing is hidden, which
+        // is the one thing a hidden row must not.
         UiAscii(text, "?", sizeof(text));
         UiText(MARK_CX - UiTextWidth(text) / 2, y, text, UI_COL_DIM, UiThemeShadow());
+        titleFg = descFg = UI_COL_DIM;
+        titleShadow = UiThemeShadow();
     }
     else
     {
-        UiRect(MARK_CX - 4, y + 3, 9, 9, UI_COL_DIM);
+        // Locked: the category shows on the empty marker, and the text stays
+        // dim, so a row still reads as not yet earned first and as its colour
+        // second.
+        UiRect(MARK_CX - 4, y + 3, 9, 9, ramp->body);
+        titleFg = descFg = UI_COL_DIM;
+        titleShadow = UiThemeShadow();
     }
 
-    UiText(TEXT_X, y, UiAscii(text, v.title, sizeof(text)), fg, UiThemeShadow());
+    UiText(TEXT_X, y, UiAscii(text, v.title, sizeof(text)), titleFg, titleShadow);
     UiText(TEXT_X, y + DESC_DY, UiAscii(text, v.desc, sizeof(text)),
-           fg, UiThemeShadow());
+           descFg, UiThemeShadow());
 
     if (MaskGet(index))
         UiTextRight(IN_R, y, UiAscii(text, "NEW", sizeof(text)),

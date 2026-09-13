@@ -783,7 +783,7 @@ void UiChevron(int x, int y)
 // runtime LZ decompress would want a cache and a size check to live in.
 //
 // The values are the SOURCE's palette roles, not ours: 6 is its pale gold, 7
-// the gold body, 8 the orange edge. sSparklePal maps them onto the three
+// the gold body, 8 the orange edge. UiSparkle maps them onto the three
 // UI_COL_SHINY* constants, which are indices 5, 7 and 9 of that same palette --
 // 7 is exact, 5 is within a shade of 6, and 9 is a deeper orange than 8. So a
 // sparkle is the ramp the notice already prints its headline in, one step wider.
@@ -829,17 +829,20 @@ static const u8 sSparkleSml[SPARKLE_SML_H][SPARKLE_SML_W] =
     {0,6,0},
 };
 
-// Indexed by the source's palette role, so roles 0-5 are unused and the table
-// reads as the ramp rather than as three arbitrary slots.
-static const u16 sSparklePal[9] =
-{
-    0, 0, 0, 0, 0, 0,
-    UI_COL_SHINY_PALE,   // 6, the pale core
-    UI_COL_SHINY,        // 7, the gold body
-    UI_COL_SHINY_EDGE,   // 8, the orange edge
-};
+// The source's palette roles, 6 to 8, are the ramp's three steps. The gold
+// sparkle passes UI_COL_SHINY_PALE, UI_COL_SHINY and UI_COL_SHINY_EDGE for them;
+// UiSparkleRamp takes any other ramp of the same shape, which is how the
+// achievement categories each get their own colour of the one piece of art.
+#define SPARKLE_ROLE_PALE 6
+#define SPARKLE_ROLE_BODY 7
+#define SPARKLE_ROLE_EDGE 8
 
 void UiSparkle(int cx, int cy, u8 size)
+{
+    UiSparkleRamp(cx, cy, size, UI_COL_SHINY_PALE, UI_COL_SHINY, UI_COL_SHINY_EDGE);
+}
+
+void UiSparkleRamp(int cx, int cy, u8 size, u16 pale, u16 body, u16 edge)
 {
     // ax/ay are the star's own bright horizontal axis inside each frame, which
     // is what (cx, cy) names. Centring on the bounding box instead would drift
@@ -874,8 +877,12 @@ void UiSparkle(int cx, int cy, u8 size)
         {
             u8 role = ink[row * w + col];
 
-            if (role != 0)
-                UiPixel(x + col, y + row, sSparklePal[role]);
+            if (role == SPARKLE_ROLE_PALE)
+                UiPixel(x + col, y + row, pale);
+            else if (role == SPARKLE_ROLE_BODY)
+                UiPixel(x + col, y + row, body);
+            else if (role == SPARKLE_ROLE_EDGE)
+                UiPixel(x + col, y + row, edge);
         }
     }
 }
