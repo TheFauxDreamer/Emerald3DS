@@ -21,6 +21,15 @@
 
 struct Pokemon;
 
+// The TROPHY tab's two pages. A provider with no such distinction puts
+// everything in MAIN.
+enum
+{
+    ACH_SECTION_MAIN,
+    ACH_SECTION_POSTGAME,
+    ACH_SECTION_COUNT
+};
+
 // One achievement as the UI shows it.
 //
 // The strings are ASCII for UiAscii(), with one exception it understands: the
@@ -33,11 +42,22 @@ struct AchView
     u32   goal;       // above 1: a counter the UI may draw while locked
     bool8 unlocked;
     bool8 unseen;     // unlocked and not yet shown on the TROPHY tab
+    // Not to be shown yet. The provider has already swapped in placeholder text
+    // and dropped the counter; the flag is for drawing the row differently.
+    bool8 hidden;
 };
 
 struct AchProvider
 {
     u16   (*count)(void);
+
+    // Cheap questions about one achievement, answered from the provider's own
+    // bits without reading a single condition. The TROPHY tab counts and
+    // filters with these on every paint; get() below is for the rows it draws.
+    u8    (*section)(u16 index);   // ACH_SECTION_*
+    bool8 (*unlocked)(u16 index);
+    bool8 (*unseen)(u16 index);
+
     void  (*get)(u16 index, struct AchView *out);
     u16   (*unlockedCount)(void);
     bool8 (*anyUnseen)(void);
@@ -47,10 +67,11 @@ struct AchProvider
     void  (*markAllSeen)(void);
     // The next notification, or FALSE when there is none. `batch` is 1 for a
     // single unlock, `index`; above 1 it is a count of unlocks announced
-    // together ("N unlocked from your save"), and `index` is the first of them.
+    // together ("N achievements unlocked"), and `index` is the first of them.
     bool8 (*popToast)(u16 *index, u16 *batch);
-    // Cheap identity of what the shell needs to repaint for: the unlocked count
-    // and whether anything is unseen (the tab bar's dot).
+    // Cheap identity of what the shell needs to repaint for: the unlocked count,
+    // whether anything is unseen (the tab bar's dot), and whether hidden
+    // achievements have been revealed.
     u32   (*stateKey)(void);
 };
 
@@ -73,5 +94,12 @@ void AchDebugTestToast(void);
 // Forget this playthrough's unlocks and derive them again from the save, which
 // is the backfill path a first load takes. The shiny, being an event, is lost.
 void AchDebugResync(void);
+// How many definitions have an id that is repeated or will not fit the store.
+// C cannot check that at compile time, so the debug page reports it.
+u16  AchDebugBadIds(void);
+// An achievement's real title and description even while it is hidden, for
+// the debug page's width check, which has to measure what will be shown after
+// the reveal as well as what is shown now.
+void AchDebugRealText(u16 index, const char **title, const char **desc);
 
 #endif // CTR_ACHIEVEMENTS_H

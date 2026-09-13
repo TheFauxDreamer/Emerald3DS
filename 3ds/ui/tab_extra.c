@@ -545,10 +545,11 @@ static void DebugRowSet(u32 row, int on)
 // other tap on the page disarms it. It is not free -- the shiny catch is an
 // event, and no save can re-derive it.
 //
-// The note is the text-width check. Nothing on this screen clips, so an
-// achievement whose title or description is too wide for the TROPHY list
-// would run into its neighbour; this counts them instead of leaving it to
-// someone paging through the list.
+// The note is two checks, the worse one first. A repeated or out-of-range id
+// is the serious one: ids are each achievement's bit in achievements.bin, so a
+// duplicate would make two achievements share one unlock. Then the text width:
+// nothing on this screen clips, so an achievement whose title or description is
+// too wide for the TROPHY list would run into its neighbour.
 #define DBG_ACH_ROW   DBG_ROW_COUNT
 
 static bool8 sAchResyncArmed;
@@ -556,6 +557,7 @@ static bool8 sAchResyncArmed;
 static void DrawAchRow(void)
 {
     int y = DBG_Y(DBG_ACH_ROW);
+    u16 badIds = AchDebugBadIds();
     u16 tooWide = UiTrophyTooWide();
     u8 label[40];
 
@@ -568,7 +570,7 @@ static void DrawAchRow(void)
                 UiAscii(label, sAchResyncArmed ? "SURE?" : "RESYNC", sizeof(label)),
                 sAchResyncArmed);
 
-    if (tooWide == 0)
+    if (badIds == 0 && tooWide == 0)
     {
         UiText(DBG_NOTE_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
                UiAscii(label, "all text fits", sizeof(label)),
@@ -578,10 +580,10 @@ static void DrawAchRow(void)
     {
         int x = DBG_NOTE_X;
 
-        x += UiNum(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2, tooWide,
+        x += UiNum(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2, badIds ? badIds : tooWide,
                    UI_COL_ACCENT, UiThemeShadow());
         UiText(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
-               UiAscii(label, " too wide", sizeof(label)),
+               UiAscii(label, badIds ? " bad ids" : " too wide", sizeof(label)),
                UI_COL_ACCENT, UiThemeShadow());
     }
 }

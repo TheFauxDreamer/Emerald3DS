@@ -7,8 +7,11 @@
 // else, so it does not know or care which provider is behind it. Nothing here
 // writes game state; the one thing it changes is the provider's "seen" bits.
 //
-// One window over the whole content area: a header with the count and a gold
-// progress bar, four two-line rows, and the DEX tab's paging arrows underneath.
+// One window over the whole content area: two page buttons, MAIN and
+// POST-GAME, each with its own count, a gold progress bar for the page on
+// screen, four two-line rows, and the DEX tab's paging arrows underneath. The
+// provider says which page each achievement belongs on, and which are hidden;
+// before the Hall of Fame that is the whole post-game page.
 
 #include "global.h"
 
@@ -28,9 +31,16 @@
 #define IN_L           16
 #define IN_R           (CTR_BOTTOM_WIDTH - 16)          // 304
 
-// The header line, then a 4px bar under it: 8..23 for the text, 26..30 for the
-// bar, which leaves the first row a clear 3px.
-#define HEAD_Y         8
+// The two page buttons on the top line, 140px each with 8 between, spanning
+// exactly IN_L..IN_R. 17px tall at y 8 is the EXTRA tab's pager height, and
+// ends at 24, clear of the bar below.
+#define SEC_Y          8
+#define SEC_H          17
+#define SEC_W          140
+#define SEC_GAP        8
+#define SEC_X(s)       (IN_L + (s) * (SEC_W + SEC_GAP))  // 16, 164
+
+// A 4px bar under the buttons, 26..30, which leaves the first row a clear 3px.
 #define BAR_X          IN_L
 #define BAR_Y          26
 #define BAR_W          (IN_R - IN_L)                    // 288
@@ -44,8 +54,8 @@
 #define DESC_DY        15
 
 // The marker column, then the text. The marker is the big sparkle frame for an
-// unlocked row (16x14 around its axis) and a small hollow square for a locked
-// one, both centred on MARK_CX.
+// unlocked row (16x14 around its axis), a small hollow square for a locked
+// one, and a question mark for a hidden one, all centred on MARK_CX.
 #define MARK_CX        (IN_L + 8)                       // 24
 #define TEXT_X         (IN_L + 20)                      // 36
 
@@ -75,15 +85,26 @@
 // host store can hold anyway (bridge.h).
 #define MAX_TRACKED    (CTR_ACH_BYTES * 8)
 
+#define NO_ROW         0xFFFF
+
+static const char *const sSectionNames[ACH_SECTION_COUNT] =
+{
+    [ACH_SECTION_MAIN]     = "MAIN",
+    [ACH_SECTION_POSTGAME] = "POST-GAME",
+};
+
 // ----------------------------------------------------------------- state ---
 
-static u16   sScroll;              // first visible row
+// The page on screen, and where each page's list was left. UI state only, like
+// EXTRA's page; the tab moves itself to whichever page has something new.
+static u8     sSection;
+static u16    sScroll[ACH_SECTION_COUNT];
 static UiHold sHoldUp, sHoldDn;
 
 // What was unseen when the tab came on screen, plus anything unlocked while it
-// stayed there. The provider's own unseen bits are cleared the moment the tab
-// shows (markAllSeen), so the tags have to live here: they last the visit,
-// and a visit ends when the tab is left.
+// stayed there, by provider index. The provider's own unseen bits are cleared
+// the moment the tab shows (markAllSeen), so the tags have to live here: they
+// last the visit, and a visit ends when the tab is left.
 static u8    sNewMask[CTR_ACH_BYTES];
 static bool8 sVisible;
 
@@ -98,40 +119,112 @@ static void MaskSet(u16 i)
         sNewMask[i / 8] |= (u8)(1 << (i % 8));
 }
 
-static u16 MaxScroll(u16 count)
+// ---- pages ------------------------------------------------------------------
+//
+// Linear scans over the provider's cheap section() and unlocked(), which read
+// only its own bits. At 67 achievements that is nothing, and it keeps the page
+// structure entirely the provider's business.
+
+static u16 SectionCount(u8 s)
 {
-    return count > VISIBLE_ROWS ? (u16)(count - VISIBLE_ROWS) : 0;
+    const struct AchProvider *p = AchActive();
+    u16 count = p->count(), n = 0;
+
+    for (u16 i = 0; i < count; i++)
+        if (p->section(i) == s)
+            n++;
+
+    return n;
 }
 
-static void ClampScroll(u16 count)
+static u16 SectionUnlocked(u8 s)
 {
-    if (sScroll > MaxScroll(count))
-        sScroll = MaxScroll(count);
+    const struct AchProvider *p = AchActive();
+    u16 count = p->count(), n = 0;
+
+    for (u16 i = 0; i < count; i++)
+        if (p->section(i) == s && p->unlocked(i))
+            n++;
+
+    return n;
+}
+
+// The provider index of row k of page s, or NO_ROW past its end.
+static u16 SectionIndex(u8 s, u16 k)
+{
+    const struct AchProvider *p = AchActive();
+    u16 count = p->count();
+
+    for (u16 i = 0; i < count; i++)
+    {
+        if (p->section(i) != s)
+            continue;
+        if (k == 0)
+            return i;
+        k--;
+    }
+
+    return NO_ROW;
+}
+
+// Which row of its page provider index i is.
+static u16 RowInSection(u16 i)
+{
+    const struct AchProvider *p = AchActive();
+    u8 s = p->section(i);
+    u16 k = 0;
+
+    for (u16 j = 0; j < i; j++)
+        if (p->section(j) == s)
+            k++;
+
+    return k;
+}
+
+static u16 MaxScroll(u16 rows)
+{
+    return rows > VISIBLE_ROWS ? (u16)(rows - VISIBLE_ROWS) : 0;
+}
+
+static void ClampScroll(void)
+{
+    u16 max = MaxScroll(SectionCount(sSection));
+
+    if (sScroll[sSection] > max)
+        sScroll[sSection] = max;
 }
 
 static void Scroll(int delta)
 {
-    u16 count = AchActive()->count();
-    int next = (int)sScroll + delta;
+    int max = (int)MaxScroll(SectionCount(sSection));
+    int next = (int)sScroll[sSection] + delta;
 
     if (next < 0)
         next = 0;
-    if (next > (int)MaxScroll(count))
-        next = (int)MaxScroll(count);
+    if (next > max)
+        next = max;
 
-    if ((u16)next == sScroll)
+    if ((u16)next == sScroll[sSection])
         return;
 
-    sScroll = (u16)next;
+    sScroll[sSection] = (u16)next;
     UiMarkDirty();
 }
 
 static bool8 CounterShown(const struct AchView *v)
 {
-    return !v->unlocked && v->goal > 1 && v->goal <= COUNTER_MAX;
+    return !v->unlocked && !v->hidden && v->goal > 1 && v->goal <= COUNTER_MAX;
 }
 
 // ---------------------------------------------------------------- drawing --
+
+static int FractionWidth(s32 a, s32 b)
+{
+    u8 slash[4];
+
+    return UiNumWidth(a) + UiTextWidth(UiAscii(slash, "/", sizeof(slash)))
+         + UiNumWidth(b);
+}
 
 // "a/b", right-aligned at xRight, as one block so the pair stays together as
 // the numbers change width.
@@ -149,21 +242,49 @@ static void DrawFraction(int xRight, int y, s32 a, s32 b, u16 fg)
     UiNum(x, y, a, fg, UiThemeShadow());
 }
 
-static void DrawHeader(u16 unlocked, u16 count)
+// A page button: its name and its own count, centred as one block. The active
+// one gets EXTRA's doubled inset outline and accent text (DrawButtonH in
+// tab_extra.c), because colour alone is easy to miss on the lighter frames.
+static void DrawSectionButton(u8 s)
 {
-    u8 label[24];
+    u8 name[16];
+    int x = SEC_X(s), y = SEC_Y;
+    bool8 active = (s == sSection);
+    u16 fg = active ? UI_COL_ACCENT : UiThemeText();
+    s32 got = SectionUnlocked(s), of = SectionCount(s);
+    int nameW, total, tx;
+
+    UiRect(x, y, SEC_W, SEC_H, UI_COL_DIM);
+    if (active)
+    {
+        UiRect(x + 2, y + 2, SEC_W - 4, SEC_H - 4, UI_COL_ACCENT);
+        UiRect(x + 3, y + 3, SEC_W - 6, SEC_H - 6, UI_COL_ACCENT);
+    }
+
+    UiAscii(name, sSectionNames[s], sizeof(name));
+    nameW = UiTextWidth(name);
+    total = nameW + 6 + FractionWidth(got, of);
+    tx = x + (SEC_W - total) / 2;
+
+    UiText(tx, y + (SEC_H - UI_GLYPH_H) / 2, name, fg, UiThemeShadow());
+    DrawFraction(tx + total, y + (SEC_H - UI_GLYPH_H) / 2, got, of, fg);
+}
+
+static void DrawHeader(void)
+{
+    u16 got = SectionUnlocked(sSection), of = SectionCount(sSection);
     int fill;
 
-    UiText(IN_L, HEAD_Y, UiAscii(label, "ACHIEVEMENTS", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
-    DrawFraction(IN_R, HEAD_Y, unlocked, count, UiThemeText());
+    for (u8 s = 0; s < ACH_SECTION_COUNT; s++)
+        DrawSectionButton(s);
 
     // The shiny notice's gold, so an achievement reads as the same kind of
     // thing on every part of this screen. Two tones for the same reason the HP
     // bar has two: a flat fill reads as a block, a highlight reads as a bar.
+    // It measures the page on screen, like the list under it.
     UiFillRect(BAR_X, BAR_Y, BAR_W, BAR_H, UI_COL_HP_BACK);
 
-    fill = count ? (BAR_W * unlocked) / count : 0;
+    fill = of ? (BAR_W * got) / of : 0;
     if (fill > 0)
     {
         UiFillRect(BAR_X, BAR_Y, fill, BAR_H, UI_COL_SHINY);
@@ -183,9 +304,18 @@ static void DrawRow(u16 index, int y)
     fg = v.unlocked ? UiThemeText() : UI_COL_DIM;
 
     if (v.unlocked)
+    {
         UiSparkle(MARK_CX, y + 7, UI_SPARKLE_SIZES - 1);
+    }
+    else if (v.hidden)
+    {
+        UiAscii(text, "?", sizeof(text));
+        UiText(MARK_CX - UiTextWidth(text) / 2, y, text, UI_COL_DIM, UiThemeShadow());
+    }
     else
+    {
         UiRect(MARK_CX - 4, y + 3, 9, 9, UI_COL_DIM);
+    }
 
     UiText(TEXT_X, y, UiAscii(text, v.title, sizeof(text)), fg, UiThemeShadow());
     UiText(TEXT_X, y + DESC_DY, UiAscii(text, v.desc, sizeof(text)),
@@ -198,16 +328,16 @@ static void DrawRow(u16 index, int y)
         DrawFraction(IN_R, y, (s32)v.progress, (s32)v.goal, UI_COL_DIM);
 }
 
-static void DrawPager(u16 count)
+static void DrawPager(void)
 {
-    if (sScroll > 0)
+    if (sScroll[sSection] > 0)
     {
         UiRect(PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
         UiArrow(PAGE_UP_X + (PAGE_W - UI_ARROW_W) / 2,
                 PAGE_Y + (PAGE_H - UI_ARROW_H) / 2, TRUE, UI_COL_ACCENT);
     }
 
-    if (sScroll < MaxScroll(count))
+    if (sScroll[sSection] < MaxScroll(SectionCount(sSection)))
     {
         UiRect(PAGE_DN_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
         UiArrow(PAGE_DN_X + (PAGE_W - UI_ARROW_W) / 2,
@@ -217,28 +347,32 @@ static void DrawPager(u16 count)
 
 void UiTrophyDraw(void)
 {
-    const struct AchProvider *p = AchActive();
-    u16 count = p->count();
-
-    ClampScroll(count);
+    ClampScroll();
 
     UiWindowFrame(0, 0, TROPHY_TW, TROPHY_TH);
-    DrawHeader(p->unlockedCount(), count);
+    DrawHeader();
 
-    for (u16 r = 0; r < VISIBLE_ROWS && sScroll + r < count; r++)
-        DrawRow(sScroll + r, LIST_Y + (int)r * ROW_H);
+    for (u16 r = 0; r < VISIBLE_ROWS; r++)
+    {
+        u16 index = SectionIndex(sSection, sScroll[sSection] + r);
 
-    DrawPager(count);
+        if (index == NO_ROW)
+            break;
+
+        DrawRow(index, LIST_Y + (int)r * ROW_H);
+    }
+
+    DrawPager();
 }
 
 // ------------------------------------------------------------------ touch --
 
 void UiTrophyTouch(const CtrTouchState *t)
 {
-    // Ahead of any justReleased guard, so a held arrow runs the list. A page
-    // at a time: 48 rows is twelve pages, which a hold crosses in a second.
-    // An arrow that is not drawn is at the end of the list, where Scroll()
-    // clamps to no change and asks for nothing.
+    // Ahead of the justReleased guard, so a held arrow runs the list. A page
+    // at a time: the MAIN list is fifteen pages, which a hold crosses in about
+    // a second. An arrow that is not drawn is at the end of the list, where
+    // Scroll() clamps to no change and asks for nothing.
     if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         Scroll(-VISIBLE_ROWS);
@@ -250,27 +384,41 @@ void UiTrophyTouch(const CtrTouchState *t)
         Scroll(VISIBLE_ROWS);
         return;
     }
+
+    if (!t->justReleased)
+        return;
+
+    for (u8 s = 0; s < ACH_SECTION_COUNT; s++)
+    {
+        if (UiHit(t, SEC_X(s), SEC_Y, SEC_W, SEC_H))
+        {
+            if (s != sSection)
+            {
+                sSection = s;
+                UiMarkDirty();
+            }
+            return;
+        }
+    }
 }
 
 // ------------------------------------------------------------------ shell --
 
 // Copy the provider's unseen bits into the NEW mask, then mark them seen.
-// Returns the first index that was unseen, or 0xFFFF if none was.
+// Returns the first index that was unseen, or NO_ROW if none was. Providers
+// list MAIN before POST-GAME, so "first" prefers the main page.
 static u16 AdoptUnseen(void)
 {
     const struct AchProvider *p = AchActive();
-    u16 count = p->count(), first = 0xFFFF;
+    u16 count = p->count(), first = NO_ROW;
 
     for (u16 i = 0; i < count; i++)
     {
-        struct AchView v;
-
-        p->get(i, &v);
-        if (!v.unseen)
+        if (!p->unseen(i))
             continue;
 
         MaskSet(i);
-        if (first == 0xFFFF)
+        if (first == NO_ROW)
             first = i;
     }
 
@@ -298,12 +446,14 @@ void UiTrophyTick(bool8 visible)
 
         sVisible = TRUE;
 
-        // Open on what was just unlocked, rather than on wherever the list was
-        // left, so VIEW on the toast lands on the thing it announced.
-        if (first != 0xFFFF)
+        // Open on what was just unlocked, on whichever page it is, rather than
+        // wherever the list was left, so VIEW on the toast lands on the thing
+        // it announced.
+        if (first != NO_ROW)
         {
-            sScroll = first;
-            ClampScroll(AchActive()->count());
+            sSection = AchActive()->section(first);
+            sScroll[sSection] = RowInSection(first);
+            ClampScroll();
         }
 
         UiMarkDirty();
@@ -317,20 +467,24 @@ void UiTrophyTick(bool8 visible)
     }
 }
 
-// The visible rows' counters, which move with no touch on this tab (a catch, a
-// hatch, a trainer battle). Unlocks are the shell's own top[9], and the NEW
-// tags and the scroll position only change through code that marks dirty.
+// The page and its scroll, and the visible rows' counters, which move with no
+// touch on this tab (a catch, a hatch, a trainer battle). Unlocks and the
+// post-game reveal are the shell's own top[8]; the NEW tags, the page and the
+// scroll position otherwise only change through code that marks dirty.
 u32 UiTrophyStateKey(void)
 {
     const struct AchProvider *p = AchActive();
-    u16 count = p->count();
-    u32 key = sScroll;
+    u32 key = sSection | ((u32)sScroll[sSection] << 1);
 
-    for (u16 r = 0; r < VISIBLE_ROWS && sScroll + r < count; r++)
+    for (u16 r = 0; r < VISIBLE_ROWS; r++)
     {
+        u16 index = SectionIndex(sSection, sScroll[sSection] + r);
         struct AchView v;
 
-        p->get(sScroll + r, &v);
+        if (index == NO_ROW)
+            break;
+
+        p->get(index, &v);
         if (CounterShown(&v))
             key = key * 31u + v.progress;
     }
@@ -338,6 +492,9 @@ u32 UiTrophyStateKey(void)
     return key;
 }
 
+// Every achievement's real text, hidden or not, since what the post-game page
+// will say after the reveal has to fit as well; and each row as it stands, which
+// covers the placeholder text of the hidden ones.
 u16 UiTrophyTooWide(void)
 {
     const struct AchProvider *p = AchActive();
@@ -346,10 +503,15 @@ u16 UiTrophyTooWide(void)
 
     for (u16 i = 0; i < count; i++)
     {
+        const char *title, *desc;
         struct AchView v;
 
+        AchDebugRealText(i, &title, &desc);
         p->get(i, &v);
-        if (UiTextWidth(UiAscii(text, v.title, sizeof(text))) > TROPHY_TITLE_MAX_W
+
+        if (UiTextWidth(UiAscii(text, title, sizeof(text))) > TROPHY_TITLE_MAX_W
+            || UiTextWidth(UiAscii(text, desc, sizeof(text))) > TROPHY_DESC_MAX_W
+            || UiTextWidth(UiAscii(text, v.title, sizeof(text))) > TROPHY_TITLE_MAX_W
             || UiTextWidth(UiAscii(text, v.desc, sizeof(text))) > TROPHY_DESC_MAX_W)
             n++;
     }
