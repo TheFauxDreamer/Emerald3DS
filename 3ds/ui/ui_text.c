@@ -323,12 +323,14 @@ int UiNumWidth(s32 value)
 
 u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
 {
-    int i = 0;
+    // Separate source and destination positions, because the e-acute below is
+    // two bytes in and one glyph out.
+    int i = 0, o = 0;
 
     if (dstSize <= 0)
         return dst;
 
-    for (; ascii[i] != '\0' && i < dstSize - 1; i++)
+    for (; ascii[i] != '\0' && o < dstSize - 1; i++)
     {
         char c = ascii[i];
         u8 out;
@@ -350,11 +352,18 @@ u8 *UiAscii(u8 *dst, const char *ascii, int dstSize)
         else if (c == '\'')            out = CHAR_SGL_QUOTE_RIGHT;
         else if (c == '"')             out = CHAR_DBL_QUOTE_RIGHT;
         else if (c == '\n')            out = CHAR_NEWLINE;
+        // The UTF-8 e-acute (C3 A9), so a literal can spell POKéMON the way
+        // the game does. The achievement text is the first to need it.
+        else if ((u8)c == 0xC3 && (u8)ascii[i + 1] == 0xA9)
+        {
+            out = CHAR_e_ACUTE;
+            i++;
+        }
         else                           out = CHAR_SPACE;
 
-        dst[i] = out;
+        dst[o++] = out;
     }
 
-    dst[i] = EOS;
+    dst[o] = EOS;
     return dst;
 }
