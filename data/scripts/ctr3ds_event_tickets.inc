@@ -62,42 +62,29 @@ Ctr3ds_EventScript_AnyEventTicketNeeded::
 	return
 
 @ VAR_RESULT: TRUE if the item is needed. It is, unless the player already has
-@ both it and its enable flag, or has already caught what it leads to. The
-@ Mystic Ticket stays needed until both Ho-Oh and Lugia are caught.
+@ both it and its enable flag. What the player has caught is not consulted,
+@ unlike the gift scripts: a catch on an island leaves its item in the bag,
+@ since nothing removes key items, so a catch check could only ever strand a
+@ save whose flags and bag disagree, and New Adventures Await counts the items.
 Ctr3ds_EventScript_EonTicketNeeded::
-	setvar VAR_RESULT, FALSE
-	goto_if_set FLAG_CAUGHT_LATIAS_OR_LATIOS, Common_EventScript_NopReturn
 	goto_if_unset FLAG_ENABLE_SHIP_SOUTHERN_ISLAND, Ctr3ds_EventScript_EventItemIsNeeded
 	checkitem ITEM_EON_TICKET
 	goto Ctr3ds_EventScript_NeededIfNotInBag
 	end
 
-@ Deoxys has no FLAG_CAUGHT_*. FLAG_BATTLED_DEOXYS is set only when it is
-@ caught (BirthIsland_Exterior/scripts.inc).
 Ctr3ds_EventScript_AuroraTicketNeeded::
-	setvar VAR_RESULT, FALSE
-	goto_if_set FLAG_BATTLED_DEOXYS, Common_EventScript_NopReturn
 	goto_if_unset FLAG_ENABLE_SHIP_BIRTH_ISLAND, Ctr3ds_EventScript_EventItemIsNeeded
 	checkitem ITEM_AURORA_TICKET
 	goto Ctr3ds_EventScript_NeededIfNotInBag
 	end
 
 Ctr3ds_EventScript_OldSeaMapNeeded::
-	setvar VAR_RESULT, FALSE
-	goto_if_set FLAG_CAUGHT_MEW, Common_EventScript_NopReturn
 	goto_if_unset FLAG_ENABLE_SHIP_FARAWAY_ISLAND, Ctr3ds_EventScript_EventItemIsNeeded
 	checkitem ITEM_OLD_SEA_MAP
 	goto Ctr3ds_EventScript_NeededIfNotInBag
 	end
 
 Ctr3ds_EventScript_MysticTicketNeeded::
-	setvar VAR_RESULT, FALSE
-	goto_if_unset FLAG_CAUGHT_HO_OH, Ctr3ds_EventScript_MysticTicketNeededUnlessHeld
-	goto_if_set FLAG_CAUGHT_LUGIA, Common_EventScript_NopReturn
-	goto Ctr3ds_EventScript_MysticTicketNeededUnlessHeld
-	end
-
-Ctr3ds_EventScript_MysticTicketNeededUnlessHeld::
 	goto_if_unset FLAG_ENABLE_SHIP_NAVEL_ROCK, Ctr3ds_EventScript_EventItemIsNeeded
 	checkitem ITEM_MYSTIC_TICKET
 	goto Ctr3ds_EventScript_NeededIfNotInBag
