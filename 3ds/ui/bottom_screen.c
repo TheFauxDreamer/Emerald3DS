@@ -29,6 +29,7 @@
 #include "ui_shell.h"
 #include "matchup.h"
 #include "ui_quickball.h"
+#include "ui_achtoast.h"
 #include "ui_title.h"
 
 // Two distinct flags: sNeedsRepaint means the framebuffer contents are stale,
@@ -42,6 +43,7 @@ static u8  sSelectedMon;
 static bool8 sInGame;
 
 void UiMarkDirty(void)          { sNeedsRepaint = 1; }
+u8   UiActiveTab(void)          { return sTab; }
 u8   UiSelectedMon(void)        { return sSelectedMon; }
 void UiSetSelectedMon(u8 index) { sSelectedMon = index; }
 
@@ -274,9 +276,12 @@ bool8 UiAnimStepped(void)
 // the case that found this. On the second-core path the shell then asks for a
 // full repaint on every frame that piece moves (CtrBottomUpdate), so it keeps
 // moving under the panel; on the single-core path it is drawn still.
+//
+// The achievement toast counts too: the party grid's top row of icons sits
+// inside its y 0..40, and the cheat tag strip with them.
 bool8 UiOverlayActive(void)
 {
-    return NoticeActive(NULL, NULL) || UiQuickBallActive();
+    return NoticeActive(NULL, NULL) || UiQuickBallActive() || UiAchToastActive();
 }
 
 // ------------------------------------------------------- notice animation --
@@ -657,7 +662,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[9];
+    u32 top[10];
     top[0] = UiFrameId();
     top[1] = sInGame;
     // The override is host-side and always safe to read; the three flags are
@@ -730,6 +735,11 @@ static u32 UiStateHash(void)
     // is safe before there is a save block.
     top[8] = AchActive()->stateKey();
 
+    // The achievement toast, in a slot of its own for the reason the strip and
+    // the notice have theirs: nothing else here moves when it comes up or goes,
+    // so without this it would never be drawn. Zero while it is down.
+    top[9] = UiAchToastStateKey();
+
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
         hash ^= top[i];
@@ -791,6 +801,16 @@ static void DrawTabBar(const u8 *vis, u32 n)
         UiText(x + (w - UiTextWidth(label)) / 2,
                UI_CONTENT_H + (UI_TABBAR_H - UI_GLYPH_H) / 2,
                label, active ? UI_COL_ACCENT : UI_COL_DIM, UI_COL_SHADOW);
+
+        // Something unlocked that the player has not looked at yet: a gold dot
+        // in the TROPHY tab's corner, until the tab is opened. It is what is
+        // left of a toast that expired unread, so it is the toast's gold. Never
+        // on the active tab, which marks everything seen as it shows.
+        if (vis[i] == UI_TAB_TROPHY && !active && AchActive()->anyUnseen())
+        {
+            UiFillRect(x + w - 12, UI_CONTENT_H + 6, 7, 7, UI_COL_SHINY_EDGE);
+            UiFillRect(x + w - 11, UI_CONTENT_H + 7, 5, 5, UI_COL_SHINY);
+        }
     }
 }
 
@@ -845,13 +865,16 @@ static void Redraw(void)
     case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
-    // Both overlays, over the top of whichever tab just drew. The strip first
-    // and the notice second, so that if the geometry is ever changed such that
-    // they do overlap, the ALERT is the one that survives -- an alert a view
-    // can paint over is not one. As they stand they abut exactly (y 152) and
-    // neither touches the other.
+    // The overlays, over the top of whichever tab just drew. The strip and the
+    // achievement toast first and the notice last, so that if the geometry is
+    // ever changed such that they do overlap, the ALERT is the one that
+    // survives -- an alert a view can paint over is not one. As they stand the
+    // three abut exactly (y 40 and y 152) and none touches another.
     if (UiQuickBallActive())
         UiQuickBallDraw();
+
+    if (UiAchToastActive())
+        UiAchToastDraw();
 
     if (NoticeActive(&noticeSpecies, &noticePersonality))
         DrawNotice(noticeSpecies, noticePersonality);
@@ -897,8 +920,9 @@ static void DrawAnimatedLayer(void)
     // paints over now CONTAINS the strip, and the party grid's bottom row of
     // icons sits under it, so redrawing them here would punch them straight
     // through the panel. UiOverlayActive() is TRUE for the strip precisely so
-    // that DrawCell paints the icons into the tab instead.
-    else if (!UiQuickBallActive() && sTab == UI_TAB_PARTY)
+    // that DrawCell paints the icons into the tab instead. The achievement
+    // toast is the same case at the other end: the top row sits under it.
+    else if (!UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY)
         UiPartyRedrawAnimated();
 }
 
@@ -987,6 +1011,20 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             sNeedsRepaint = 1;
         }
     }
+    // The achievement toast, on the same terms: the whole strip absorbs, and
+    // only VIEW acts, by opening the TROPHY tab. The notice and the toast abut
+    // at y 40 rather than overlap, so this order only decides a tie that the
+    // geometry does not allow.
+    else if (touch != NULL
+             && UiHit(touch, UI_AT_X, UI_AT_Y, UI_AT_W, UI_AT_H)
+             && UiAchToastActive())
+    {
+        if (UiAchToastTouch(touch))
+        {
+            sTab = UI_TAB_TROPHY;
+            sNeedsRepaint = 1;
+        }
+    }
     // The quick-throw strip, on the same terms and for the same reasons: it
     // takes every touch inside its rect, release or not, so a drag begun on it
     // cannot carry through into the tab it is covering. Below the notice in
@@ -1061,8 +1099,9 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         // already hold what they held and then make the host upload an
         // unchanged screen. The tick itself still runs, so the phase carries on
         // underneath and the icons pick up where they were when the strip goes
-        // down.
-        else if (!UiQuickBallActive())
+        // down. The achievement toast freezes the grid the same way, so it is
+        // excluded for the same reason.
+        else if (!UiQuickBallActive() && !UiAchToastActive())
         {
             animParty = 1;
         }
@@ -1087,6 +1126,12 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         else
             animNotice = 1;
     }
+
+    // The achievement toast's countdown, and the next one waiting. Only while
+    // the game runs: before that nothing is drawn, and a toast that timed out
+    // on a blank screen would have told nobody anything.
+    if (sInGame)
+        UiAchToastTick();
 
     // The achievements list's NEW tags, taken on the frame the tab comes on
     // screen and dropped on the frame it goes. Before the hash, so a tab switch

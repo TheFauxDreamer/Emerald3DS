@@ -91,16 +91,20 @@ void UiMarkDirty(void);
 // the note above UI_ANIM_STEP_FRAMES in bottom_screen.c.
 bool8 UiAnimStepped(void);
 
-// TRUE while a modal overlay (the shiny notice or the quick-throw strip) is
-// covering the tab. A tab that defers part of its drawing to the shell's
-// animated layer must draw that part into its own paint while this is TRUE:
-// the overlay owns that layer while it is up, so the deferred piece is
-// otherwise not drawn at all -- and it cannot simply be drawn there anyway,
-// because the animated layer paints over a snapshot that already contains the
-// panel. On the second-core path the shell repaints fully for every step
-// while an overlay is up, so what the tab draws there may move; on the
-// single-core path it does not, so draw a still.
+// TRUE while an overlay (the shiny notice, the quick-throw strip or the
+// achievement toast) is covering the tab. A tab that defers part of its
+// drawing to the shell's animated layer must draw that part into its own
+// paint while this is TRUE: the overlay owns that layer while it is up, so
+// the deferred piece is otherwise not drawn at all -- and it cannot simply be
+// drawn there anyway, because the animated layer paints over a snapshot that
+// already contains the panel. On the second-core path the shell repaints
+// fully for every step while an overlay is up, so what the tab draws there may
+// move; on the single-core path it does not, so draw a still.
 bool8 UiOverlayActive(void);
+
+// The tab on screen, one of enum UiTab. For an overlay that has to know, the
+// way the achievement toast drops its VIEW button on the TROPHY tab itself.
+u8 UiActiveTab(void);
 
 // The party slot the BAG tab will act on. Set by the party grid.
 u8   UiSelectedMon(void);
