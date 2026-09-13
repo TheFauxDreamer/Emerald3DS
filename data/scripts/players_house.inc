@@ -433,6 +433,10 @@ PlayersHouse_1F_EventScript_GetSSTicketAndSeeLatiTV::
 	msgbox PlayersHouse_1F_Text_TicketFromBrineyCameForYou, MSGBOX_DEFAULT
 	giveitem ITEM_SS_TICKET
 	msgbox PlayersHouse_1F_Text_PortsInSlateportLilycove, MSGBOX_DEFAULT
+#if PLATFORM_3DS
+	@ The four event items (data/scripts/ctr3ds_event_tickets.inc).
+	call Ctr3ds_EventScript_EventTicketsFromDad
+#endif
 	closemessage
 	delay 20
 	call_if_eq VAR_0x8008, MALE, PlayersHouse_1F_EventScript_MomApproachDadMale

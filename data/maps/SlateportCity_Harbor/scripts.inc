@@ -163,6 +163,10 @@ SlateportCity_Harbor_EventScript_FerryAttendant::
 	end
 
 SlateportCity_Harbor_EventScript_AskForTicket::
+#if PLATFORM_3DS
+	@ The four event items (data/scripts/ctr3ds_event_tickets.inc).
+	call Ctr3ds_EventScript_EventTicketsAtOtherPort
+#endif
 	msgbox SlateportCity_Harbor_Text_MayISeeYourTicket, MSGBOX_DEFAULT
 	message SlateportCity_Harbor_Text_FlashedTicketWhereTo
 	waitmessage

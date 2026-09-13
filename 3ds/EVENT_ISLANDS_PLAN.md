@@ -1,10 +1,31 @@
 # Event islands plan
 
-**Status: planned, not implemented.** Written 2026-09-13 against `5ee5f1c` on
-the `achievements` branch ("achievements 8"), and amended the same day against
-`c2f8d00` on `main` for existing post-game saves and the ticket counter. Line
-references were read then; the script and function names are the stable
-anchors.
+**Status: implemented, not yet tested on a console.** Written 2026-09-13
+against `5ee5f1c` on the `achievements` branch ("achievements 8"), and amended
+the same day against `c2f8d00` on `main` for existing post-game saves and the
+ticket counter. This file is now the design record. Line references were read
+then; the script and function names are the stable anchors.
+
+**How it landed, where that differs from the text below:**
+
+- **A full bag stops the hand-over at the first item that doesn't fit,** with
+  one "The BAG is full" message rather than one per item left. Nothing that
+  wasn't given gets flags, as planned. `giveitem` itself says nothing on a full
+  bag (`EventScript_NoRoomForItem` only sets `VAR_RESULT`), which is why the
+  script shows `gText_TooBadBagIsFull` itself.
+- **One give helper for all four,** `Ctr3ds_EventScript_GiveEventItemIfMissing`.
+  It takes the item in `VAR_0x8000`, the scratch var `giveitem` overwrites
+  anyway, so a caller sees nothing a plain `giveitem` wouldn't do.
+- **The fence check is "no content changes", not "byte-identical".** Without
+  the define, the preprocessed `event_scripts.s` differs from the unmodified
+  tree's in 17 blank lines and in cpp line markers shifted by the include's
+  three-line fence. No label, instruction or data line differs.
+- **At Lilycove the Old Sea Map comes first,** because the game checks it
+  before the other first-time tickets. The talk that hands the items over ends
+  with Mr. Briney sailing the player to Faraway Island, as it would have for a
+  Mystery Gift map. The next talk is the sailor's shared first-time scene for
+  the other three, with a choice of island. That scene marks all three shown,
+  and after it the ordinary menu lists all four islands.
 
 ## Context
 
@@ -204,8 +225,9 @@ the rest of POST-GAME), after Eon Chaser and before Odd Tree:
   `data/event_scripts.s`.
   - With `-DPLATFORM_3DS=1`, the new labels and the four calls appear, and
     preproc converts every `.string` without error.
-  - Without the define, the output is byte-identical to the unmodified tree's.
-    That proves the fence.
+  - Without the define, the output matches the unmodified tree's apart from
+    blank lines and cpp line markers (see "How it landed"). That proves the
+    fence.
   - A full local assemble isn't possible: clang's assembler rejects GNU-only
     constructs in the game's macros (`waitstate`), so CI's devkitARM run is the
     assembly check.
@@ -219,15 +241,17 @@ the rest of POST-GAME), after Eon Chaser and before Odd Tree:
     isn't available.
   - **A save just before the Elite Four:** after the credits, Dad gives the
     S.S. Ticket then the four items, and New Adventures Await toasts in gold.
-    Lilycove then offers all four islands, with each first-time ticket line.
+    At Lilycove, the first talk is the Old Sea Map's scene, straight to Faraway
+    Island. The next is the sailor's scene for the other three, with a choice,
+    and after that the ordinary menu offers all four islands.
   - **An existing post-game save**, on a copy for each attendant:
     - POST-GAME shows New Adventures Await at 0/4 with the ferry hint.
     - **Slateport:** gives the items, says the island ferry sails from
       Lilycove, then shows the usual destination menu. The counter reaches 4/4
       and toasts.
     - **Battle Frontier dock:** the same.
-    - **Lilycove:** gives the items, then the first-time ticket dialogue, then
-      sails.
+    - **Lilycove:** gives the items, then the Old Sea Map's first-time scene,
+      then sails to Faraway Island.
     - Talking to any of them again gives nothing more.
   - **Catching each Pokémon** gives its green toast. A catch made earlier is
     picked up on load.

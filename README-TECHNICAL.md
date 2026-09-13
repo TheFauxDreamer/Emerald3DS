@@ -87,6 +87,14 @@ lives in that one file so the hooks inside `src/` stay to one or two lines each,
 fenced with `#if PLATFORM_3DS`. The less original source a port rewrites, the
 easier it stays to rebase.
 
+Data scripts can be fenced the same way. `assemble_s` in `3ds/build_objs.sh`
+passes `-DPLATFORM_3DS=1` to the cpp stage the data files already go through,
+and nothing they include tests it, so a `#if PLATFORM_3DS` block changes the 3DS
+build and nothing else. The event items are the one change that uses it: the
+script is `data/scripts/ctr3ds_event_tickets.inc`, and each of its four callers
+(Dad's post-Hall-of-Fame scene and the three S.S. Tidal ferry attendants) gains
+one fenced `call`.
+
 ## Why it cannot be a `.3dsx`
 
 Emerald's script bytecode packs a 4-byte pointer directly after a 1-byte opcode
