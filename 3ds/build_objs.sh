@@ -103,7 +103,7 @@ n=0
 # stays -- it is the host's entry point into the mixer, not the mixer.
 for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/psg.c \
            rp2350/m4a_mix.c \
-           3ds/gba_mem.c 3ds/tweaks.c 3ds/ui/*.c; do
+           3ds/gba_mem.c 3ds/tweaks.c 3ds/achievements.c 3ds/ui/*.c; do
   obj="$OBJ/$(basename "$src" .c).o"
   compile_c "$src" "$obj"
   n=$((n+1))

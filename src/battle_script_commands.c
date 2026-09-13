@@ -59,6 +59,9 @@
 // extra statement. None of them changes the vanilla path, which is why every
 // one is fenced rather than folded in.
 #include "../3ds/tweaks.h"
+// The shiny-catch achievement, the one achievement that is an event rather
+// than a state and so needs a hook (Cmd_givecaughtmon). See 3ds/achievements.c.
+#include "../3ds/achievements.h"
 #endif
 
 extern const u8 *const gBattleScriptsForMoveEffects[];
@@ -10093,6 +10096,9 @@ static void Cmd_handleballthrow(void)
 
 static void Cmd_givecaughtmon(void)
 {
+#if PLATFORM_3DS
+    Ctr3dsAchOnCaught(&gEnemyParty[gBattlerPartyIndexes[BATTLE_OPPOSITE(gBattlerAttacker)]]);
+#endif
     if (GiveMonToPlayer(&gEnemyParty[gBattlerPartyIndexes[BATTLE_OPPOSITE(gBattlerAttacker)]]) != MON_GIVEN_TO_PARTY)
     {
         if (!ShouldShowBoxWasFullMessage())
