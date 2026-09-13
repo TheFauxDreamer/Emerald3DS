@@ -300,7 +300,20 @@ Collected gotchas, most of which cost hours.
   priority 0, so the intro's grass slid across the textbox instead of behind
   it. Only four `BgTemplate` sets in the game share a priority: battle, contest,
   contest results and the slot machine.
-  That makes three reference-inherited defects, and none of them could ever show
+- **And a fourth: the OBJ window was never implemented.** Neither renderer read
+  OAM attr0 bits 10-11, so a sprite in OBJ mode 2 was drawn like any other and
+  the window it defines had no region at all. On hardware that sprite is never
+  drawn; its opaque texels only mark where WINOUT's high byte applies. The
+  battle's metal shine and every stat-change effect stand on it:
+  `CreateInvisibleSpriteCopy` makes a priority-0, mode-2 copy of the battler so
+  the effect on BG1 shows only inside the mon. Drawn as a sprite, that copy put
+  the whole mon in front of the textbox (a double battle's right-hand battler
+  sits low enough to show it plainly) and the effect never appeared. Both
+  renderers now build the region (`objWinFill` in `ppu.c`, `buildObjWindow` in
+  `app.js`) and rank it WIN0 > WIN1 > OBJ > outside. The title screen's logo
+  shine, the Pokédex's rotating ball and the catch and contest effects use the
+  same window.
+  That makes four reference-inherited defects, and none of them could ever show
   up in `ppu_validate.sh`, because it measures agreement with the reference.
   **Byte-exact is not correct.** The first fix for the grass went to the window
   clamp, because the intro's per-scanline writes look like window values; they
