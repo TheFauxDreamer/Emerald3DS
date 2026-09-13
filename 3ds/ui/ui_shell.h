@@ -16,12 +16,18 @@
 
 // Which of these are actually shown depends on what the player has unlocked;
 // bottom_screen.c mirrors BuildNormalStartMenu() (src/start_menu.c).
+//
+// Six is the cap. The bar divides 320px between the visible tabs, and six is
+// 53px each, about the floor for a fingertip (SECOND_SCREEN_CHEATSHEET.md,
+// "Adding a tab"). TROPHY sits before EXTRA so the port's settings stay at the
+// right-hand end.
 enum UiTab
 {
     UI_TAB_PARTY,
     UI_TAB_BAG,
     UI_TAB_MAP,
     UI_TAB_DEX,
+    UI_TAB_TROPHY,
     UI_TAB_EXTRA,
     UI_TAB_COUNT
 };
@@ -177,5 +183,25 @@ u32 UiTweakStateKey(void);
 // Cheap identity of the dex counts, for the shell's repaint hash. Walks the
 // whole dex, so the shell only asks while the DEX tab is on screen.
 u32 UiDexStateKey(void);
+
+// The achievements list (tab_trophy.c). It reads everything through
+// AchActive() in 3ds/achievements.h, so it works the same for any provider.
+void UiTrophyDraw(void);
+void UiTrophyTouch(const CtrTouchState *t);
+
+// Per frame, on UiPartyTick's terms: `visible` is whether TROPHY is the tab on
+// screen. On the frame it comes on screen this copies what is unseen into the
+// tab's own NEW tags and marks it all seen; on the frame it goes, the tags go.
+// Must run every frame, before the state hash, or a tab switch would paint the
+// list before it knew which rows are new.
+void UiTrophyTick(bool8 visible);
+
+// Cheap identity of the visible rows' counters, for the shell's repaint hash.
+// They move with no touch on this tab: a catch, a hatch, a trainer battle.
+u32 UiTrophyStateKey(void);
+
+// How many achievements have a title or a description too wide for the list,
+// for the debug page's check. Nothing on this screen clips text.
+u16 UiTrophyTooWide(void);
 
 #endif // CTR_UI_SHELL_H
