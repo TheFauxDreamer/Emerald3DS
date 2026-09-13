@@ -1,24 +1,20 @@
-// m4a -> NDSP audio.
+// m4a to NDSP audio.
 //
-// rp2350/m4a_mix.c is the port's mixer seam, compiled into the
-// game archive; it hands us signed 16-bit samples with DirectSound and the four
-// PSG channels already summed, through Rp2350MixFrameStereo16() (interleaved
-// L,R, already panned) or Rp2350MixFrame16() (downmixed). NDSP plays PCM16
-// natively either way, so the samples reach the DSP exactly as the mixer
-// produced them, with no conversion and no requantisation.
+// rp2350/m4a_mix.c is the port's mixer seam, compiled into the game archive. It
+// gives signed 16-bit samples with DirectSound and the four PSG channels
+// already summed. Rp2350MixFrameStereo16() gives interleaved, panned L,R
+// samples, and Rp2350MixFrame16() gives a downmix. NDSP plays PCM16 directly,
+// so the samples reach the DSP with no conversion.
 //
-// The mixer runs once per game frame and can stall (a load spike, a save
-// flush), while the DSP consumes at a constant rate. A ring between them
-// absorbs that jitter, the same job the GBA's DirectSound DMA double-buffer
-// did for the VBlank mixer.
+// The mixer runs once for each game frame and can stall (a load, a save flush),
+// but the DSP uses samples at a constant rate. A ring buffer between them
+// absorbs that jitter, like the GBA's DirectSound DMA double buffer.
 //
-// The one thing that is NOT obvious here is thread priority; see
-// fix_thread_priority() below. It is why this file could look completely
-// correct and still produce silence on a console.
+// Thread priority is important here; see fix_thread_priority() below. With the
+// wrong priority, this file looks correct and gives silence on a console.
 //
-// CTR_AUDIO_STEREO below selects between that path and the mono one it
-// replaced. See the comment on it: it exists as a bisect handle, not as an
-// option anybody is meant to have a preference about.
+// CTR_AUDIO_STEREO selects the stereo path or the older mono path. It is a
+// bisect switch for tests, not a preference.
 
 #include <3ds.h>
 #include <stdio.h>
@@ -27,133 +23,118 @@
 #include "../bridge.h"
 #include "trace.h"
 
-// m4a produces this many samples per VBlank at Emerald's SOUND_MODE_FREQ_13379
-// (gPcmSamplesPerVBlankTable[3], src/m4a_tables.c: m4a.c indexes it as
-// freq - 1, and SOUND_MODE_FREQ_13379 is freq 4).
+// m4a makes this many samples for each VBlank at SOUND_MODE_FREQ_13379
+// (gPcmSamplesPerVBlankTable[3] in src/m4a_tables.c; m4a.c uses freq - 1, and
+// SOUND_MODE_FREQ_13379 is freq 4).
 #define SAMPLES_PER_FRAME 224
 
-// The game is paced by the 3DS panel, not by the GBA's 59.7275 Hz, so it
-// produces SAMPLES_PER_FRAME once per 3DS refresh. The playback rate has to
-// match THAT, or the ring drifts one way at a fixed rate and the drift alone
-// guarantees a dropout on a timer.
+// The 3DS panel paces the game, not the GBA's 59.7275 Hz. Thus the game makes
+// SAMPLES_PER_FRAME once for each 3DS refresh. The playback rate must match
+// that. Otherwise the ring drifts, and the drift causes a dropout at regular
+// times.
 //
-// The panel is 59.8261 Hz, not 60: the old 60.0 here asked the DSP for 39
-// samples a second more than the game produces, which drains the ring and
-// clicks roughly every six seconds even when nothing else is wrong.
+// The panel is 59.8261 Hz, not 60. A rate of 60.0 asks for 39 samples a second
+// more than the game makes, which empties the ring and clicks about every six
+// seconds.
 //
-// 224 x 59.8261 = 13401 Hz, which is also closer to the GBA's true 13379 than
-// the old value was, so the pitch error drops from 0.46% to 0.16%.
+// 224 x 59.8261 = 13401 Hz. That is also closer to the GBA's 13379, so the
+// pitch error is 0.16%.
 #define REFRESH_HZ  59.8261f
 #define SAMPLE_RATE (SAMPLES_PER_FRAME * REFRESH_HZ)   // 13401 Hz
 
-// Enough wave buffers to stay queued through a couple of slow frames without
-// the DSP running dry, but short enough to keep audio latency imperceptible
-// (4 x 224 samples @ 13401 Hz = 67 ms worst case).
+// Enough wave buffers to stay queued through two slow frames, but few enough to
+// keep the latency small. The worst case is 4 x 224 samples at 13401 Hz, 67 ms.
 #define NUM_WAVEBUFS 4
 #define BLOCK_SAMPLES SAMPLES_PER_FRAME
 
-// NDSP is always configured stereo, and the STEREO A/B switch downmixes into
-// both sides rather than reconfiguring the channel.
+// NDSP is always stereo. The STEREO A/B switch puts a downmix on both sides and
+// does not change the channel format.
 //
-// That is deliberate. Changing ndspChnSetFormat under a running channel means
-// stopping it, clearing queued wave buffers and restarting, and a switch that
-// exists to diagnose a fault must not be able to introduce one. Filling both
-// sides with (L + R) / 2 is the same sample stream the mono format would have
-// produced, at the cost of one extra int16 per frame.
+// A change of ndspChnSetFormat on a running channel means stop, clear the
+// queued wave buffers and restart. A switch that finds faults must not cause
+// one. Both sides with (L + R) / 2 give the same samples as the mono format.
 //
-// Everything downstream sizes from AUDIO_CHANNELS rather than a literal 2,
-// which is the specific mistake that put a 0x1C00 overrun in this file the
-// first time the channel count changed.
+// Everything below uses AUDIO_CHANNELS, not a literal 2. A literal caused a
+// 0x1C00-byte overrun here once, when the channel count changed.
 #define AUDIO_CHANNELS 2
 
-// In sample FRAMES, which is the unit sRingHead and sRingTail advance in, the
-// unit ring_fill() returns, and the unit BLOCK_SAMPLES is compared against.
-// The ring holds interleaved stereo, so the ARRAY is twice this many int16.
+// In sample frames: the unit of sRingHead and sRingTail, of ring_fill() and of
+// BLOCK_SAMPLES. The ring holds interleaved stereo, so the array holds twice
+// this many int16 values.
 //
-// That distinction is why this is named for frames. It used to be a "samples"
-// count with the array declared to match, while the indexing was already
-// [frame * 2 + channel] -- so every frame wrote 0x1C00 bytes past the end into
-// the neighbouring .bss. Azahar tolerated it and the sound was fine; a real
-// ARM11 eventually found a zeroed sBlock[] pointer and took a data abort
-// writing to address 0, a few seconds after boot.
+// Keep this distinction. An array sized in samples, with the index [frame * 2 +
+// channel], wrote 0x1C00 bytes past its end. On a real ARM11 that caused a data
+// abort at address 0 a few seconds after boot.
 #define RING_FRAMES (SAMPLES_PER_FRAME * 16)
 
-// libctru creates the NDSP service thread at this priority (ndspInit,
-// libctru/source/ndsp/ndsp.c). Hardcoded there, so it is a constant we have to
-// live with rather than something we can ask for.
+// libctru makes the NDSP service thread at this priority (ndspInit, in
+// libctru/source/ndsp/ndsp.c). The value is fixed there.
 #define NDSP_THREAD_PRIO 0x18
 
-// What the main thread is lowered to once NDSP is up. 0x30 is the priority
-// every .3dsx gets under hbmenu, which is the configuration NDSP is actually
-// tested in, and it reproduces that ordering exactly:
+// The main thread's priority after NDSP starts. 0x30 is the priority of every
+// .3dsx under hbmenu, which is how NDSP is usually tested. It gives this order:
 //
 //     0x18  NDSP service thread   (ndsp.c)
 //     0x1A  GSP event thread      (gspgpu.c)   signals VBlank / P3D / PPF
-//     0x30  us
+//     0x30  this port's main thread
 //     0x31  APT event handler     (apt.c)
 #define MAIN_THREAD_PRIO 0x30
 
-// How long to run before writing the one-line audio health report.
-#define HEALTH_REPORT_FRAME 600   // ~10 seconds
+// The time before the one-line audio health report.
+#define HEALTH_REPORT_FRAME 600   // about 10 seconds
 
 static ndspWaveBuf sWaveBuf[NUM_WAVEBUFS];
 
-// PCM16 all the way from the mixer. Originally chosen while chasing the silence
-// (every working NDSP homebrew feeds PCM16, and an emulator's HLE DSP is not the
-// real DSP); it now also carries real precision, because the PSG channels are
-// generated at 16-bit and a console mixes them with DirectSound in the analog
-// domain rather than on an 8-bit grid.
-static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, DSP-visible
+// PCM16 from the mixer to the DSP. The PSG channels are made at 16 bits, and a
+// console mixes them with DirectSound in analog, not on an 8-bit grid. PCM16
+// keeps that precision.
+static int16_t    *sBlock[NUM_WAVEBUFS];   // linearAlloc'd, visible to the DSP
 
 static int16_t  sRing[RING_FRAMES * AUDIO_CHANNELS];
 static uint32_t sRingHead, sRingTail;      // free-running; head - tail = fill
 
 static int sReady;
 
-// Counters behind the health report. Each one distinguishes a different way for
-// this to end up silent, which is the whole point of keeping them apart: on a
-// console there is no debugger and no console output, so the log line they
-// produce is the only evidence available.
+// The counters for the health report. Each one shows a different cause of
+// silence. A console has no debugger and no console output, so this log line is
+// the only evidence.
 static uint32_t sFrames;
-static uint32_t sUnderruns;   // a buffer was free but the ring was short
-static uint32_t sStalled;     // NOTHING was free: the DSP is not consuming
-static uint32_t sZeroMix;     // the game-side mixer produced no samples
-static uint32_t sDropped;     // ring full, samples discarded
-static uint32_t sQueued;      // wave buffers handed to the DSP
+static uint32_t sUnderruns;   // a buffer was free, but the ring was short
+static uint32_t sStalled;     // nothing was free: the DSP does not consume
+static uint32_t sZeroMix;     // the game-side mixer made no samples
+static uint32_t sDropped;     // the ring was full; samples dropped
+static uint32_t sQueued;      // wave buffers given to the DSP
 
-// The measurement that actually splits the problem, and the one the first
-// version of this report was missing. Every counter above can read perfectly
-// healthy while the samples flowing through are all zero, because
-// Rp2350MixFrame returning 224 only means the sound ENGINE is initialised, not
-// that anything is playing. A peak of 0 means the silence is upstream of this
-// file entirely and no amount of DSP configuration will help.
+// This measurement splits the problem. All counters above can look normal while
+// all samples are zero. A return of 224 from Rp2350MixFrame means only that the
+// sound engine started, not that anything plays. A peak of 0 means that the
+// silence comes from before this file, and no DSP setting can help.
 static uint32_t sPeak;        // largest |sample| seen
-static uint32_t sNonZero;     // how many samples were not silence
+static uint32_t sNonZero;     // the number of samples that were not silence
 
-// Where a repeating click actually happens.
+// Where a repeating click occurs.
 //
-// A click is a sample-to-sample discontinuity, and WHERE it lands in the frame
-// says what caused it. Clustered at index 0 means the fault is at the frame
-// boundary -- the buffer handoff, the render window, the engine tick. Spread
-// through the frame means it is in the audio itself and no amount of buffer
-// plumbing will fix it. Nothing else in this report can tell those apart.
+// A click is a jump between two samples. Its position in the frame tells the
+// cause. At index 0, the fault is at the frame boundary: the buffer handoff,
+// the render window or the engine tick. Spread through the frame, the fault is
+// in the audio itself. Nothing else in this report can tell the two apart.
 //
-// The threshold is 32 DirectSound LSBs. DirectSound is 8-bit, so a legitimate
-// step is a multiple of 256 and small ones are everywhere; a real waveform at
-// 13.4 kHz does not jump an eighth of full scale between adjacent samples.
+// The threshold is 32 DirectSound LSBs. DirectSound is 8-bit, so a normal step
+// is a multiple of 256. A real waveform at 13.4 kHz does not jump an eighth of
+// full scale between two samples.
 #define JUMP_THRESHOLD 8192
 
-static int32_t  sPrevSample;   // carried across frames, so index 0 is measured
-static uint32_t sJumpCount;    // discontinuities over the threshold
-static uint32_t sJumpAtFrameStart;  // ... of those, how many at index 0
-static uint32_t sJumpMax;      // largest one seen
-static uint32_t sJumpMaxPos;   // and where in the frame it was
+static int32_t  sPrevSample;   // kept between frames, so index 0 is measured
+static uint32_t sJumpCount;    // jumps over the threshold
+static uint32_t sJumpAtFrameStart;  // of those, the number at index 0
+static uint32_t sJumpMax;      // the largest jump
+static uint32_t sJumpMaxPos;   // and its position in the frame
 
 static uint32_t ring_fill(void) { return sRingHead - sRingTail; }
 
-// Where one frame lives. The frame index is scaled by the channel count exactly
-// once, here, rather than at each of the four use sites -- doing it at the use
-// sites is how the array came to be declared at half the size those sites index.
+// The address of one frame. Scale the frame index by the channel count only
+// here, not at each use. Scaling at each use caused the array to have half the
+// needed size.
 static int16_t *ring_slot(uint32_t frame)
 {
     return &sRing[(frame % RING_FRAMES) * AUDIO_CHANNELS];
@@ -161,24 +142,19 @@ static int16_t *ring_slot(uint32_t frame)
 
 // Keep the DSP thread able to preempt the game loop.
 //
-// The 3DS scheduler is strict priority with no round-robin between different
-// priorities: a lower-priority thread runs only while every higher-priority one
-// is blocked. libctru puts NDSP's work on its own thread at 0x18, and
-// AffinityMask 1 with SystemModeExt Legacy confine both it and us to core 0, so
-// a main thread that outranked it would starve the DSP whenever the software
-// rasteriser had work to do -- and it always does. A .3dsx under hbmenu gets
-// main priority 0x30, i.e. below NDSP, which is the arrangement NDSP is
-// actually exercised in.
+// The 3DS scheduler uses strict priority, with no round-robin between different
+// priorities. A lower-priority thread runs only while all higher ones are
+// blocked. libctru runs NDSP's work on its own thread at 0x18. AffinityMask 1
+// and SystemModeExt Legacy keep that thread and this one on core 0. A main
+// thread above it would starve the DSP whenever the rasterizer has work, which
+// is always. Under hbmenu, a .3dsx gets main priority 0x30, below NDSP.
 //
-// 3ds/emerald3ds.rsf asks for main thread priority 0x10, which WOULD be that
-// inversion. It measurably is not what the console hands out: on hardware this
-// function found the main thread already at or below 0x18 and changed nothing,
-// which is why the log below reports the priority unconditionally rather than
-// only when it acts. That reading is what ruled the theory out; do not let the
-// silence of an untaken branch look like a fix that worked.
+// 3ds/emerald3ds.rsf asks for main priority 0x10, which would be above NDSP. On
+// hardware, the main thread was already at 0x18 or below, and this function
+// changed nothing. Thus the log below always reports the priority.
 //
-// The guard stays because it costs one comparison and the exheader still asks
-// for the wrong thing.
+// The guard stays. It costs one comparison, and the exheader still asks for the
+// wrong value.
 static void fix_thread_priority(void)
 {
     s32 before = 0, after = 0;
@@ -198,9 +174,8 @@ static void fix_thread_priority(void)
         svcGetThreadPriority(&after, CUR_THREAD_HANDLE);
     }
 
-    // Unconditional. An absent line is not evidence of anything, and the first
-    // version of this only logged when it acted, which made "the inversion is
-    // not happening" indistinguishable from "the code never ran".
+    // Always log. A missing line proves nothing. If it logged only when it
+    // acted, "no inversion" and "the code did not run" would look the same.
     CtrLog("emerald3ds: main thread priority 0x%02lX (NDSP 0x%02X)%s\n",
            (unsigned long)after, NDSP_THREAD_PRIO,
            after != before ? " [lowered]" : "");
@@ -210,34 +185,30 @@ void CtrAudioInit(void)
 {
     Result rc = ndspInit();
     if (R_FAILED(rc)) {
-        // Almost always a missing DSP firmware dump: libctru loads the DSP
-        // component from sdmc:/3ds/dspfirm.cdc and ndspInit() fails outright if
-        // that file is absent. The game is perfectly playable silent, so this
-        // is a warning -- but it must be a VISIBLE one, or it presents as
-        // "the port has no sound".
+        // Usually a missing DSP firmware dump. libctru loads the DSP component
+        // from sdmc:/3ds/dspfirm.cdc, and ndspInit() fails if that file is not
+        // there. The game works without sound, so this is a warning, but it
+        // must be visible. Otherwise it looks like "the port has no sound".
         //
-        // Reaches sdmc:/3ds/emerald3ds/log.txt as well as the emulator's debug
-        // output in a debug build (3ds/host/log.c). A shipping build writes no
-        // file, so on a console this one is answered by README.md's Limitations
-        // section instead -- no build can carry a DSP dump anyway.
+        // In a debug build, it goes to sdmc:/3ds/emerald3ds/log.txt and to the
+        // emulator's debug output (3ds/host/log.c). A release build writes no
+        // file. On a console, the Limitations section of README.md answers
+        // this.
         CtrLog("emerald3ds: audio disabled - ndspInit failed (rc=0x%08lX). "
                "Missing sdmc:/3ds/dspfirm.cdc? Dump it with DSP1.\n",
                (unsigned long)rc);
         return;
     }
 
-    // STEREO, not the MONO this used to ask for. A mono channel played into a
-    // stereo output with an even front-left/front-right mix reaches both
-    // speakers and is the configuration NDSP is actually exercised in
-    // everywhere else; NDSP_OUTPUT_MONO changes the DSP's whole downmix path
-    // for no benefit here, and an emulator's HLE DSP is free to ignore the
-    // distinction where real firmware does not.
+    // STEREO, not MONO. A mono channel played into a stereo output with an
+    // equal front-left and front-right mix reaches both speakers. That is the
+    // usual NDSP setup. NDSP_OUTPUT_MONO changes the DSP's downmix path for no
+    // benefit.
     ndspSetOutputMode(NDSP_OUTPUT_STEREO);
 
-    // Both of these are already the libctru defaults (ndspInitMaster sets the
-    // master volume to 1.0, ndspChnReset sets mix[0] and mix[1] to 1.0). Set
-    // them anyway: "silent" is the symptom being chased, and a default is only
-    // a default until some future libctru changes it.
+    // Both values are already the libctru defaults (ndspInitMaster sets the
+    // master volume to 1.0, and ndspChnReset sets mix[0] and mix[1] to 1.0).
+    // Set them anyway, because a future libctru can change a default.
     ndspSetMasterVol(1.0f);
     {
         float mix[12] = { 0 };
@@ -246,16 +217,13 @@ void CtrAudioInit(void)
         ndspChnSetMix(0, mix);
     }
 
-    // LINEAR, not NONE. The old comment here claimed "no resampling: rate
-    // matches", which is not true of anything: the DSP runs at 32728 Hz and the
-    // mixer feeds it 13401, so every sample is resampled up by about 2.44x no
-    // matter what. NDSP_INTERP_NONE makes that a zero-order hold, whose imaging
-    // is heard as grit on top of the music. Linear interpolation costs the DSP
-    // nothing and removes most of it.
+    // LINEAR, not NONE. The DSP runs at 32728 Hz and the mixer gives 13401 Hz,
+    // so the DSP always resamples by about 2.44x. NDSP_INTERP_NONE is a
+    // zero-order hold, which adds grit to the music. Linear interpolation costs
+    // the DSP nothing and removes most of it.
     //
-    // Not POLYPHASE: libctru degrades it to NONE whenever the rate ratio is
-    // below 1.0 (ndspiUpdateChn), which ours always is, so asking for it would
-    // quietly land back on the zero-order hold.
+    // Not POLYPHASE: libctru changes it to NONE when the rate ratio is below
+    // 1.0 (ndspiUpdateChn). Here the ratio is always below 1.0.
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, SAMPLE_RATE);
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
@@ -270,11 +238,11 @@ void CtrAudioInit(void)
         memset(sBlock[i], 0, BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
         memset(&sWaveBuf[i], 0, sizeof(sWaveBuf[i]));
         sWaveBuf[i].data_vaddr = sBlock[i];
-        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // sample FRAMES, not bytes
+        sWaveBuf[i].nsamples   = BLOCK_SAMPLES;   // sample frames, not bytes
         sWaveBuf[i].status     = NDSP_WBUF_DONE;  // free for the first fill
     }
 
-    // Only now that there is a DSP thread worth yielding to.
+    // Only now that there is a DSP thread to yield to.
     fix_thread_priority();
 
     sReady = 1;
@@ -293,23 +261,18 @@ void CtrAudioExit(void)
     sReady = 0;
 }
 
-// One line, once, naming which of the ways this can fail actually happened.
-// Without it "no sound" is indistinguishable from "sound, but you were in a
-// silent room of the game", and every cause below looks identical on a console.
+// One line, once, which tells which failure occurred. Without it, "no sound"
+// and "sound, in a silent part of the game" look the same on a console.
 //
-// The first version of this report got its verdict wrong, and the wrongness is
-// worth recording. It treated `underruns` as a fault, but one underrun per
-// frame is the DESIGNED steady state: the mixer produces exactly one buffer's
-// worth of samples per frame, so the second free wave buffer in the refill loop
-// always finds an empty ring and always counts an underrun. It read
-// "underruns == frames" and cried starvation about a pipeline that was working
-// perfectly. Both counters below now only count a frame where NOTHING was
-// queued, which is the only case that can actually cost you audio.
+// One underrun for each frame is the normal state. The mixer makes one buffer
+// of samples for each frame, so the second free wave buffer in the refill loop
+// always finds an empty ring. Thus both counters below count only a frame where
+// nothing was queued. Only that case loses audio.
 static void health_report(void)
 {
-    // Mirrors the M4A_DBG_* order in rp2350/m4a_mix.c: each entry is what a CLEAR
-    // bit means, and the first clear one is the answer. Kept as text here so the
-    // log reads as a diagnosis rather than a number to decode by hand.
+    // In the same order as M4A_DBG_* in rp2350/m4a_mix.c. Each entry is what a
+    // clear bit means, and the first clear bit is the answer. The text makes
+    // the log a diagnosis, not a number to decode.
     static const char *const kChainFaults[] = {
         "m4aSoundInit never published gSoundInfo (SOUND_INFO_PTR is wrong)",
         "MPlayOpen never ran: the music player chain is empty",
@@ -335,9 +298,8 @@ static void health_report(void)
     { extern volatile uint32_t gM4aDbgDsWrap; dsWrap = gM4aDbgDsWrap; }
 
     if (sPeak == 0) {
-        // Name the first broken link rather than just reporting silence. Only
-        // reached when the samples really are all zero, so the chain walk is
-        // the explanation and not a coincidence.
+        // Name the first broken link. This runs only when all samples are zero,
+        // so the chain is the explanation.
         verdict = "samples all zero, and every engine stage looks set";
         for (i = 0; i < sizeof(kChainFaults) / sizeof(kChainFaults[0]); i++) {
             if (!(flags & (1u << i))) {
@@ -351,8 +313,8 @@ static void health_report(void)
             verdict = "maxChans is 0: the mixer loop never runs";
         else if (active == 0)
             verdict = "no channel is live: nothing asked to be played";
-        // Everything above is engine-wide. Below is the live channel itself,
-        // which is the only place left for the silence to be hiding.
+        // The data above is for the full engine. Below is the live channel, the
+        // last place where the silence can be.
         else if (chType & 0x30)
             verdict = "the live channel is compressed/reverse: check cry= "
                       "in the peaks line, not this one";
@@ -380,10 +342,9 @@ static void health_report(void)
            (unsigned long)sZeroMix, (unsigned long)sDropped,
            (unsigned long)sPeak, (unsigned long)sNonZero);
 
-    // The engine's own view, which the host side cannot infer. bgm 0 means no
-    // song is playing, which is a complete and innocent explanation for a peak
-    // of 0 and has nothing to do with the 3DS at all; masterVol 0 or chans 0
-    // mean the mixer is structurally incapable of producing anything.
+    // The engine's own view, which the host cannot find. A value of bgm 0 means
+    // that no song plays, which fully explains a peak of 0. A value of
+    // masterVol 0 or chans 0 means that the mixer cannot make any sound.
     CtrLog("emerald3ds: m4a ident=%08lX spvb=%ld bgm=%08lX zero-returns=%lu "
            "masterVol=%u maxChans=%u active=%lu chain=%02lX\n",
            (unsigned long)ident, (long)spvb, (unsigned long)bgmStatus,
@@ -393,16 +354,16 @@ static void health_report(void)
            "sampleNonZero=%lu/64\n",
            (unsigned long)chType, (unsigned long)chStatus, (unsigned long)chEnv,
            (unsigned long)chFreq, (unsigned long)chNonZero);
-    // Split by subsystem, so each stage of the sound work can be signed off
-    // from the log rather than by ear: DirectSound, the PSG synthesiser, and
-    // the compressed/reverse path each report their own peak.
+    // Split by subsystem: DirectSound, the PSG synthesizer, and the compressed
+    // and reverse path each report their own peak. Thus each part of the sound
+    // work can be checked from the log.
     CtrLog("emerald3ds: mix peaks - directSound=%lu psg=%lu cry=%lu clipped=%lu\n",
            (unsigned long)dsPeak, (unsigned long)psgPeak,
            (unsigned long)cryPeak, (unsigned long)clipped);
 
-    // jumps= how many discontinuities, atFrameStart= how many of those landed on
-    // the first sample of a frame. atFrameStart close to jumps means the click
-    // is the frame boundary itself; close to 0 means it is in the audio.
+    // jumps= is the number of jumps. atFrameStart= is how many were on the
+    // first sample of a frame. Near jumps means that the click is at the frame
+    // boundary. Near 0 means that it is in the audio.
     CtrLog("emerald3ds: discontinuities - jumps=%lu atFrameStart=%lu "
            "biggest=%lu at sample %lu of %d, dsWrap=%lu\n",
            (unsigned long)sJumpCount, (unsigned long)sJumpAtFrameStart,
@@ -411,8 +372,8 @@ static void health_report(void)
     CtrLog("emerald3ds: audio verdict - %s\n", verdict);
 }
 
-// Run the mixer for one game frame and top up the DSP queue. Called from
-// Rp2350PresentFrame() on the main thread.
+// Run the mixer for one game frame and fill the DSP queue. Rp2350PresentFrame()
+// calls this on the main thread.
 void CtrAudioFrame(void)
 {
     int16_t mixed[SAMPLES_PER_FRAME * AUDIO_CHANNELS];
@@ -423,14 +384,13 @@ void CtrAudioFrame(void)
 
     sFrames++;
 
-    // 1. Produce. Mix straight into the ring; drop the frame if the ring is
-    //    full (the DSP is behind, which means we are running fast).
+    // 1. Produce. Mix directly into the ring. Drop the frame if the ring is
+    // full (the DSP is behind, so the game runs fast).
     n = Rp2350MixFrameStereo16(mixed, SAMPLES_PER_FRAME);
 
-    // The STEREO A/B switch, applied here rather than in the mixer: what it is
-    // asking is whether the two sides being different is what sounds wrong, and
-    // collapsing them after the fact answers that without changing a single
-    // thing about how they were generated.
+    // The STEREO A/B switch, applied here and not in the mixer. It tests if the
+    // difference between the two sides sounds wrong. A downmix here answers
+    // that without a change to how the sides are made.
     if (!Ctr3dsGetAudioDbg(CTR_AUDIO_DBG_STEREO)) {
         for (int i = 0; i < n; i++) {
             int16_t mono = (int16_t)(((int32_t)mixed[i * 2]
@@ -443,9 +403,9 @@ void CtrAudioFrame(void)
         sZeroMix++;
 
     for (int i = 0; i < n; i++) {
-        // Measured on the way past, before anything else can be blamed, and
-        // over both sides so a hard-panned line still registers. Widened first:
-        // -32768 negates to itself in int16.
+        // Measure here, before anything else can be at fault, and over both
+        // sides, so a hard-panned line counts. Widen first: -32768 negates to
+        // itself in int16.
         for (int c = 0; c < AUDIO_CHANNELS; c++) {
             int mag = mixed[i * AUDIO_CHANNELS + c] < 0
                           ? -(int)mixed[i * AUDIO_CHANNELS + c]
@@ -457,8 +417,8 @@ void CtrAudioFrame(void)
             }
         }
 
-        // Measured on the left channel only. Both carry the same discontinuity
-        // when there is one, and one channel keeps this to a subtract per frame.
+        // Measure the left channel only. Both channels have the same jump, and
+        // one channel costs one subtract for each frame.
         {
             int32_t cur = mixed[i * AUDIO_CHANNELS];
             int32_t d = cur - sPrevSample;
@@ -496,16 +456,15 @@ void CtrAudioFrame(void)
             sWaveBuf[i].status != NDSP_WBUF_DONE)
             continue;
 
-        // NOT counted as an underrun here. Producing one buffer per frame
-        // means the next free wave buffer legitimately finds an empty ring
-        // every single frame; only a frame that queued NOTHING has actually
-        // lost audio, and that is counted once, below.
+        // Do not count an underrun here. With one buffer for each frame, the
+        // next free wave buffer always finds an empty ring. Only a frame that
+        // queued nothing lost audio, and that is counted once, below.
         if (ring_fill() < BLOCK_SAMPLES)
             break;
 
         for (int s = 0; s < BLOCK_SAMPLES; s++) {
-            // Already PCM16 in the DSP's own layout from the mixer, so this
-            // is a copy rather than a conversion.
+            // The mixer already gives PCM16 in the DSP's layout, so this is a
+            // copy.
             const int16_t *slot = ring_slot(sRingTail);
 
             for (int c = 0; c < AUDIO_CHANNELS; c++)
@@ -520,11 +479,10 @@ void CtrAudioFrame(void)
         queuedThisFrame++;
     }
 
-    // A frame that handed the DSP nothing, split by whose fault it was. Held
-    // apart on purpose: `stalled` means every buffer was still QUEUED or
-    // PLAYING, so the DSP side has not returned one, which is what a starved
-    // NDSP thread looks like from here. `underruns` means a buffer WAS free and
-    // we had nothing to put in it. They call for opposite fixes.
+    // A frame that gave the DSP nothing, split by cause. `stalled` means every
+    // buffer was still QUEUED or PLAYING, so the DSP did not return one: a
+    // starved NDSP thread looks like this. `underruns` means a buffer was free
+    // and there was nothing to put in it. The two need opposite fixes.
     if (queuedThisFrame == 0) {
         if (ring_fill() >= BLOCK_SAMPLES)
             sStalled++;
