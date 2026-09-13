@@ -25,7 +25,7 @@
 #include "script.h"
 #include "battle.h"              // struct DisableStruct, for the header below
 #include "battle_controllers.h"
-#include "party_menu.h"          // GetItemEffectType, GetMonAilment
+#include "party_menu.h"          // GetItemEffectType
 #include "constants/items.h"
 #include "constants/item_effects.h"
 #include "constants/species.h"
@@ -35,6 +35,7 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "status_tags.h"
 
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
@@ -469,7 +470,12 @@ static void DrawPickCell(u8 slot)
 
     UiMonIcon(cx + PICK_ICON_X, cy + 8, (u16)species,
               GetMonData(mon, MON_DATA_PERSONALITY));
-    UiStatusIcon(cx + PICK_ICON_X, cy + 40, GetMonAilment(mon));
+
+    // The same tag the PARTY cell shows at the same moment, CNF included, which
+    // matters here: this is where a Persim Berry or a Full Heal gets its
+    // target. The picker has no animated layer, so a mon with two tags flips
+    // by full repaint, keyed in the shell's hash (UiStatusTagsKey).
+    UiStatusIcon(cx + PICK_ICON_X, cy + 40, UiStatusTag(slot));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
     UiText(cx + PICK_TEXT_X, cy + 8, name, UiThemeText(), UiThemeShadow());

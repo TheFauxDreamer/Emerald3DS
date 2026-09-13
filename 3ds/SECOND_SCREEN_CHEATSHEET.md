@@ -115,12 +115,13 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 947 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 164 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 979 / 213 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1187 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 247 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1043 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 369 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 944 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP and mon-icon animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/tab_party.c](ui/tab_party.c) | 1207 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/tab_bag.c](ui/tab_bag.c) | 687 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 206 / 44 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
@@ -234,12 +235,13 @@ can show through it. What happens next depends on the path:
 
 - **Second core:** `CtrBottomUpdate` asks for a **full** repaint on every frame
   `UiPartyTick` moves anything while an overlay is up. `DrawCell` bakes the
-  icons at the live frame and the HP block at its sliding value, so the grid
-  keeps animating under the panel. The snapshot still holds nothing that moves
+  icons at the live frame, the HP block at its sliding value and the status
+  badge at whichever tag is showing, so the grid keeps animating under the
+  panel. The snapshot still holds nothing that moves
   on the cheap path: while an overlay is up, the party's moving parts are only
   ever in a full paint.
-- **Single core:** the icons are baked at frame 0 and the HP block at whatever
-  value the last full paint caught, and nothing repaints for them. The layer
+- **Single core:** the icons are baked at frame 0, and the HP block and status
+  badge at whatever the last full paint caught, and nothing repaints for them. The layer
   has nothing to draw for the party, so `CtrBottomUpdate` also skips asking for
   the cheap animated redraw while the strip or the toast is up, or the host
   would upload an unchanged screen five times a second. (The notice needs no
@@ -435,6 +437,7 @@ in Options, being handed the Pokedex.
 | `top[8]` | `AchActive()->stateKey()`: the unlocked count and whether anything is unseen, on every tab, because the TROPHY tab's dot depends on it and an unlock can land on any of them. Reads only the provider's own bits, so it is safe before there is a save block |
 | `top[9]` | `UiAchToastStateKey()`, zero while the achievement toast is down and different for every toast, so two in a row still repaint between them |
 | then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
+| then | `UiStatusTagsKey()`: which slots are confused, on the same terms. Confusion is battle state (`gBattleMons[].status2`), not on the mon, so nothing above would see it arrive or clear. For the picker only, also which of a two-tag mon's badges is showing: it has no animated layer, so a repaint is its only way to flip. The grid leaves the phase out and flips on its animated layer |
 
 The party fields used to be folded on every tab, so in a battle each hit
 repainted BAG, MAP, DEX and EXTRA as well, for screens that show none of it.
@@ -473,8 +476,18 @@ frames, which the shell turns into `sNeedsRepaint`:
 
 | Tick | Runs while |
 |---|---|
-| `UiPartyTick(visible)` ([tab_party.c](ui/tab_party.c)) | the PARTY tab is up: mon icons cycle their two frames, HP bars slide |
+| `UiPartyTick(visible)` ([tab_party.c](ui/tab_party.c)) | the PARTY tab is up: mon icons cycle their two frames, HP bars slide, a two-tag status badge alternates |
 | `NoticeTick()` ([bottom_screen.c](ui/bottom_screen.c)) | the shiny panel is up |
+
+`UiStatusTagsTick()` ([status_tags.c](ui/status_tags.c)) also runs every frame,
+on every tab, straight after the step clock. It asks for nothing itself: it
+reads which party mons are confused and advances the tag phase, and the views
+that draw badges pick that up. The phase moves once a second, only on a
+`UiAnimStepped()` frame (60 divides both step periods) and only while some mon
+carries two tags, so on the grid a flip rides the icon step's repaint. It is
+also the one thing that still repaints the grid with BATTLE ANIM off. It
+ignores `gBattleMons` until the battle's first action selection, because
+`status2` still holds the previous battle's values until the intro refills it.
 
 `UiPartyTick` flips its icons on `UiAnimStepped()`, the shared step clock:
 every 6 frames with a second core, every 12 without. Its HP bars slide every
@@ -665,7 +678,9 @@ An animation whose change is not confined to rects it can name must ask for a
 full repaint instead. `UiPartyAnimOnly()` is how `UiPartyTick` tells the shell
 which. On the grid an icon flip and a sliding HP bar both live on the animated
 layer (the HP block has two restore rects of its own), so it answers TRUE and
-the shell takes the cheap path. The detail view's HP readout is not on that
+the shell takes the cheap path. So does the status badge, one 32x8 per slot
+under the icon (and one on the detail view's HP row), because a mon that is
+poisoned and confused alternates between the two. The detail view's HP readout is not on that
 layer, so a slide there answers FALSE and the shell rebuilds, and so does
 anything that moves under an overlay on the second-core path (section 5).
 

@@ -28,6 +28,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "matchup.h"
+#include "status_tags.h"
 #include "ui_quickball.h"
 #include "ui_achtoast.h"
 #include "ui_title.h"
@@ -776,6 +777,15 @@ static u32 UiStateHash(void)
                 hash *= 16777619u;
             }
         }
+
+        // Confusion, which is not in MON_DATA_STATUS or anywhere else on the
+        // mon (status_tags.h), so gaining or losing CNF would otherwise leave
+        // the badge stale. Which tag a two-tag mon is showing is folded only
+        // for the picker: it has no animated layer, so a repaint is its only
+        // way to flip. The grid flips on its animated layer, and folding the
+        // phase there would turn every flip into a full repaint.
+        hash ^= UiStatusTagsKey(sTab == UI_TAB_BAG);
+        hash *= 16777619u;
     }
 
     return hash;
@@ -981,6 +991,13 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     sAnimStepped = (++sAnimSub >= UI_ANIM_STEP_FRAMES);
     if (sAnimStepped)
         sAnimSub = 0;
+
+    // Which party mons are confused, and which of a mon's two tags is showing.
+    // After the step clock, because a tag only flips on a step, and before
+    // anything that draws a badge or hashes one. Every tab, not just PARTY:
+    // it has to see the battle's first action selection whichever tab is up,
+    // and BAG's target picker shows the same badges.
+    UiStatusTagsTick();
 
     // Nothing is interactive before the game starts, except that a tap anywhere
     // on the title screen counts as START (ui_title.c).

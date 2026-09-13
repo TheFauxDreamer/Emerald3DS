@@ -559,6 +559,64 @@ void UiFootprint(int x, int y, u16 species, u16 color)
 // Index 0 of the sheet's palette is the transparency marker and every badge
 // carries its own colours in the remaining slots, so one palette covers all of
 // them and an ordinary transparent blit is all that is needed.
+//
+// The one badge that is not in the sheet is CNF (UI_STATUS_CNF): confusion
+// lives in gBattleMons[].status2, and the game never draws it anywhere. It is
+// drawn here in the sheet's exact geometry instead, so it sits among the others
+// as one of them. The pill is 20px wide at x 6..25 of the badge's 32, with a
+// lighter pixel on each rounded corner, and the letters are 4x6 at the same x
+// as every other badge's. N is BRN's and F is FRZ's, pixel for pixel; C is
+// drawn in the rounded style of SLP's S. This table is the pill and nothing
+// else, like sChevron below, so it is drawn 6px in.
+//
+// 0 transparent, 1 body, 2 the corner pixels, 3 the lettering.
+#define CNF_INK_X  6
+#define CNF_INK_W  20
+
+static const u8 sConfusionBadge[8][CNF_INK_W] =
+{
+    {0,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,0},
+    {2,1,1,1,3,3,1,1,3,1,1,3,1,3,3,3,3,1,1,2},
+    {1,1,1,3,1,1,3,1,3,3,1,3,1,3,1,1,1,1,1,1},
+    {1,1,1,3,1,1,1,1,3,1,3,3,1,3,1,1,1,1,1,1},
+    {1,1,1,3,1,1,1,1,3,1,1,3,1,3,3,3,1,1,1,1},
+    {1,1,1,3,1,1,3,1,3,1,1,3,1,3,1,1,1,1,1,1},
+    {2,1,1,1,3,3,1,1,3,1,1,3,1,3,1,1,1,1,1,2},
+    {0,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,0},
+};
+
+// Teal, because no other badge is. FRZ's pale blue is the nearest, and this is
+// clearly darker and greener, so the two never read alike when one mon's badge
+// alternates. BGR555 like the sheet's own colours, so they go through the same
+// conversion, and the corner a few 5-bit steps lighter than the body the way
+// the sheet's pairs are.
+static const u16 sConfusionPal[4] =
+{
+    0,
+    0x5288,     // body,   RGB( 65,164,164)
+    0x630C,     // corner, RGB( 98,197,197)
+    0x7FFF,     // lettering, the sheet's white
+};
+
+static void DrawConfusionBadge(int x, int y)
+{
+    u16 pal[4];
+
+    for (int i = 1; i < 4; i++)
+        pal[i] = UiBgr555ToRgb565(sConfusionPal[i]);
+
+    for (int row = 0; row < 8; row++)
+    {
+        for (int col = 0; col < CNF_INK_W; col++)
+        {
+            u8 ink = sConfusionBadge[row][col];
+
+            if (ink != 0)
+                UiPixel(x + CNF_INK_X + col, y + row, pal[ink]);
+        }
+    }
+}
+
 void UiStatusIcon(int x, int y, u8 ailment)
 {
     static u8   tiles[0x400];      // the size sSpriteSheet_StatusIcons declares
@@ -566,6 +624,12 @@ void UiStatusIcon(int x, int y, u8 ailment)
     static bool8 loaded;
 
     const u8 *icon;
+
+    if (ailment == UI_STATUS_CNF)
+    {
+        DrawConfusionBadge(x, y);
+        return;
+    }
 
     // Matches UpdatePartyMonAilmentGfx(): the party menu hides the sprite for
     // both of these rather than drawing anything.
