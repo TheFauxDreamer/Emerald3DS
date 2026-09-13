@@ -30,7 +30,12 @@
 // backdrop fill (skipped pixels keep the previous frame's contents); alpha
 // blending reads the "below" pixel and layer byte that may be stale from the
 // previous frame during the backdrop pass; sprites can alpha-blend over
-// sprites; OBJ-window (DISPCNT bit 15) enables windowing but has no region.
+// sprites.
+//
+// The OBJ window is implemented, in both renderers: a sprite in OBJ mode 2 is
+// never drawn, and with DISPCNT bit 15 set its opaque texels are the window's
+// region (see winRowFor). Both used to draw those sprites as ordinary ones and
+// give the window no region at all.
 
 #include "ppu.h"
 
@@ -154,12 +159,27 @@ static void winrowFill(uint16_t hrange, uint8_t val) {
     memset(&winrow[start], val, end - start);
 }
 
+static void objWinFill(int y, uint8_t val);   // with the sprite list below
+
 // Returns the row's mask array, or NULL meaning "mask is 0x3f everywhere".
+//
+// The OBJ window (DISPCNT bit 15) is the silhouette of every sprite in OBJ
+// mode 2, and inside it the layers come from WINOUT's high byte. It ranks
+// below WIN0 and WIN1 and above the outside, so it is stamped straight over
+// the outside fill and the two rectangles then overwrite it as before.
+//
+// This is what the battle's metal shine and stat-change effects stand on.
+// CreateInvisibleSpriteCopy (src/battle_anim_mons.c) makes a priority-0,
+// mode-2 copy of the battler so the effect on BG1 shows only inside the mon.
+// Without a region, that copy was drawn as an ordinary sprite in front of
+// everything, including the textbox, and the effect itself never showed.
 static const uint8_t *winRowFor(int y) {
     if (!F.windowsOn) return NULL;
     if (winrow_y != y) {
         winrow_y = y;
         memset(winrow, F.winout & 0x3f, WIDTH);
+        if (F.dispcnt & 0x8000)
+            objWinFill(y, (F.winout >> 8) & 0x3f);
         // win1 first, then win0 overwrites: matches the reference's win0-first
         // priority check.
         if ((F.dispcnt & 0x4000) && inWindowRange(y, F.win1v))
@@ -458,9 +478,15 @@ static int g_nspr;
 // skip-scanning the whole list 4 times per line.
 static uint8_t g_sprByPrio[4][128] PPU_EWRAM;
 static int g_nsprByPrio[4];
+// OBJ-window sprites (mode 2) share g_spr, filled from the far end:
+// g_spr[127 - k] for k < g_nobjwin. Each OAM entry is one sprite or the
+// other, so the two ends can never meet, and this costs no new buffer (the
+// RP2350's EWRAM region is packed to the byte).
+static int g_nobjwin;
 
 static void buildSpriteList(uint16_t dispcnt) {
     g_nspr = 0;
+    g_nobjwin = 0;
     g_nsprByPrio[0] = g_nsprByPrio[1] = g_nsprByPrio[2] = g_nsprByPrio[3] = 0;
     if (!(dispcnt & 0x1000)) return;
     // OAM order ascending; render walks the list backwards to keep the
@@ -475,7 +501,11 @@ static void buildSpriteList(uint16_t dispcnt) {
         if (!affine && (a0 & 0x0200)) continue;  // disabled
         int shape = (a0 >> 14) & 3;
         if (shape == 3) continue;
-        sprite_t *s = &g_spr[g_nspr++];
+        // OBJ mode 2 is the OBJ window. Never drawn: it only marks the
+        // window's region, and only while DISPCNT has that window on.
+        bool objwin = ((a0 >> 10) & 3) == 2;
+        if (objwin && !(dispcnt & 0x8000)) continue;
+        sprite_t *s = objwin ? &g_spr[127 - g_nobjwin++] : &g_spr[g_nspr++];
         s->w = obj_sizes[shape][(a1 >> 14) & 3][0];
         s->h = obj_sizes[shape][(a1 >> 14) & 3][1];
         s->affine = (uint8_t)affine;
@@ -500,6 +530,7 @@ static void buildSpriteList(uint16_t dispcnt) {
             s->pc = (int16_t)signed16(ld16(OAMb, mb + 22));
             s->pd = (int16_t)signed16(ld16(OAMb, mb + 30));
         }
+        if (objwin) continue;
         int prio = s->priority;
         g_sprByPrio[prio][g_nsprByPrio[prio]++] = (uint8_t)(g_nspr - 1);
     }
@@ -778,6 +809,40 @@ static bool objPixel(const sprite_t *s, int x, int y, int *palIdx) {
     if (!colorIndex) return false;
     *palIdx = 0x100 + (s->color256 ? colorIndex : s->palette * 16 + colorIndex);
     return true;
+}
+
+// Stamp the OBJ window's region on line y into winrow: every opaque texel of
+// every mode-2 sprite on the line. Walks exactly the coordinates spritesLine
+// draws (the same row test, flips and affine stepping), one objPixel per
+// pixel. These sprites exist only for a handful of effects, so none of
+// spritesLine's fast paths are worth copying.
+static void objWinFill(int y, uint8_t val) {
+    for (int k = 0; k < g_nobjwin; k++) {
+        const sprite_t *s = &g_spr[127 - k];
+        int row = y - s->oy;
+        if (row < 0 || row >= s->drawH) continue;
+        int x0 = (s->ox < 0) ? -s->ox : 0;
+        int x1 = (s->ox + s->drawW > WIDTH) ? WIDTH - s->ox : s->drawW;
+        int palIdx;
+        if (s->affine) {
+            int w = s->w, h = s->h;
+            int dy = row - s->drawH / 2;
+            int32_t fx = s->pa * (x0 - s->drawW / 2) + s->pb * dy;
+            int32_t fy = s->pc * (x0 - s->drawW / 2) + s->pd * dy;
+            for (int x = x0; x < x1; x++, fx += s->pa, fy += s->pc) {
+                int px = (fx >> 8) + w / 2;
+                int py = (fy >> 8) + h / 2;
+                if (px < 0 || py < 0 || px >= w || py >= h) continue;
+                if (objPixel(s, px, py, &palIdx)) winrow[s->ox + x] = val;
+            }
+        } else {
+            int py = s->flipV ? s->h - 1 - row : row;
+            for (int x = x0; x < x1; x++) {
+                int px = s->flipH ? s->w - 1 - x : x;
+                if (objPixel(s, px, py, &palIdx)) winrow[s->ox + x] = val;
+            }
+        }
+    }
 }
 
 // Render the sprites' slice of scanline y. priority < 0 means "all priorities"

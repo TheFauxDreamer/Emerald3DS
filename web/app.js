@@ -219,7 +219,28 @@ function windowMask(x, y) {
     return (u16[(REG + 0x48) >> 1] >> 8) & 0x3f;
   }
 
+  if ((dispcnt & 0x8000) && objWindow[y * WIDTH + x]) {
+    return (u16[(REG + 0x4a) >> 1] >> 8) & 0x3f;
+  }
+
   return u16[(REG + 0x4a) >> 1] & 0x3f;
+}
+
+// The OBJ window's region for the frame: set wherever a sprite in OBJ mode 2
+// has an opaque texel. Such sprites are never drawn (renderSprites skips them
+// outside this pass), and windowMask gives the region WINOUT's high byte,
+// below WIN0 and WIN1 and above the outside. Kept in step with objWinFill in
+// rp2350/ppu.c; both used to draw these sprites and give the window no region.
+const objWindow = new Uint8Array(WIDTH * HEIGHT);
+
+function stampObjWindow(x, y) {
+  if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) return;
+  objWindow[y * WIDTH + x] = 1;
+}
+
+function buildObjWindow(dispcnt) {
+  objWindow.fill(0);
+  if (dispcnt & 0x8000) renderSprites(dispcnt, null, true);
 }
 
 function activeBlendColor(color, layer, pixel, effectsEnabled) {
@@ -433,7 +454,9 @@ function renderBgs(dispcnt) {
   }
 }
 
-function renderSprites(dispcnt, priority = null) {
+// `objWindowPass` walks only the OBJ-window sprites (mode 2) and stamps them
+// into objWindow instead of drawing; the normal pass skips them.
+function renderSprites(dispcnt, priority = null, objWindowPass = false) {
   if (!(dispcnt & 0x1000)) return;
   const mapping1d = dispcnt & 0x40;
   const sizes = [
@@ -452,6 +475,7 @@ function renderSprites(dispcnt, priority = null) {
     if (!affine && (a0 & 0x0200)) continue;
     const shape = (a0 >> 14) & 3;
     if (shape === 3) continue;
+    if ((((a0 >> 10) & 3) === 2) !== objWindowPass) continue;
     const [w, h] = sizes[shape][(a1 >> 14) & 3];
     const color256 = a0 & 0x2000;
     const spritePriority = (a2 >> 10) & 3;
@@ -485,7 +509,9 @@ function renderSprites(dispcnt, priority = null) {
           const py = ((pc * dx + pd * dy) >> 8) + texCy;
           if (px < 0 || py < 0 || px >= w || py >= h) continue;
           const color = objPixel(tileBase, px, py, w, color256, palette, mapping1d);
-          if (color) putPixel(ox + x, oy + y, color, 0x10);
+          if (!color) continue;
+          if (objWindowPass) stampObjWindow(ox + x, oy + y);
+          else putPixel(ox + x, oy + y, color, 0x10);
         }
       }
     } else {
@@ -494,7 +520,9 @@ function renderSprites(dispcnt, priority = null) {
           const px = a1 & 0x1000 ? w - 1 - x : x;
           const py = a1 & 0x2000 ? h - 1 - y : y;
           const color = objPixel(tileBase, px, py, w, color256, palette, mapping1d);
-          if (color) putPixel(ox + x, oy + y, color, 0x10);
+          if (!color) continue;
+          if (objWindowPass) stampObjWindow(ox + x, oy + y);
+          else putPixel(ox + x, oy + y, color, 0x10);
         }
       }
     }
@@ -518,6 +546,7 @@ function renderTiled(dispcnt) {
 function render() {
   const dispcnt = u16[REG >> 1];
   const mode = dispcnt & 7;
+  buildObjWindow(dispcnt);
   if (mode === 3) renderBitmapMode3();
   else if (mode === 4) renderBitmapMode4(dispcnt);
   else renderTiled(dispcnt);
