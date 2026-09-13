@@ -4043,12 +4043,22 @@ static void Cmd_endselectionscript(void)
     *(gBattlerAttacker + gBattleStruct->selectionScriptFinished) = TRUE;
 }
 
+#ifdef UBFIX
+// UB: Most playanimation scripts give no argument, so the pointer is NULL.
+// A GBA reads BIOS at address 0. On the 3DS, address 0 is not mapped.
+static const u16 sNoAnimArgument = 0;
+#endif
+
 static void Cmd_playanimation(void)
 {
     const u16 *argumentPtr;
 
     gActiveBattler = GetBattlerForBattleScript(gBattlescriptCurrInstr[1]);
     argumentPtr = T2_READ_PTR(gBattlescriptCurrInstr + 3);
+#ifdef UBFIX
+    if (argumentPtr == NULL)
+        argumentPtr = &sNoAnimArgument;
+#endif
 
     if (gBattlescriptCurrInstr[2] == B_ANIM_STATS_CHANGE
      || gBattlescriptCurrInstr[2] == B_ANIM_SNATCH_MOVE
@@ -4093,6 +4103,10 @@ static void Cmd_playanimation_var(void)
     gActiveBattler = GetBattlerForBattleScript(gBattlescriptCurrInstr[1]);
     animationIdPtr = T2_READ_PTR(gBattlescriptCurrInstr + 2);
     argumentPtr = T2_READ_PTR(gBattlescriptCurrInstr + 6);
+#ifdef UBFIX
+    if (argumentPtr == NULL)
+        argumentPtr = &sNoAnimArgument;
+#endif
 
     if (*animationIdPtr == B_ANIM_STATS_CHANGE
      || *animationIdPtr == B_ANIM_SNATCH_MOVE
