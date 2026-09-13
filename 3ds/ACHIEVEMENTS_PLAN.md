@@ -127,6 +127,36 @@ the save does not:
   an in-place rewrite. RESYNC keeps the places, since nothing can re-derive
   them.
 
+**A ninth commit** opened the four event islands and added six post-game rows
+([EVENT_ISLANDS_PLAN.md](EVENT_ISLANDS_PLAN.md) is the full record):
+
+- **75 achievements: 59 main, 16 post-game.** Five Legendary rows are the
+  island catches: Southern Secret [69], Faraway Friend [70], Out of This World
+  [71], Rainbow Wing [72] and Silver Wing [73]. Each reads a flag the island's
+  script sets only on a catch. Deoxys's is `FLAG_BATTLED_DEOXYS`, which despite
+  its name is set only on the catch branch. New Adventures Await [74], in Story,
+  counts the four event items in the bag.
+- **The items are handed over, not distributed.** Emerald only gave them out by
+  Record Mixing and Mystery Gift. `data/scripts/ctr3ds_event_tickets.inc` gives
+  whichever are still needed after the Hall of Fame: Dad does it in the scene
+  where he brings the S.S. Ticket, and any S.S. Tidal ferry attendant does it
+  for a save already past that scene. It sets what the distributions set: the
+  item, its `FLAG_ENABLE_SHIP_*` flag, and `FLAG_RECEIVED_*` where there is one.
+- **The first fenced data change.** `assemble_s` passes `-DPLATFORM_3DS=1` to
+  its cpp stage, so data scripts can use `#if PLATFORM_3DS` like the `src/`
+  hooks. Without the define, the preprocessed `event_scripts.s` differs from the
+  unmodified tree's only in blank lines and cpp line markers.
+- **A new condition kind, `ACH_ITEM_LIST`,** counts items in the bag through
+  `CheckBagHasItem`, which handles the encrypted quantities. It counts the
+  items rather than their ferry flags because the old Cable Club Eon Ticket
+  script sets the flag even when a full bag stopped `giveitem`. Key items can't
+  leave the bag, so the count only goes up. Inside the Battle Pyramid,
+  `CheckBagHasItem` reads the Pyramid bag, so a locked row reads low there,
+  which can't unlock anything.
+- **A row can carry a hint,** shown in place of its description until it is
+  earned. New Adventures Await's says "Ask any ferry attendant for the rest",
+  for the saves that were already past Dad's scene when this build arrived.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists

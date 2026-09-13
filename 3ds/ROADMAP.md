@@ -713,7 +713,7 @@ run (published as the `emerald3ds-elf` artifact alongside `emerald3ds.map`).
 
 # Part E: Achievements (built in; RetroAchievements later, maybe)
 
-The built-in set is done: 69 achievements on MAIN and POST-GAME pages (the
+The built-in set is done: 75 achievements on MAIN and POST-GAME pages (the
 post-game ones hidden until the Hall of Fame), the TROPHY tab and the unlock
 toast. [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record. What
 is left:

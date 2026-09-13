@@ -82,9 +82,14 @@ compile_c() {  # $1 = source .c, $2 = out .o
     || { echo "error: failed to build $1 (drop the 2>/dev/null in compile_c to see why)" >&2; return 1; }
 }
 
+# The data files get -DPLATFORM_3DS too, so a script can carry a 3DS-only
+# change behind #if PLATFORM_3DS the way the src/ hooks do. The one that does
+# is the event items (data/scripts/ctr3ds_event_tickets.inc and its four
+# callers). Nothing the data files include tests it, so nothing else in them
+# changes, and the top-level Makefile's builds never define it.
 assemble_s() { # $1 = data .s, $2 = out .o
   $PP "$1" charmap.txt \
-    | $CC -E -I include - \
+    | $CC -E -DPLATFORM_3DS=1 -I include - \
     | $PP -ie "$1" charmap.txt \
     | $AS -march=armv6k -mfloat-abi=hard -I include -o "$2" -
 }

@@ -2,10 +2,11 @@
 // bottom screen reads them through (achievements.h).
 //
 // Every condition is read through the game's own accessors -- FlagGet,
-// GetGameStat, the Pokedex counts -- for the reason SECOND_SCREEN_CHEATSHEET.md
-// gives for the whole bottom screen: stats are XOR-encrypted and flags live
-// behind gSaveBlock1Ptr, so a raw read could disagree with the game's own
-// screens. Nothing here writes game state.
+// GetGameStat, CheckBagHasItem, the Pokedex counts -- for the reason
+// SECOND_SCREEN_CHEATSHEET.md gives for the whole bottom screen: stats and bag
+// quantities are XOR-encrypted and flags live behind gSaveBlock1Ptr, so a raw
+// read could disagree with the game's own screens. Nothing here writes game
+// state.
 //
 // This is a GAME-SIDE translation unit under the two-worlds rule in bridge.h:
 // game headers plus bridge.h, never <3ds.h>. The unlocked bits are handed to
@@ -24,6 +25,7 @@
 
 #include "global.h"
 #include "event_data.h"               // FlagGet
+#include "item.h"                     // CheckBagHasItem
 #include "main.h"                     // gMain
 #include "overworld.h"                // CB2_Overworld, GetGameStat
 #include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag
@@ -31,6 +33,7 @@
 #include "region_map.h"               // Ctr3dsGetMapSecType
 #include "constants/flags.h"
 #include "constants/game_stat.h"
+#include "constants/items.h"
 #include "constants/layouts.h"
 #include "constants/maps.h"
 #include "constants/region_map_sections.h"
@@ -46,6 +49,7 @@ enum
     ACH_FLAG,          // FlagGet(arg)
     ACH_FLAG_COUNT,    // how many of `count` flags from `arg`, `step` apart, are set
     ACH_FLAG_LIST,     // how many of the `count` flags in `list` are set
+    ACH_ITEM_LIST,     // how many of the `count` items in `list` are in the bag
     ACH_STAT,          // GetGameStat(arg)
     ACH_DEX_HOENN,     // kinds owned in the Hoenn Pokedex
     ACH_CAUGHT,        // owns species `arg` or, if set, species `arg2`
@@ -70,10 +74,13 @@ struct AchDef
     u8  step;          // ACH_FLAG_COUNT only
     const char *title;
     const char *desc;
-    const u16 *list;   // ACH_FLAG_LIST only
+    // Shown in place of desc until the row is earned (a hidden row shows
+    // neither), to say how to finish it. NULL for none.
+    const char *hint;
+    const u16 *list;   // ACH_FLAG_LIST and ACH_ITEM_LIST
     u16 arg;
     u16 arg2;          // ACH_CAUGHT only: a second species that also counts
-    u16 count;         // ACH_FLAG_COUNT and ACH_FLAG_LIST
+    u16 count;         // ACH_FLAG_COUNT, ACH_FLAG_LIST and ACH_ITEM_LIST
     u32 goal;          // unlocked once the value reaches this
 };
 
@@ -83,6 +90,8 @@ struct AchDef
     { .id = i, .title = t, .desc = d, .kind = ACH_FLAG_COUNT, .arg = f, .count = n, .step = s, .goal = g }
 #define FLAG_LIST(i, t, d, l, g) \
     { .id = i, .title = t, .desc = d, .kind = ACH_FLAG_LIST, .list = l, .count = ARRAY_COUNT(l), .goal = g }
+#define ITEM_LIST(i, t, d, h, l, g) \
+    { .id = i, .title = t, .desc = d, .hint = h, .kind = ACH_ITEM_LIST, .list = l, .count = ARRAY_COUNT(l), .goal = g }
 #define STAT(i, t, d, s, g) \
     { .id = i, .title = t, .desc = d, .kind = ACH_STAT, .arg = s, .goal = g }
 #define DEX_HOENN(i, t, d, g) \
@@ -118,12 +127,24 @@ static const u16 sHmFlags[] =
     FLAG_RECEIVED_HM_WATERFALL, FLAG_RECEIVED_HM_DIVE,
 };
 
+// The four event items, in the order they are handed over: Dad gives them after
+// the Hall of Fame, or any S.S. Tidal ferry attendant does for a save already
+// past that scene (data/scripts/ctr3ds_event_tickets.inc). They are key items,
+// which cannot be deposited, tossed or sold, so the count only goes up. Inside
+// the Battle Pyramid, CheckBagHasItem answers for the Pyramid bag instead
+// (src/item.c), so a locked row reads low there; that cannot unlock anything
+// falsely, and an unlock is never taken back.
+static const u16 sEventItems[] =
+{
+    ITEM_EON_TICKET, ITEM_AURORA_TICKET, ITEM_OLD_SEA_MAP, ITEM_MYSTIC_TICKET,
+};
+
 // The groups. Each is one page of the TROPHY tab and one colour, and a row's
 // page and colour are nothing but which group it is in, so neither can be
 // filed wrong. sGroups below lists them MAIN first, and within a page they
 // read as colour blocks in that order.
 //
-// IDS ARE PERMANENT. The next new achievement takes the next unused id (69 at
+// IDS ARE PERMANENT. The next new achievement takes the next unused id (75 at
 // the time of writing); a retired one leaves its id unused forever. Rows move
 // between groups freely, because only the id is stored. The debug page counts
 // duplicate or out-of-range ids, since C cannot check that at compile time.
@@ -246,11 +267,15 @@ static const struct AchDef sMainContests[] =
 // until then (see sRevealed). The National Pokedex is Birch's reward for it;
 // the abnormal weather that opens Terra Cave and Marine Cave only starts once
 // FLAG_SYS_GAME_CLEAR is set (Route119_WeatherInstitute_2F/scripts.inc); the
-// roaming Lati is released by it; and the S.S. Tidal to the Battle Frontier
-// only sails after it.
+// roaming Lati is released by it; the S.S. Tidal to the Battle Frontier only
+// sails after it; and the four event items only come after it.
 static const struct AchDef sPostStory[] =
 {
     FLAG(10, "A Bigger Journey Begins", "Get the National " POKEDEX, FLAG_SYS_NATIONAL_DEX),
+    // Mostly for saves already past Dad's scene, which have none of the four
+    // until they talk to a ferry attendant: the hint says so.
+    ITEM_LIST(74, "New Adventures Await", "Get all three tickets and the Old Sea Map",
+              "Ask any ferry attendant for the rest", sEventItems, 4),
 };
 
 // Sudowoodo is a special encounter rather than a legendary, but it is faced
@@ -259,9 +284,19 @@ static const struct AchDef sPostLegends[] =
 {
     FLAG(12, "Terra Firma",        "Face Groudon in the Terra Cave",  FLAG_DEFEATED_GROUDON),
     FLAG(13, "Deep Blue",          "Face Kyogre in the Marine Cave",  FLAG_DEFEATED_KYOGRE),
-    // The roaming one sets no flag when caught (only the Southern Island event
-    // does, and that needs the Eon Ticket), so this asks the Pokedex instead.
+    // The roaming one sets no flag when caught (only the Southern Island one
+    // does, below), so this asks the Pokedex instead.
     CAUGHT(17, "Eon Chaser",       "Catch the roaming Latias or Latios", SPECIES_LATIAS, SPECIES_LATIOS),
+    // The four event islands, opened by the items New Adventures Await counts.
+    // Each flag is set only on a catch, so these are about catching rather than
+    // facing, and they still work with the randomiser on.
+    FLAG(69, "Southern Secret",    "Catch the Lati on Southern Island", FLAG_CAUGHT_LATIAS_OR_LATIOS),
+    FLAG(70, "Faraway Friend",     "Catch Mew on Faraway Island",     FLAG_CAUGHT_MEW),
+    // Deoxys has no FLAG_CAUGHT_*. FLAG_BATTLED_DEOXYS, despite its name, is
+    // set only on the catch branch (BirthIsland_Exterior/scripts.inc).
+    FLAG(71, "Out of This World",  "Catch Deoxys on Birth Island",    FLAG_BATTLED_DEOXYS),
+    FLAG(72, "Rainbow Wing",       "Catch Ho-Oh atop Navel Rock",     FLAG_CAUGHT_HO_OH),
+    FLAG(73, "Silver Wing",        "Catch Lugia deep in Navel Rock",  FLAG_CAUGHT_LUGIA),
     FLAG(18, "Odd Tree",           "Deal with the tree by the Frontier", FLAG_DEFEATED_SUDOWOODO),
 };
 
@@ -539,6 +574,12 @@ static u32 Value(const struct AchDef *d)
     case ACH_FLAG_LIST:
         for (u16 i = 0; i < d->count; i++)
             if (FlagGet(d->list[i]))
+                n++;
+        return n;
+
+    case ACH_ITEM_LIST:
+        for (u16 i = 0; i < d->count; i++)
+            if (CheckBagHasItem(d->list[i], 1))
                 n++;
         return n;
 
@@ -881,6 +922,10 @@ static void LocalGet(u16 i, struct AchView *out)
         value = Value(d);
 
     out->progress = value > d->goal ? d->goal : value;
+
+    // Until it is earned, a row with a hint says how to finish it.
+    if (!out->unlocked && d->hint != NULL)
+        out->desc = d->hint;
 
     // The last few places are the hard ones to find. Only rows inside the
     // towns and routes, the places AppendPlaceName can name.

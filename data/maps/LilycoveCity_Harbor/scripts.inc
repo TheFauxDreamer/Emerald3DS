@@ -10,6 +10,11 @@ LilycoveCity_Harbor_EventScript_FerryAttendant::
 	lock
 	faceplayer
 	goto_if_unset FLAG_SYS_GAME_CLEAR, LilycoveCity_Harbor_EventScript_FerryUnavailable
+#if PLATFORM_3DS
+	@ The four event items (data/scripts/ctr3ds_event_tickets.inc), before the
+	@ ticket checks below so that they see them.
+	call Ctr3ds_EventScript_EventTicketsAtLilycove
+#endif
 	call LilycoveCity_Harbor_EventScript_GetEonTicketState
 	call LilycoveCity_Harbor_EventScript_GetAuroraTicketState
 	call LilycoveCity_Harbor_EventScript_GetOldSeaMapState
