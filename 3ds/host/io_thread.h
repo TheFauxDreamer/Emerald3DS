@@ -21,9 +21,10 @@ int  CtrIoRunning(void);
 // Ask the writer for a pass. Cheap, never blocks, callable from any thread.
 void CtrIoWake(void);
 
-// The jobs a pass runs, each owned by the file whose state it writes. Both are
+// The jobs a pass runs, each owned by the file whose state it writes. All are
 // also called directly on the exit path, after the writer has stopped.
 void CtrLogDrain(void);        // 3ds/host/log.c
 void CtrSettingsDrain(void);   // 3ds/host/settings.c
+void CtrAchDrain(void);        // 3ds/host/achievements.c
 
 #endif // CTR_IO_THREAD_H
