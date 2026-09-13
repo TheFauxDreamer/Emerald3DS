@@ -15,6 +15,7 @@
 
 #include "ui_draw.h"                // UI_STATUS_CNF
 #include "ui_shell.h"               // UiAnimStepped
+#include "ui_team.h"                // UiPartyMon
 #include "status_tags.h"
 
 // How long each tag holds, in displayed frames: one second.
@@ -80,8 +81,10 @@ static u8 ReadConfused(void)
         // between the struct still holds the outgoing mon, confusion and all.
         // Without this, CNF would flash on the cell of the mon coming in. The
         // personality sits in the plaintext header, so this costs no decrypt.
+        // Through UiPartyMon because gBattlerPartyIndexes holds field slots,
+        // and the game's party menu may have the array in battle order.
         if (gBattleMons[b].personality
-            != GetMonData(&gPlayerParty[slot], MON_DATA_PERSONALITY))
+            != GetMonData(UiPartyMon((u8)slot), MON_DATA_PERSONALITY))
             continue;
 
         mask |= 1 << slot;
@@ -100,7 +103,7 @@ static u8 GetTags(u8 slot, u8 tags[2])
     if (slot >= PARTY_SIZE)
         return 0;
 
-    mon = &gPlayerParty[slot];
+    mon = UiPartyMon(slot);
 
     // GetMonAilment() without its last step, the Pokerus check. That one
     // decrypts the mon, and its answer draws nothing (the party menu shows no

@@ -115,13 +115,14 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1187 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1198 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 247 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1043 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 369 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 1207 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 687 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
-| [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 206 / 44 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
+| [ui/tab_party.c](ui/tab_party.c) | 1256 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/tab_bag.c](ui/tab_bag.c) | 697 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 209 / 44 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
+| [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 67 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
@@ -438,8 +439,9 @@ in Options, being handed the Pokedex.
 | `top[7]` | `UiTitleStateKey()`: zero unless the title's PRESS START is up, otherwise which half of TOUCH TO START's blink is showing, **only while `!sInGame`**. Timed off the banner's own frame count (`Ctr3dsTitlePromptClock()`), so it keeps a fixed phase with the top screen |
 | `top[8]` | `AchActive()->stateKey()`: the unlocked count and whether anything is unseen, on every tab, because the TROPHY tab's dot depends on it and an unlock can land on any of them. Reads only the provider's own bits, so it is safe before there is a save block |
 | `top[9]` | `UiAchToastStateKey()`, zero while the achievement toast is down and different for every toast, so two in a row still repaint between them |
-| then | 6 party mons x 5 fields (species, HP, max HP, level, status), **only while the PARTY tab or BAG's target picker is up** |
+| then | 6 party mons x 5 fields (species, HP, max HP, level, status), read through `UiPartyMon`, **only while the PARTY tab or BAG's target picker is up** |
 | then | `UiStatusTagsKey()`: which slots are confused, on the same terms. Confusion is battle state (`gBattleMons[].status2`), not on the mon, so nothing above would see it arrive or clear. For the picker only, also which of a two-tag mon's badges is showing: it has no animated layer, so a repaint is its only way to flip. The grid leaves the phase out and flips on its animated layer |
+| then | `UiTeamKey()`: which slots are a battle partner's, on the same terms. Their Pokemon are already in the party during the battle transition, so nothing above moves when the battle starts and they take the partner's colour, or when it ends and they lose it |
 
 The party fields used to be folded on every tab, so in a battle each hit
 repainted BAG, MAP, DEX and EXTRA as well, for screens that show none of it.
@@ -894,6 +896,28 @@ from a live mon, route them through `Ctr3dsMapWildSpecies()` (wild encounter
 tables) or `Ctr3dsMapSpecies()` ([tweaks.h](tweaks.h)) or the list lies when the
 randomiser is on.
 
+**The party in battle: `UiPartyMon(slot)`, not `&gPlayerParty[slot]`.**
+[ui_team.h](ui/ui_team.h) explains both reasons:
+
+- While the in-battle party menu, or the summary screen opened from it, is up,
+  `gPlayerParty` is physically in battle order (`UpdatePartyToBattleOrder`,
+  `src/party_menu.c`). `UiPartyMon` undoes that through a `PLATFORM_3DS` flag
+  the two order functions set and clear (`Ctr3dsPartyInBattleOrder`), so a
+  slot here is always the same Pokemon. The raw read moves HP bars, badges and
+  the selection onto another mon for as long as the menu is up.
+- Beside a partner trainer (`BATTLE_TYPE_INGAME_PARTNER`: Steven at the Space
+  Center, the Battle Frontier's multi partners), slots 3-5 are the partner's
+  (`FillPartnerParty`, `src/battle_tower.c`). `UiAllySlot` says which, and a
+  view that lists the party paints them with `UiAllyFrameGround`, in the colour
+  the game's own party menu gives them. The PARTY strip's `UiAllyTag` names the
+  partner. They stay selectable and pickable: the game lets you use an item on
+  them, and the colour is there so that is a choice rather than a slip.
+
+A slot number still indexes `gPlayerParty` directly where the game itself does
+that: the out-of-battle item use in [tab_bag.c](ui/tab_bag.c), and
+`Ctr3dsQueueBattleItem`, which only acts during action selection, when no menu
+has the party shuffled.
+
 **Statics are the memory model.** The UI layer is deliberately heap-free.
 Caches are file statics: `UiMonPic` caches one species'
 expanded sheet, `UiWindowFrame` caches the converted palette keyed on frame id,
@@ -1206,6 +1230,9 @@ appears.
 | A readout goes stale until you switch tabs | State changes without a touch and has no state key. |
 | Every tap lands at (0,0) | Reading touch coordinates without the latch, or dropping the `justReleased` guard. |
 | Detail view reopens after a tab switch | Modal file statics survive the switch. Known bug. |
+| HP bars, badges or the selected mon jump to another Pokemon while the game's own party menu is open in battle | A raw `gPlayerParty[slot]` read. That menu keeps the array in battle order while it is up. Read through `UiPartyMon` (section 10). |
+| A battle partner's Pokemon look like the player's | A party view that does not ask `UiAllySlot` (section 10). In a partner battle slots 3-5 are the partner's. |
+| A battler is drawn in front of the textbox during a move's effect (top screen) | An OBJ-window sprite rendered as an ordinary one. `rp2350/ppu.c` implements the OBJ window now; see `docs/PORTING.md`, the reference-inherited defects. |
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
 | A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
