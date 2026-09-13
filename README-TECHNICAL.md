@@ -361,11 +361,12 @@ directory.
 | `3ds/bridge.h` | **The seam.** The only thing both worlds include. |
 | `3ds/gba_mem.c` | The `gGbaMem` block and the save-flash backing (game side). |
 | `3ds/tweaks.c` | EXP All, level cap, randomiser, bag sort, phone calls (game side). |
+| `3ds/achievements.c` | What each achievement is and when it unlocks, and the provider the TROPHY tab reads (game side). |
 | `3ds/build_objs.sh` | Game sources to `libpokeemerald.a` (ARM11). |
 | `3ds/Makefile`, `3ds/emerald3ds.rsf` | Host sources, link, and makerom packaging. |
 | `3ds/meta/` | Icon, banner art and banner audio for the CIA. |
-| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c` (including the rasteriser's worker thread), `audio.c`, `save.c`, `settings.c`, `log.c`, `io_thread.c` (the background SD writer). |
-| `3ds/ui/` | **The second screen**, game side: `bottom_screen.c` is the shell, one `tab_*.c` per tab, `view_encounters.c` and `matchup.c` are overlays, `ui_draw.c` and `ui_text.c` are the primitives. |
+| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c` (including the rasteriser's worker thread), `audio.c`, `save.c`, `settings.c`, `log.c`, `io_thread.c` (the background SD writer), `achievements.c` (the per-playthrough achievement bits). |
+| `3ds/ui/` | **The second screen**, game side: `bottom_screen.c` is the shell, one `tab_*.c` per tab, `view_encounters.c` and `matchup.c` are overlays, `ui_quickball.c` and `ui_achtoast.c` are the two overlays that live in files of their own, `ui_draw.c` and `ui_text.c` are the primitives. |
 | `rp2350/` | The RP2350 port this is built on. `ppu.c` and the `m4a_*.c` pair are shared. |
 | `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald sources and assets. |
 | `web/`, `tools/wasm_*` | The WASM build, retained as the rasteriser reference. |
@@ -384,7 +385,8 @@ Working documents live beside the code they describe, all under `3ds/`:
   rasteriser has its own core. Proposed, not started.
 - [ACHIEVEMENTS_PLAN.md](3ds/ACHIEVEMENTS_PLAN.md), built-in achievements on a
   sixth bottom-screen tab with an unlock toast over any tab, plus why real
-  RetroAchievements is not the first step. Proposed, not started.
+  RetroAchievements is not the first step. Implemented, not yet tested on a
+  console.
 
 The RP2350 and WASM targets still build (`make wasm`, and see
 [docs/BUILD.md](docs/BUILD.md)). The WASM build is deliberately kept:
