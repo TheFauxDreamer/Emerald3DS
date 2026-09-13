@@ -1,14 +1,15 @@
-// The achievement toast: a strip across the top of the bottom screen that says
-// something was just unlocked, over whichever tab is up.
+// The achievement toast: a strip across the top of the bottom screen that
+// announces an unlock, over the current tab.
 //
-// This is an OVERLAY in the sense section 5 of 3ds/SECOND_SCREEN_CHEATSHEET.md
-// means it, the third after the shiny notice and the quick-throw strip, and it
-// has the quick-throw strip's shape: its own file, and the shell calls Active,
-// Draw, Touch, StateKey and Tick.
+// It is an overlay (3ds/SECOND_SCREEN_CHEATSHEET.md, section 5), the third
+// after the shiny notice and the quick-throw strip. It has the strip's shape:
+// its own file, and the shell calls Active, Draw, Touch, StateKey and Tick.
 //
-// It follows the four overlay rules: painted after the tab, takes every touch
-// inside its rect, has a real control (VIEW, which opens the TROPHY tab), and
-// expires on its own.
+// It follows the four overlay rules:
+// - It paints after the tab.
+// - It takes every touch in its rect.
+// - It has a real control: VIEW, which opens the TROPHY tab.
+// - It closes by itself.
 
 #ifndef CTR_UI_ACHTOAST_H
 #define CTR_UI_ACHTOAST_H
@@ -18,15 +19,11 @@
 
 // 40x5 tiles along the top of the content area, y 0..40.
 //
-// The Y is the whole reason for the size, the same argument ui_quickball.h
-// makes from the other end. The shiny notice occupies y 40..152 and the strip
-// y 152..192, so ending at 40 makes all three ABUT EXACTLY and tile the 192px
-// content area between them: no overlap, no torn border, and all three can be
-// up together -- a catchable shiny caught by the quick throw, say, which is
-// precisely when a shiny-catch achievement unlocks.
+// The shiny notice uses y 40..152 and the strip uses y 152..192. Thus the three
+// touch exactly and fill the 192px content area, with no overlap. All three can
+// be up at the same time, for example when the quick throw catches a shiny.
 //
-// UiWindowFrame takes TILES, so these are tiles, and 5*8 == 40 is not a
-// coincidence to be broken casually.
+// UiWindowFrame takes tiles, so these values are in tiles: 5*8 is 40.
 #define UI_AT_TX 0
 #define UI_AT_TY 0
 #define UI_AT_TW 40
@@ -40,17 +37,16 @@
 bool8 UiAchToastActive(void);
 void  UiAchToastDraw(void);
 
-// Takes a touch inside the strip. Returns TRUE when VIEW was tapped, which the
-// shell answers by switching to the TROPHY tab; the toast has already gone.
+// Takes a touch inside the strip. Returns TRUE when VIEW was tapped. The shell
+// then switches to the TROPHY tab. The toast is already closed.
 bool8 UiAchToastTouch(const CtrTouchState *t);
 
-// Once a frame, from the shell, while the game is running: counts the toast
-// down and brings on the next one waiting.
+// Called once each frame by the shell, while the game runs. It counts down the
+// toast and starts the next one in the queue.
 void  UiAchToastTick(void);
 
-// Cheap identity of what the strip shows, for the shell's repaint hash. Zero
-// while it is down, and different for every toast, so two in a row still
-// repaint between them.
+// A key for what the strip shows, for the shell's repaint hash. Zero while it
+// is down, and different for each toast, so two toasts in a row both repaint.
 u32   UiAchToastStateKey(void);
 
 #endif // CTR_UI_ACHTOAST_H

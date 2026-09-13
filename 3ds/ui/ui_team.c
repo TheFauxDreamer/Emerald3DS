@@ -1,6 +1,6 @@
 // Whose Pokemon each party slot holds. See ui_team.h.
 //
-// Pure reads, like matchup.c and status_tags.c. Nothing here writes.
+// This file only reads, like matchup.c and status_tags.c.
 
 #include "global.h"
 #include "main.h"                   // gMain.inBattle
@@ -16,8 +16,8 @@
 #include "ui_shell.h"
 #include "ui_team.h"
 
-// Text inset from the tag's edge: the two-pixel rule plus three of air, the
-// same five the PARTY tab's cheat tags leave.
+// The text inset from the tag's edge: the 2px rule and 3px of space, the same
+// 5px as the PARTY tab's cheat tags.
 #define TAG_PAD 5
 
 struct Pokemon *UiPartyMon(u8 slot)
@@ -25,11 +25,11 @@ struct Pokemon *UiPartyMon(u8 slot)
     if (slot >= PARTY_SIZE)
         slot = 0;
 
-    // While the party menu has the array in battle order, field slot `slot`
-    // is at the menu position GetPartyIdFromBattlePartyId names: that is
-    // exactly where UpdatePartyToBattleOrder copied it. It stays true while
-    // the menu is up, because a switch there (TrySwitchInPokemon) swaps the
-    // Pokemon and their order entries together.
+    // While the party menu has the array in battle order, field slot `slot` is
+    // at the menu position that GetPartyIdFromBattlePartyId gives.
+    // UpdatePartyToBattleOrder copied it there. This stays true while the menu
+    // is up, because a switch (TrySwitchInPokemon) swaps the Pokemon and their
+    // order entries together.
     if (gMain.inBattle && Ctr3dsPartyInBattleOrder())
         return &gPlayerParty[GetPartyIdFromBattlePartyId(slot)];
 
@@ -62,9 +62,9 @@ void UiAllyFrameGround(int x, int y, int w, int h)
     UiFillRect(x + 8, y + 8, w - 16, h - 16, UI_COL_ALLY_GROUND);
 }
 
-// The partner's name, from the first of their slots that holds a Pokemon.
-// FALSE with no partner, which also covers the frames either side of a
-// battle, when their Pokemon are in the party but no longer marked.
+// The partner's name, from the first of their slots that holds a Pokemon. FALSE
+// with no partner. That also covers the frames before and after a battle, when
+// their Pokemon are in the party but have no mark.
 static bool8 AllyName(u8 *name)
 {
     for (u8 i = MULTI_PARTY_SIZE; i < PARTY_SIZE; i++)
@@ -105,8 +105,8 @@ int UiAllyTag(int x, int y, int h)
 
     w = UiTextWidth(name) + TAG_PAD * 2;
 
-    // The achievement toast's two-step rule, in the partner's gold, around the
-    // same ground the partner's cells are painted in.
+    // The two-step rule of the achievement toast, in the partner's gold, around
+    // the same ground as the partner's cells.
     UiFillRect(x, y, w, h, UI_COL_ALLY_GROUND);
     UiRect(x, y, w, h, UI_COL_ALLY);
     UiRect(x + 1, y + 1, w - 2, h - 2, UI_COL_ALLY_EDGE);

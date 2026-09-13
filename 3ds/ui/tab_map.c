@@ -1,34 +1,26 @@
-// MAP tab: Hoenn's region map, drawn at 1:1, with a marker where the player is.
+// MAP tab: the Hoenn region map at 1:1, with a marker at the player's position.
 //
-// The art is the game's own -- the same tiles, tilemap and palette the PokeNav
-// draws -- reached through the accessors in the PLATFORM_3DS block of
-// src/region_map.c, because they are file-static there.
+// The art is the game's own: the PokeNav's tiles, tilemap and palette. The
+// accessors are in the PLATFORM_3DS block of src/region_map.c, because the data
+// is file-static there.
 //
-// Drawing the map writes nothing. Flying from it does, and that half of the
-// file is built the way the BAG tab's item use is built: every check the game
-// makes is made here too, the tap that commits is a separate deliberate tap
-// from the tap that selects, and the checks are re-run at the moment of
-// commit rather than trusted from when the button was drawn. See FlyState.
+// The map only reads. The fly controls write. They follow the rules of BAG's
+// item use: the game's own checks, a separate tap to commit, and a new check at
+// that moment. See FlyState.
 //
-// Three things about that art are not obvious and are worth stating once, since
-// getting any of them wrong produces a plausible-looking wrong picture:
+// Three facts about the art:
+// - The background is 8bpp, not 4bpp. UiBlit4bppTile cannot draw it.
+// - The tilemap is affine: BG2 has BG_ATTR_SCREENSIZE 2 and BG_ATTR_PALETTEMODE
+//   1. That is 64x64 tiles at one byte each, the 4096 bytes of map.bin. There
+//   are no flip bits and no palette bank. The byte is the tile id.
+// - The tile bytes are absolute palette indices in 112..143, because the game
+//   loads the map's 32 colors at BG_PLTT_ID(7). Thus the 256-entry palette
+//   below has only that part filled.
 //
-//   1. The background is 8bpp, not 4bpp. UiBlit4bppTile cannot draw it.
-//
-//   2. Its tilemap is an AFFINE one: BG2 is set up with BG_ATTR_SCREENSIZE 2 and
-//      BG_ATTR_PALETTEMODE 1 (src/region_map.c), and affine screen size 2 is
-//      64x64 tiles at ONE BYTE per entry, which is exactly the 4096 bytes
-//      map.bin decompresses to. So there are no 16-bit screen entries, no flip
-//      bits and no palette-bank field: the tile id is simply the byte.
-//
-//   3. Those tile bytes are ABSOLUTE palette indices in the 112..143 range,
-//      because the game loads the map's 32 colours at BG_PLTT_ID(7). Hence the
-//      256-entry palette below with only that slice filled.
-//
-// What is deliberately NOT used: InitRegionMap() and LoadRegionMapGfx(). They
-// drive BG layers, sprites and the task system on the top screen. The one piece
-// of src/region_map.c this file does lean on is the player's position, and only
-// because it is pure arithmetic -- see Ctr3dsGetRegionMapPlayerPos.
+// Do not use InitRegionMap() or LoadRegionMapGfx(). They use BG layers, sprites
+// and tasks on the top screen. The player's position is the only value used
+// from src/region_map.c, because it is only arithmetic
+// (Ctr3dsGetRegionMapPlayerPos).
 
 #include "global.h"
 #include "main.h"
@@ -42,8 +34,8 @@
 #include "field_effect.h"
 #include "field_weather.h"            // PlayRainStoppingSoundEffect
 #include "palette.h"                  // gPaletteFade
-#include "battle.h"                   // struct DisableStruct, for the header below
-#include "party_menu.h"               // gPartyMenu, whose slotId picks the flyer
+#include "battle.h"                   // struct DisableStruct
+#include "party_menu.h"               // gPartyMenu.slotId selects the flyer
 #include "constants/region_map_sections.h"
 #include "constants/flags.h"
 #include "constants/moves.h"
@@ -55,73 +47,61 @@
 #include "ui_shell.h"
 #include "view_encounters.h"
 
-// The drawn artwork's real extent inside the 64x64 tilemap: everything outside
-// this is the blank tile. Measured from map.bin rather than assumed, because the
-// MAPSEC grid (28x15 at offset 1,2) is smaller than the picture around it -- the
-// northern coast, Dewford's islands and the eastern edge all sit outside it.
+// The real area of the art in the 64x64 tilemap. Everything outside it is the
+// blank tile. These values come from map.bin. The MAPSEC grid (28x15 at 1,2) is
+// smaller than the picture.
 #define MAP_TW        31
 #define MAP_TH        19
 #define TILEMAP_STRIDE 64
 
-// 31 tiles is 248px in a 320px panel, so it centres with 36px each side, and 19
-// tiles is 152px, leaving exactly 40px for the caption. 2x would be 496x304 and
-// does not fit in either dimension, so 1x is the only scale -- which is also the
-// only pixel-perfect one.
+// The map is 31 tiles (248px) wide in a 320px panel, so it has 36px on each
+// side. It is 19 tiles (152px) tall, which leaves 40px for the caption. A 2x
+// scale does not fit. The 1x scale is also the only pixel-perfect scale.
 #define MAP_PX        ((CTR_BOTTOM_WIDTH - MAP_TW * 8) / 2)
 #define MAP_PY        0
 
-// The caption takes the rest of the content area. Both bands are whole tiles so
-// the window frame lands on tile boundaries: 19 + 5 = 24 tiles = 192px.
+// The caption uses the rest of the content area. Both bands are whole tiles:
+// 19 + 5 = 24 tiles = 192px.
 #define CAP_TY        MAP_TH
 #define CAP_TH        ((UI_CONTENT_H / 8) - MAP_TH)
 #define CAP_Y         (CAP_TY * 8)
 #define CAP_TEXT_Y    (CAP_Y + 12)
 #define CAP_MARGIN    10
 
-// The fly controls share the caption band's one interior row. The band is 5
-// tiles at 152..192 and its 8px frame leaves y 160..184, so a 22px button at
-// 161 sits inside it with a pixel to spare, and its glyph row lands on
-// CAP_TEXT_Y -- the button and the place name read as a single line.
+// The fly controls share the one interior row of the caption band. The band is
+// at y 152..192 and its frame leaves y 160..184. A 22px button at y 161 fits,
+// and its text lines up with CAP_TEXT_Y.
 #define FLY_BTN_H     22
 #define FLY_BTN_Y     (CAP_Y + 9)
 #define FLY_BTN_W     54
 #define FLY_BTN_X     (CTR_BOTTOM_WIDTH - CAP_MARGIN - FLY_BTN_W)
 
-// Confirming replaces that one button with three things on the same row: the
-// ask right-aligned at 202, then NO at 210..256 and YES at 264..310.
+// The confirm step replaces that button with three items on the same row. The
+// question right-aligns at 202, NO is at 210..256 and YES is at 264..310.
 //
-// 202 is chosen against the widest thing that can share the row. The longest
-// place name is EVER GRANDE CITY at 90px, which from x=10 ends at 100, so there
-// are 78px to spare whatever is selected. The widest refusal that replaces all
-// three, "can't FLY from here" at 100px, right-aligns to 210 and clears it too.
+// The longest place name, EVER GRANDE CITY, is 90px and ends at x 100. The
+// widest refusal, "can't FLY from here", is 100px and right-aligns to 210. Both
+// are clear.
 #define CFM_W         46
 #define CFM_YES_X     (CTR_BOTTOM_WIDTH - CAP_MARGIN - CFM_W)
 #define CFM_NO_X      (CFM_YES_X - 8 - CFM_W)
 #define CFM_ASK_X     (CFM_NO_X - 8)
 
-// WILD PKMN opens the encounter list for whatever the caption is describing. It
-// shares FLY's row, so the right-hand end of the caption is one right-aligned
-// cluster: [FLY] [WILD PKMN], either of them alone, or neither.
+// WILD PKMN opens the encounter list for the place in the caption. It shares
+// FLY's row. The right end of the caption holds [FLY] [WILD PKMN], one of them,
+// or neither.
 //
-// WILD PKMN is the one PINNED to the right-aligned slot, and FLY is the one that
-// steps inward to make room for it. That is by frequency, not by importance:
-// almost everywhere on the map has wild Pokemon, while FLY appears only on the
-// handful of towns the player has actually reached. Pinning the common button
-// means the one they reach for most is always in the same place, and the rare
-// one is what moves. FLY still right-aligns whenever WILD PKMN is absent, so a
-// town with no encounters has its button in the corner rather than stranded
-// inboard.
+// WILD PKMN has a fixed slot at the right, and FLY moves inward when both show.
+// Most places have wild Pokemon, but FLY shows only on the towns that the
+// player has reached. Thus the common button is always in the same place. FLY
+// right-aligns when WILD PKMN is absent.
 //
-// 66 rather than FLY's 54 because the label is 51px and 54 would have it
-// touching its own border. That is measured, not guessed: 66 leaves 7px each
-// side, and every string that can share this row still clears the place name at
-// the resulting right edge of 236. The tightest pairing is a landmark, and the
-// widest of those is FOSSIL MANIAC'S HOUSE at 117px, which from 236 starts at
-// 119 -- 19px clear of where the longest place name, EVER GRANDE CITY at 90px,
-// ends. The refusals are all 100px or less and clear it by 36px or more. The
-// button could go as wide as 84 before the worst pairing touched.
+// The button is 66px, because the label is 51px. That leaves 7px on each side.
+// Its left edge is x 236. The widest landmark (FOSSIL MANIAC'S HOUSE, 117px)
+// then starts at 119, clear of the longest place name. The refusals are 100px
+// or less.
 //
-// See WildBtnX and FlyBtnX, which are the single places that decide each.
+// WildBtnX and FlyBtnX are the only places that decide the positions.
 #define WILD_BTN_W    66
 #define WILD_BTN_X    (CTR_BOTTOM_WIDTH - CAP_MARGIN - WILD_BTN_W)
 #define FLY_INNER_X   (WILD_BTN_X - 8 - FLY_BTN_W)
@@ -130,8 +110,7 @@
 #define MAP_PAL_BASE   112
 #define MAP_PAL_COUNT  32
 
-// Decompressed once and kept. 19KB against a 150KB framebuffer in the same
-// directory, and nothing in 3ds/ui/ ever touches the game's heap.
+// Decompressed once and kept, 19KB. Nothing in 3ds/ui/ uses the game's heap.
 static u8    sTiles[MAP_TILE_COUNT * 64];
 static u8    sTilemap[TILEMAP_STRIDE * TILEMAP_STRIDE];
 static u16   sPal[256];
@@ -139,21 +118,20 @@ static u8    sIconGfx[0x80];        // 16x16 4bpp, 4 tiles, stored uncompressed
 static u16   sIconPal[16];
 static bool8 sLoaded;
 
-// The tile the player last tapped, or -1 to follow the player instead.
+// The tile that the player tapped last, or -1 to follow the player.
 static s8 sPickX = -1;
 static s8 sPickY = -1;
 
-// Whether the selected destination is waiting on a YES. Cleared whenever the
-// selection moves, so a raised confirm can never belong to a different town.
+// TRUE when the selected destination waits for YES. Cleared when the selection
+// moves, so a confirm always belongs to the current town.
 static bool8 sConfirm;
 
 // ---------------------------------------------------------------- loading ---
 //
-// The map never changes, so this is a one-shot load rather than a keyed cache.
-// Both destinations are size-checked before either decompress: LZDecompressWram
-// is bounded only by the size word in its own input, and an overrun here lands
-// in the neighbouring statics of this file. That exact bug has been hit in
-// ui_draw.c before -- see the comment above UiMonPic.
+// The map never changes, so it loads once. Check the size of both destinations
+// before each decompress. LZDecompressWram uses only the size word in its
+// input, so an overrun writes into the statics of this file. See the note above
+// UiMonPic in ui_draw.c.
 static void EnsureLoaded(void)
 {
     const u32 *gfxLZ;
@@ -175,8 +153,8 @@ static void EnsureLoaded(void)
     LZDecompressWram(gfxLZ, sTiles);
     LZDecompressWram(tilemapLZ, sTilemap);
 
-    // Only the slice the art uses. Every other entry stays 0 and is never
-    // indexed: no tile the tilemap references contains a byte outside this range.
+    // Only the part that the art uses. The other entries stay 0. No tile in the
+    // tilemap uses a byte outside this range.
     UiLoadPal(&sPal[MAP_PAL_BASE], gbaPal, MAP_PAL_COUNT);
 
     Ctr3dsGetRegionMapPlayerIcon(&iconGfx, &iconPal);
@@ -189,16 +167,15 @@ static void EnsureLoaded(void)
 
 // --------------------------------------------------------------- helpers ----
 
-// Whether a tap landed on something nameable. Takes the same absolute map-tile
-// coordinates GetRegionMapSecIdAt does, which is what dividing a touch position
-// by 8 gives directly.
+// TRUE when a tap is on a place with a name. It uses the same absolute map-tile
+// coordinates as GetRegionMapSecIdAt, which is the touch position divided by 8.
 static bool8 PickIsSet(void)
 {
     return sPickX >= 0 && sPickY >= 0;
 }
 
-// The mapsec the caption is describing, and where its box sits. `mapSecId` is
-// always written; the rest only when the player is what is being described.
+// The mapsec in the caption, and where its box is. This always writes
+// `mapSecId`. It writes the rest only when the caption describes the player.
 static mapsec_u16_t CaptionMapSec(u8 *posWithinMapSec)
 {
     u16 x, y;
@@ -217,33 +194,30 @@ static mapsec_u16_t CaptionMapSec(u8 *posWithinMapSec)
 
 // ------------------------------------------------------------------ fly -----
 //
-// Every gate the game puts in front of a fly, in one place. Four of them are
-// about the player and one is about the destination, and they are all the
-// game's own tests rather than reimplementations:
+// All the game's gates for a fly, in one place. Four are about the player and
+// one is about the destination. All are the game's own tests:
 //
-//   engine state   the same four conditions the BAG tab's item use checks
+//   engine state   the same four conditions as BAG's item use
 //   the place      SetUpFieldMove_Fly            (src/party_menu.c)
 //   the badge      CursorCb_FieldMove            (src/party_menu.c)
-//   a flyer        SetPartyMonFieldSelectionActions, which is what puts FLY in
-//                  the party menu at all         (src/party_menu.c)
+//   a flyer        SetPartyMonFieldSelectionActions, which puts FLY in
+//                  the party menu                (src/party_menu.c)
 //   the target     CB_HandleFlyMapInput's A press (src/region_map.c)
 enum {
     FLY_READY,
-    FLY_NOT_A_DEST,   // a route or the sea: no fly control belongs here at all
-    FLY_UNVISITED,    // a town, but not one the player has reached on foot
-    FLY_BUSY,         // mid-battle, mid-script, or not in the overworld
-    FLY_BAD_PLACE,    // indoors, in a cave, underwater
+    FLY_NOT_A_DEST,   // a route or the sea: no fly control here
+    FLY_UNVISITED,    // a town that the player has not reached on foot
+    FLY_BUSY,         // in battle, in a script, or not in the overworld
+    FLY_BAD_PLACE,    // indoors, in a cave, or underwater
     FLY_NO_BADGE,
     FLY_NO_MON,
 };
 
-// The party slot that will perform the fly, or PARTY_SIZE if nobody can.
+// The party slot of the mon that flies, or PARTY_SIZE if no mon can.
 //
-// Eggs are skipped to match GetPartyMenuActionsType, which offers an egg
-// SWITCH and nothing else, so its stored moves are never usable as field moves.
-// Fainted mons are NOT skipped, because the party menu does not skip them
-// either: flying with a whited-out team is allowed in the original game and
-// removing that here would be a change, not a check.
+// Skip eggs, as GetPartyMenuActionsType does: an egg offers only SWITCH. Do not
+// skip fainted mons, because the party menu does not skip them. The original
+// game lets a fainted team fly.
 static u8 FlyerSlot(void)
 {
     u8 i, j;
@@ -274,23 +248,22 @@ static u8 FlyState(mapsec_u16_t dest)
 
     type = Ctr3dsGetMapSecType(dest);
 
-    // Routes, the sea and the landmarks the fly map draws no icon over. Nothing
-    // to explain: the control simply does not exist there.
+    // Routes, the sea, and the landmarks with no fly icon. There is no control
+    // here.
     if (type != MAPSECTYPE_CITY_CANFLY
      && type != MAPSECTYPE_CITY_CANTFLY
      && type != MAPSECTYPE_BATTLE_FRONTIER)
         return FLY_NOT_A_DEST;
 
-    // Checked before the player-side gates so that tapping a town you have
-    // never seen says so, rather than blaming a badge you also happen to lack.
-    // This is the FLAG_VISITED_* test, reached through GetMapsecType.
+    // Check this before the player's gates. A tap on an unvisited town then
+    // says so, and does not blame a missing badge. This is the FLAG_VISITED_*
+    // test, through GetMapsecType.
     if (type == MAPSECTYPE_CITY_CANTFLY)
         return FLY_UNVISITED;
 
-    // The gate the BAG tab carries, for the same reason: this runs from
-    // CtrBottomUpdate, which has no idea what the frame it follows was doing.
-    // Flying is far more invasive than using a Potion -- it replaces the main
-    // callback -- so if anything it matters more here.
+    // The same gate as the BAG tab. This runs from CtrBottomUpdate, which does
+    // not know what the frame did. A fly replaces the main callback, so this
+    // gate is even more important here.
     if (gMain.inBattle)
         return FLY_BUSY;
     if (gMain.callback2 != CB2_Overworld)
@@ -300,22 +273,20 @@ static u8 FlyState(mapsec_u16_t dest)
     if (ScriptContext_IsEnabled())
         return FLY_BUSY;
 
-    // Every exit from the overworld in the game waits on this before tearing
-    // anything down -- the start menu, item use, the PC, all of them open with
-    // `if (!gPaletteFade.active)`. A fade means a transition is already in
-    // flight, and starting a second one on top of it hands the callback it was
-    // heading for a half-dismantled map.
+    // Each exit from the overworld in the game waits for this: the start menu,
+    // item use and the PC all check `if (!gPaletteFade.active)`. A fade means
+    // that a transition has started. A second transition breaks the map.
     if (gPaletteFade.active)
         return FLY_BUSY;
 
-    // SetUpFieldMove_Fly. Indoors, in a cave or underwater the party menu
-    // refuses before the fly map is ever opened.
+    // SetUpFieldMove_Fly. The party menu refuses indoors, in a cave or
+    // underwater.
     if (Overworld_MapTypeAllowsTeleportAndFly(gMapHeader.mapType) != TRUE)
         return FLY_BAD_PLACE;
 
     // CursorCb_FieldMove tests FlagGet(FLAG_BADGE01_GET + fieldMove), and
-    // FIELD_MOVE_FLY is index 5. Spelled as the badge itself because that
-    // arithmetic, and the enum it indexes, are private to src/party_menu.c.
+    // FIELD_MOVE_FLY is index 5. This names the badge directly, because that
+    // enum is private to src/party_menu.c.
     if (!FlagGet(FLAG_BADGE06_GET))
         return FLY_NO_BADGE;
 
@@ -325,9 +296,8 @@ static u8 FlyState(mapsec_u16_t dest)
     return FLY_READY;
 }
 
-// Why the button is not there. Shown rather than greyed out: on a screen this
-// size there is nowhere else for the player to find out, and every one of these
-// is something they can act on.
+// The reason that the button does not show. Show the reason, not a gray button.
+// The player has no other way to find out, and can act on each reason.
 static const char *FlyRefusal(u8 state)
 {
     switch (state)
@@ -342,62 +312,45 @@ static const char *FlyRefusal(u8 state)
 
 static void DoFly(mapsec_u16_t mapSecId)
 {
-    // Vetted by FlyState, so this cannot come back as PARTY_SIZE.
+    // FlyState checked this, so it is never PARTY_SIZE.
     u8 slot = FlyerSlot();
 
-    // Refuses rather than flying to wherever the last warp happened to point.
-    // FlyState has already ruled out every destination this can reject, so this
-    // is the belt to that brace, not an expected path.
+    // Refuse, and do not fly to the last warp point. FlyState already refuses
+    // each destination that this can reject, so this is only a second guard.
     if (!Ctr3dsSetFlyWarpDestination(mapSecId, (u16)sPickX, (u16)sPickY))
         return;
 
-    // Task_UseFly asks the party menu's cursor which mon performs the take-off
-    // (GetCursorSelectionMonId, src/party_menu.c). No party menu was opened to
-    // get here, so without this it would animate whichever mon was last
-    // highlighted, or fall back to slot 0 through its own clamp. Point it at
-    // the mon this fly was actually authorised on.
+    // Task_UseFly asks the party menu's cursor which mon flies
+    // (GetCursorSelectionMonId). No party menu opened, so set the cursor to the
+    // mon that FlyState found. Otherwise it animates the last highlighted mon
+    // or slot 0.
     gPartyMenu.slotId = (s8)slot;
 
-    // Hand the overworld's graphics back BEFORE leaving it.
+    // Release the overworld's graphics before you leave it.
     //
-    // This is not optional and it is not tidiness. The overworld does not free
-    // these on the way out, it frees them on the way IN, so whatever takes the
-    // main callback away from CB2_Overworld has to do it first. Every one of
-    // the twenty places in the game that leaves the overworld calls this: the
-    // start menu, item use, the PC, egg hatching, battle setup, the lot.
+    // This is necessary. The overworld frees these when it starts, not when it
+    // ends. Thus the code that takes the main callback from CB2_Overworld must
+    // free them first. All twenty exits from the overworld in the game call
+    // this.
     //
-    // Skipping it does not fail visibly, which is what made it dangerous. The
-    // first fly looks perfect. ReturnToFieldLocal still reaches
-    // InitOverworldBgs, and it leaks 0x2D80 bytes every time:
+    // Without it, each fly leaks 0x2D80 bytes of heap and nothing looks wrong.
+    // After fewer than ten flies, the 0x1C000 heap is full. Then InitWindows
+    // gets NULL, and the next window draw writes to address 0.
     //
-    //   3 x BG_SCREEN_SIZE   fresh Bg1/2/3 tilemap buffers allocated straight
-    //                        over the live pointers
-    //   1 x BG_SCREEN_SIZE   InitWindows' first loop sets
-    //                        gWindowBgTilemapBuffers[0] to NULL without freeing
-    //   27 * 4 * 32          its second loop NULLs every gWindows[].tileData,
-    //                        also without freeing
-    //
-    // That is under ten flies before a 0x1C000 heap has nothing left, sooner
-    // with fragmentation. Then an allocation returns NULL, nobody checks
-    // InitWindows' return value, and the next thing to draw into a window
-    // writes through a null tileData -- which is a write to address 0.
-    //
-    // The rain SFX is stopped for the same reason the start menu stops it: the
-    // map is being left, and nothing downstream of here will silence it.
+    // Stop the rain sound for the same reason as the start menu: nothing later
+    // stops it.
     PlayRainStoppingSoundEffect();
     CleanupOverworldWindowsAndTilemaps();
 
-    // Exactly what CB_ExitFlyMap does once it has set the destination.
+    // The same steps as CB_ExitFlyMap after it sets the destination.
     //
-    // Replacing the main callback from here is safe for one specific reason:
-    // Rp2350PresentFrame runs at the END of a frame, after CallCallbacks and
-    // after VBlankIntr (src/main.c), so the callback being replaced has already
-    // finished its turn. This is no different from a callback setting the next
-    // one as its own last act, which is what CB_ExitFlyMap is doing.
+    // It is safe to replace the main callback here. Rp2350PresentFrame runs at
+    // the end of a frame, after CallCallbacks and VBlankIntr (src/main.c), so
+    // the old callback has finished.
     ReturnToFieldFromFlyMapSelect();
 
-    // Back to following the player, so landing and reopening this tab does not
-    // present a stale selection box over the town just left.
+    // Go back to following the player. The tab then does not show an old
+    // selection box over the town that the player left.
     sPickX = -1;
     sPickY = -1;
     sConfirm = FALSE;
@@ -414,17 +367,17 @@ static void DrawMap(void)
         {
             u32 tileId = sTilemap[ty * TILEMAP_STRIDE + tx];
 
-            // Opaque: index 0 never appears in a tile this map references, so
-            // there is nothing to see through and nothing to test per pixel.
+            // Opaque: index 0 is in no tile of this map, so there is nothing to
+            // test per pixel.
             UiBlit8bppTile(MAP_PX + tx * 8, MAP_PY + ty * 8,
                            &sTiles[tileId * 64], sPal, FALSE);
         }
     }
 }
 
-// The 16x16 icon, positioned the way CreateRegionMapPlayerIcon positions its
-// sprite: that sets the sprite's CENTRE to tile*8 + 4, so the top-left corner is
-// tile*8 - 4.
+// The 16x16 icon, at the position that CreateRegionMapPlayerIcon uses. That
+// sets the sprite's center to tile*8 + 4, so the top-left corner is at tile*8 -
+// 4.
 static void DrawPlayerIcon(void)
 {
     u16 x, y;
@@ -433,8 +386,8 @@ static void DrawPlayerIcon(void)
     bool8 inCave;
     int px, py;
 
-    // Birth Island, Faraway Island and Navel Rock are not on the Hoenn map at
-    // all, and the game draws no icon there either.
+    // Birth Island, Faraway Island and Navel Rock are not on the Hoenn map. The
+    // game shows no icon there either.
     if (IsEventIslandMapSecId(gMapHeader.regionMapSectionId))
         return;
 
@@ -448,8 +401,8 @@ static void DrawPlayerIcon(void)
                        sIconGfx + t * 32, sIconPal, TRUE);
 }
 
-// Outlines the whole mapsec, not the tile that was tapped: a two-tile city reads
-// as one place, and boxing half of it would look like a mis-hit.
+// Put a box around the full mapsec, not only the tapped tile. A city of two
+// tiles is one place.
 static void DrawPick(void)
 {
     mapsec_u16_t mapSecId;
@@ -469,15 +422,13 @@ static void DrawPick(void)
            entry->width * 8, entry->height * 8, UI_COL_ACCENT);
 }
 
-// The same shape the EXTRA tab's buttons use -- 1px border, accent doubled
-// inset on the one that commits -- so a button means the same thing on both
-// tabs. Local rather than shared because these two are the only ones outside
-// tab_extra.c, and hoisting a widget for a second user is premature.
+// The same shape as the EXTRA buttons: a 1px border, with the accent doubled on
+// the button that commits. Thus a button looks the same on both tabs. Local,
+// because only two buttons outside tab_extra.c use it.
 static void DrawBtn(int x, int w, const char *text, int accent)
 {
-    // Sized past the longest label rather than to it: UiAscii truncates to what
-    // it is given without saying so, which turns a label that outgrew this into
-    // a button reading WILD PK.
+    // Larger than the longest label. UiAscii cuts a long label without a
+    // warning.
     u8 label[16];
 
     UiRect(x, FLY_BTN_Y, w, FLY_BTN_H, UI_COL_DIM);
@@ -496,62 +447,58 @@ static void DrawBtn(int x, int w, const char *text, int accent)
 
 // ------------------------------------------------------------ encounters ---
 //
-// Which of the two lookups the encounter list should use for what the caption is
-// currently describing. A tapped tile is a mapsec; the player's own location is
-// a MAP, and has to be, because the region map has no cave interiors -- see the
-// note on UI_ENC_SRC_PLAYER.
+// The lookup that the encounter list uses for the place in the caption. A
+// tapped tile is a mapsec. The player's location is a map, because the region
+// map has no cave interiors. See the note on UI_ENC_SRC_PLAYER.
 static u8 EncSource(void)
 {
     return PickIsSet() ? UI_ENC_SRC_MAPSEC : UI_ENC_SRC_PLAYER;
 }
 
-// Where the WILD button goes on the caption row, or -1 for "it is not there".
+// The x of the WILD button on the caption row, or -1 when it is not there.
 //
-// Asked by the drawing and asked again by the hit test, so that a button which
-// is not on the screen cannot be tapped -- the row has four possible tenants and
-// deciding this in two places is how they would come to disagree.
+// The draw and the hit test both use this, so a button that does not show
+// cannot work. The row can hold four different items, and one function must
+// decide.
 static int WildBtnX(mapsec_u16_t mapSecId)
 {
     if (mapSecId >= MAPSEC_NONE)
         return -1;
 
-    // A place with nothing to list gets no button at all, rather than one that
-    // opens an empty panel.
+    // A place with no encounters gets no button, not a button that opens an
+    // empty panel.
     if (!UiEncountersAvailable(EncSource(), mapSecId))
         return -1;
 
-    // A raised confirm owns the whole row -- the ask right-aligns at CFM_ASK_X,
-    // then NO and YES fill it to the margin. There is nowhere to put this, and a
-    // third button beside a live YES is a mis-tap either way.
+    // A confirm uses the full row: the question right-aligns at CFM_ASK_X, then
+    // NO and YES fill it to the margin. There is no space for this button, and
+    // a third button next to YES causes wrong taps.
     if (PickIsSet() && sConfirm && FlyState(mapSecId) == FLY_READY)
         return -1;
 
-    // Otherwise always the same slot, whatever else is on the row. That is the
-    // whole point of pinning it: see the note on WILD_BTN_X.
+    // Otherwise, always the same slot. See the note on WILD_BTN_X.
     return WILD_BTN_X;
 }
 
-// Where the FLY button goes: the row's right-aligned slot, or one step inward
-// when WILD has taken it. Asked by the drawing and asked again by the hit test,
-// for the same reason WildBtnX is.
+// The x of the FLY button: the right-aligned slot, or one step inward when WILD
+// uses that slot. The draw and the hit test both use this, as for WildBtnX.
 //
-// Only meaningful while a FLY button is actually drawn, which is FLY_READY and
-// no raised confirm. The refusal string and the YES/NO pair place themselves.
+// This applies only while a FLY button shows: FLY_READY with no confirm. The
+// refusal text and the YES/NO pair place themselves.
 static int FlyBtnX(mapsec_u16_t mapSecId)
 {
     return WildBtnX(mapSecId) >= 0 ? FLY_INNER_X : FLY_BTN_X;
 }
 
-// Right-hand end of the caption row: a FLY button, or the reason there is not
-// one, or the confirmation that replaces it.
+// The right end of the caption row: a FLY button, the reason for no button, or
+// the confirm that replaces it.
 //
-// `textRight` is where a refusal string may reach, which is the caption's own
-// margin unless the WILD button has taken that end of the row.
+// `textRight` is the right limit of a refusal string. It is the caption margin,
+// or the left of the WILD button when that button is there.
 //
-// Nothing here is cached. FlyState is re-read on every repaint so the row keeps
-// up with a player who walks indoors, faints their last flyer or starts a
-// script while this tab is open, and so the touch handler's own re-check can
-// never disagree with what is on screen.
+// Nothing here is cached. Read FlyState on each repaint, so the row stays
+// correct when the player goes indoors, faints the last flyer or starts a
+// script. The touch handler's check then always agrees with the screen.
 static void DrawFlyControls(mapsec_u16_t mapSecId, int textRight)
 {
     u8 label[24];
@@ -574,9 +521,8 @@ static void DrawFlyControls(mapsec_u16_t mapSecId, int textRight)
         return;
     }
 
-    // The place name is already on the left of this row, so the prompt does not
-    // repeat it: "SLATEPORT CITY ... FLY? NO YES" reads as one sentence and
-    // leaves room for the longest name there is.
+    // The place name is already on the left of this row, so the question does
+    // not repeat it. "SLATEPORT CITY ... FLY? NO YES" reads as one sentence.
     UiTextRight(CFM_ASK_X, CAP_TEXT_Y, UiAscii(label, "FLY?", sizeof(label)),
                 UiThemeText(), UiThemeShadow());
     DrawBtn(CFM_NO_X, CFM_W, "NO", FALSE);
@@ -590,8 +536,8 @@ static void DrawCaption(void)
     const u8 *landmark;
     int wildX;
     int textRight;
-    // Not MAP_NAME_LENGTH (16): the game's own struct RegionMap sizes this field
-    // at 20, and GetMapName's empty-name fallback fills 18 plus a terminator.
+    // Not MAP_NAME_LENGTH (16). The game's struct RegionMap uses 20 for this
+    // field, and GetMapName's empty-name fallback writes 18 and a terminator.
     u8 name[32];
 
     UiWindowFrame(0, CAP_TY, CTR_BOTTOM_WIDTH / 8, CAP_TH);
@@ -604,26 +550,24 @@ static void DrawCaption(void)
         return;
     }
 
-    // Already in the game's own encoding, so it goes straight to UiText.
+    // This is already in the game's encoding, so it goes directly to UiText.
     GetMapNameGeneric(name, mapSecId);
     UiText(CAP_MARGIN, CAP_TEXT_Y, name, UiThemeText(), UiThemeShadow());
 
-    // Whatever text shares this row stops short of the WILD button when that
-    // button has taken the end of it.
+    // When the WILD button is at the end of this row, the other text stops
+    // before it.
     //
-    // Both strings that can be there clear the place name in every real pair.
-    // The widest refusal is "can't FLY from here" at about 100px, which from
-    // this edge runs 148..248; the longest landmark is FOSSIL MANIAC'S HOUSE at
-    // 21 characters, about 118px, running 130..248 -- and that one belongs to
-    // Route 114, whose own name is short. The longest name there is, EVER GRANDE
-    // CITY at 90px, ends at 100.
+    // Both possible strings clear the place name in every real pair. The widest
+    // refusal is about 100px and runs 148..248. The longest landmark is about
+    // 118px and runs 130..248; it belongs to Route 114, which has a short name.
+    // The longest place name ends at 100.
     wildX = WildBtnX(mapSecId);
     textRight = (wildX >= 0) ? WILD_BTN_X - 8 : CTR_BOTTOM_WIDTH - CAP_MARGIN;
 
-    // Landmarks are only for the player's own location: they are keyed on which
-    // tile of a multi-tile mapsec you are standing in, and a tapped tile has no
-    // such position to offer. A tapped tile has a fly control instead, and the
-    // two share this end of the row precisely because they never coexist.
+    // Landmarks are only for the player's own location. They depend on which
+    // tile of a mapsec the player stands on, and a tapped tile has no such
+    // position. A tapped tile has a fly control instead. The two never show
+    // together.
     if (PickIsSet())
     {
         DrawFlyControls(mapSecId, textRight);
@@ -642,10 +586,9 @@ static void DrawCaption(void)
 
 void UiMapDraw(void)
 {
-    // The encounter list replaces the whole tab while it is up, the way the DEX
-    // tab's entry screen replaces its list. Not an overlay: there is nothing
-    // behind it worth seeing, and an overlay would have to absorb touches the
-    // map has no business receiving anyway.
+    // The encounter list replaces the full tab while it is up, like the DEX
+    // entry screen. It is not an overlay, because the map has nothing useful
+    // behind it.
     if (UiEncountersIsOpen())
     {
         UiEncountersDraw();
@@ -671,11 +614,9 @@ void UiMapDraw(void)
 
 // ----------------------------------------------------------- repaint key ----
 //
-// Without this the map would go stale while the player walks: nothing else in
-// UiStateHash tracks where they are. It is naturally cheap and naturally coarse
-// -- the cursor position only moves when the player crosses a band boundary
-// within a mapsec, so walking the length of one stretch of route costs no
-// repaints at all.
+// Without this key, the map is stale while the player walks. Nothing else in
+// UiStateHash tracks the position. The cursor moves only when the player
+// crosses a band in a mapsec, so a walk along a route costs few repaints.
 u32 UiMapStateKey(void)
 {
     u16 x, y;
@@ -690,14 +631,12 @@ u32 UiMapStateKey(void)
     key = ((u32)x << 24) ^ ((u32)y << 16) ^ ((u32)mapSecId << 4)
         ^ (u32)posWithinMapSec ^ ((u32)inCave << 3);
 
-    // The fly row's own inputs, which nothing above tracks. A script ending, a
-    // battle starting, the last flyer being deposited in the PC: each changes
-    // what that row should say, and none of them move the player.
+    // The inputs of the fly row, which the fields above do not track. Examples
+    // are a script that ends, a battle that starts, or the last flyer put in
+    // the PC. None of them move the player.
     //
-    // Scattered rather than XORed in raw. The fields above already use most of
-    // the word, and two contributions that happen to cancel would show up as a
-    // row that stops updating, which is the one failure this key exists to
-    // prevent.
+    // Multiply, do not XOR the raw value. The fields above use most of the
+    // word, and two values that cancel stop the row from updating.
     if (PickIsSet())
     {
         u32 fly = (u32)FlyState(GetRegionMapSecIdAt((u16)sPickX, (u16)sPickY))
@@ -708,13 +647,11 @@ u32 UiMapStateKey(void)
         key ^= fly * 2654435761u;
     }
 
-    // The encounter panel's own inputs: which page it is on, which map it is
-    // describing, and whether each mon on that page has been seen yet. Zero
-    // while it is closed, so this costs nothing on the map itself.
+    // The inputs of the encounter panel: the page, the map, and whether each
+    // mon on the page is seen. Zero while it is closed.
     //
-    // Its own multiplier, not the fly row's. Two contributions folded through
-    // the same constant are two contributions that can cancel, which is the
-    // failure the note above exists to prevent.
+    // It has its own multiplier. Two values folded through the same constant
+    // can cancel.
     key ^= UiEncountersStateKey() * 0x85EBCA6Bu;
 
     return key;
@@ -722,17 +659,15 @@ u32 UiMapStateKey(void)
 
 // --------------------------------------------------------------- input -----
 
-// The caption band's own controls. Returns TRUE when it consumed the tap.
+// The controls of the caption band. Returns TRUE when it used the tap.
 static bool8 HandleFlyTouch(const CtrTouchState *t)
 {
     mapsec_u16_t mapSecId = GetRegionMapSecIdAt((u16)sPickX, (u16)sPickY);
 
-    // Re-checked at the moment of the tap rather than trusted from when the
-    // button was drawn. The player can still walk, be handed a script or be
-    // pulled into a battle with this screen open, and a confirm raised before
-    // any of that must not survive it. DrawFlyControls hides the row in exactly
-    // the same case, so falling through here is also what guarantees no tap
-    // ever lands on a button that is not on the screen.
+    // Check again at the moment of the tap. The player can walk, start a script
+    // or enter a battle while this screen is open, and an old confirm must not
+    // survive that. DrawFlyControls hides the row in the same case, so no tap
+    // reaches a button that does not show.
     if (FlyState(mapSecId) != FLY_READY)
     {
         sConfirm = FALSE;
@@ -769,8 +704,8 @@ void UiMapTouch(const CtrTouchState *t)
 {
     int tx, ty;
 
-    // The panel covers the whole tab, so it takes every touch -- presses and
-    // drags included, not just releases -- until its own BACK closes it.
+    // The panel covers the full tab, so it takes every touch (presses, drags
+    // and releases) until its BACK closes it.
     if (UiEncountersIsOpen())
     {
         UiEncountersTouch(t);
@@ -780,19 +715,17 @@ void UiMapTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
-    // The caption band's two tenants, both tested before the deselect below,
-    // which would otherwise claim every tap outside the map. Anything in that
-    // band neither of them wants falls through and deselects, so tapping away
-    // from a raised confirm still cancels it.
+    // Test the two controls of the caption band before the deselect below,
+    // which takes every tap outside the map. Other taps in the band deselect,
+    // so a tap away from a confirm cancels it.
     if (t->y >= CAP_Y)
     {
         u8 posWithinMapSec = 0;
         mapsec_u16_t capMapSec;
         int wildX;
 
-        // Fly first: it is the tenant that can be mid-confirm, and its own
-        // re-check at the moment of the tap is what decides whether its buttons
-        // are on the screen at all.
+        // Fly first: it can be in a confirm, and its own check decides if its
+        // buttons show.
         if (PickIsSet() && HandleFlyTouch(t))
             return;
 
@@ -806,8 +739,8 @@ void UiMapTouch(const CtrTouchState *t)
         }
     }
 
-    // Anywhere off the map, the caption band included, drops the selection and
-    // goes back to reporting where the player actually is.
+    // A tap outside the map, the caption band too, drops the selection. The
+    // caption then shows the player's location again.
     if (t->y < MAP_PY || t->y >= MAP_PY + MAP_TH * 8
      || t->x < MAP_PX || t->x >= MAP_PX + MAP_TW * 8)
     {
@@ -824,8 +757,8 @@ void UiMapTouch(const CtrTouchState *t)
     tx = (t->x - MAP_PX) / 8;
     ty = (t->y - MAP_PY) / 8;
 
-    // Open sea has no mapsec. Treat it as a deselect rather than ignoring it, so
-    // there is always an obvious way back to following the player.
+    // The open sea has no mapsec. Treat a tap there as a deselect, so there is
+    // always a way back to the player.
     if (GetRegionMapSecIdAt((u16)tx, (u16)ty) >= MAPSEC_NONE)
     {
         sPickX = -1;
@@ -837,9 +770,9 @@ void UiMapTouch(const CtrTouchState *t)
         sPickY = (s8)ty;
     }
 
-    // A fresh selection is never pre-confirmed. Without this, tapping from one
-    // town to another would carry the first one's raised YES across, and the
-    // next tap would fly to somewhere the player never confirmed.
+    // A new selection starts without a confirm. Otherwise a YES from one town
+    // moves to the next, and the next tap flies to a place that the player did
+    // not confirm.
     sConfirm = FALSE;
     UiMarkDirty();
 }

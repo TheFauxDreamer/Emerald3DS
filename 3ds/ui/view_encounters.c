@@ -1,25 +1,19 @@
-// Wild encounter list for a place. See view_encounters.h for what it is for.
+// The wild encounter list for a place. See view_encounters.h.
 //
-// Everything here reads. The species come from gWildMonHeaders, which is the
-// same table the encounter generator rolls against, so the list agrees with what
-// the player will actually meet by construction rather than by being kept in
-// step.
+// This file only reads. The species come from gWildMonHeaders, the same table
+// as the encounter generator uses. Thus the list agrees with what the player
+// meets.
 //
-// Three things about that table are not obvious and each produces a
-// plausible-looking wrong list if missed:
-//
-//   1. The four categories have DIFFERENT slot counts -- 12, 5, 5, 10. Reading
-//      fishing with LAND_WILD_COUNT is the vanilla out-of-bounds bug in
-//      MapHasSpecies (src/pokedex_area_screen.c); it is not copied here.
-//
-//   2. Altering Cave has NINE consecutive headers for one map and only the one
-//      VAR_ALTERING_CAVE_WILD_SET names is live. A plain scan finds the first
-//      and is wrong eight days out of nine.
-//
-//   3. With the randomiser on, the species in the table is not the species the
-//      player meets: CreateWildMon remaps it (src/wild_encounter.c:384). The
-//      mapping is applied here BEFORE deduping, because two table entries can
-//      map onto one mon.
+// Three facts about that table. If you miss one, the list looks correct but is
+// wrong:
+// - The four categories have different slot counts: 12, 5, 5 and 10. The
+//   original MapHasSpecies reads fishing with LAND_WILD_COUNT, which is an
+//   out-of-bounds bug. This file does not copy it.
+// - Altering Cave has nine headers in sequence for one map. Only the one that
+//   VAR_ALTERING_CAVE_WILD_SET names is live. A plain scan finds the first one.
+// - With the randomizer on, the species in the table is not the species that
+//   the player meets: CreateWildMon maps it. Apply the mapping before the
+//   dedupe, because two table entries can map to one mon.
 
 #include "global.h"
 #include "pokemon.h"
@@ -45,12 +39,12 @@
 
 // ---------------------------------------------------------------- layout ---
 //
-// The whole content area, 40x24 tiles, so the frame's interior is x 8..311 and
-// y 8..183. Everything below is fitted inside that 176px of height:
+// The full content area, 40x24 tiles. The frame's interior is x 8..311 and y
+// 8..183. Everything below fits in those 176px:
 //
-//   8      header      one glyph row, 15px
-//   25     grid        4 rows of 33, ending at 157
-//   160    controls    22px, ending at 182
+//    8      header      one glyph row, 15px
+//    25     grid        4 rows of 33, ending at 157
+//    160    controls    22px, ending at 182
 #define HDR_Y        8
 #define HDR_MARGIN   10
 
@@ -63,16 +57,14 @@
 
 #define UI_ENC_PER_PAGE (GRID_ROWS * GRID_COLS)
 
-// Inside one cell. The icon is 32x32, then a 12px gutter for the caught marker,
-// then the name with the type badges under it. That puts the cell's right edge
-// at cx+114 -- column 2 therefore ends at 274, clear of the 311 interior edge,
-// and column 1 ends at 122, clear of column 2's icon at 160. The name gets the
-// remaining 104px of its column, against about 60px for the longest
-// ten-character species name.
+// Inside one cell: the 32x32 icon, a 12px gutter for the caught marker, then
+// the name with the type badges under it. The cell's right edge is at cx+114.
+// Thus column 2 ends at 274, inside the 311 interior edge. Column 1 ends at
+// 122, clear of column 2's icon at 160. The name has 104px, and the longest
+// species name is about 60px.
 //
-// The ball's column is reserved whether or not a given cell draws one, which is
-// what stops names shuffling sideways down a page -- the same reason the dex
-// list reserves its own (tab_dex.c:62).
+// The ball's column is always there, with or without a ball, so the names do
+// not move down a page. The dex list does the same (tab_dex.c).
 #define CELL_ICON_W  32
 #define CELL_BALL_X  36
 #define CELL_TEXT_X  48
@@ -84,36 +76,32 @@
 #define PAGE_W       52
 #define PAGE_UP_X    10
 #define PAGE_DN_X    70
-// The same 42x22 the DEX tab's entry screen uses, in the same place, so BACK
-// means the same thing and is in the same corner on both.
+// The same 42x22 BACK as the DEX entry screen, in the same corner.
 #define BACK_X       (CTR_BOTTOM_WIDTH - 50)
 #define BACK_W       42
 
 // ------------------------------------------------------------------ state ---
 //
-// A hard stop rather than an assumption, sized off the data: the worst single
-// map is Safari Zone Southeast at 15 unique species, and the worst MAPSEC, once
-// its several maps are aggregated, is the Safari Zone at 38. That one is not
-// reachable by tapping -- only mapsecs in the region map's 28x15 grid are, and
-// the Safari Zone is not one of them -- but the cap is set past it anyway, so
-// nothing the table can hold gets silently dropped. Six pages at most, which is
-// what lets the page counter stay a single digit.
+// A hard limit that comes from the data. The worst single map is Safari Zone
+// Southeast, with 15 species. The worst mapsec, with all its maps, is the
+// Safari Zone with 38. A tap cannot reach that mapsec, because it is not in the
+// region map's 28x15 grid. The limit is above it anyway, so nothing drops.
+// There are six pages at most, so the page counter is one digit.
 #define UI_ENC_MAX   48
 
 static u16   sSpecies[UI_ENC_MAX];
 static u8    sCount;
 
-// What sSpecies was built for, so a repaint costs a comparison rather than a
-// 124-header scan. On the single-core path a repaint is already ~4.9ms of a
-// ~5.7ms budget.
+// The place that sSpecies holds. A repaint then costs one comparison, not a
+// scan of 124 headers.
 static bool8 sBuilt;
 static u8    sBuiltSrc;
 static u8    sBuiltGroup, sBuiltNum;
 static mapsec_u16_t sBuiltMapSec;
 
-// The mapsec whose name titles the panel. Not always the one it was opened with:
-// in PLAYER mode it is the current map's own mapsec, which is how a cave gets
-// its own name instead of the outdoor one the region map resolves it to.
+// The mapsec whose name is the title of the panel. In PLAYER mode, it is the
+// current map's own mapsec, not the one the panel opened with. Thus a cave
+// shows its own name, not the outdoor name that the region map gives.
 static mapsec_u16_t sTitleMapSec;
 
 static bool8 sOpen;
@@ -123,10 +111,10 @@ static u8    sPage;
 
 // ------------------------------------------------------------- gathering ----
 
-// The dex's own three-state readout for one species: nothing, seen, or caught.
+// The dex's three states for one species: nothing, seen, or caught.
 //
-// Both flags in one call because every caller wants both, and the bounds guard
-// and the species -> national conversion are the same work for either.
+// Both flags in one call, because every caller needs both. The bounds guard and
+// the conversion to the national number are the same for either flag.
 #define DEX_SEEN    (1u << 0)
 #define DEX_CAUGHT  (1u << 1)
 
@@ -135,8 +123,8 @@ static u32 DexState(u16 species)
     u16 national;
     u32 state = 0;
 
-    // SpeciesToNationalPokedexNum indexes [species - 1] into a table of
-    // NUM_SPECIES - 1 entries with no bound of its own (src/pokemon.c:5690).
+    // SpeciesToNationalPokedexNum reads [species - 1] from a table of
+    // NUM_SPECIES - 1 entries, with no bounds check of its own (src/pokemon.c).
     if (species == SPECIES_NONE || species >= NUM_SPECIES)
         return 0;
 
@@ -160,16 +148,15 @@ static void AddSpecies(u16 species)
     if (species == SPECIES_NONE || species >= NUM_SPECIES)
         return;
 
-    // The randomiser's mapping, applied here rather than at display time so the
-    // dedupe below sees the mons the player will actually meet: two table
-    // entries can map onto one.
+    // Apply the randomizer's mapping here, not at display time. The dedupe
+    // below then sees the mons that the player meets, because two table entries
+    // can map to one.
     //
-    // Ctr3dsMapSpecies and not Ctr3dsMapWildSpecies. The latter's extra guard
-    // asks whether the PLAYER is standing in the Battle Pike or Pyramid
-    // (3ds/tweaks.c:312), which is the wrong question about some other map, and
-    // it is unnecessary here anyway: the index-encoded pseudo-species it exists
-    // to protect live in gBattlePikeWildMonHeaders and
-    // gBattlePyramidWildMonHeaders, separate arrays this file never reads.
+    // Use Ctr3dsMapSpecies, not Ctr3dsMapWildSpecies. The second one checks if
+    // the player stands in the Battle Pike or Pyramid (3ds/tweaks.c), which is
+    // the wrong question for another map. That check protects pseudo-species in
+    // gBattlePikeWildMonHeaders and gBattlePyramidWildMonHeaders, which this
+    // file never reads.
     species = Ctr3dsMapSpecies(species);
 
     if (species == SPECIES_NONE || species >= NUM_SPECIES)
@@ -191,9 +178,9 @@ static void AddMonList(const struct WildPokemonInfo *info, u32 slots)
         AddSpecies(info->wildPokemon[i].species);
 }
 
-// Every category of one header, in the order the player meets them: grass, then
-// surfing, then rock smash, then fishing. Nothing labels the categories, so the
-// order is what groups the list.
+// Every category of one header, in the order that the player meets them: grass,
+// surfing, rock smash, then fishing. Nothing labels the categories, so the
+// order groups the list.
 static void AddHeader(const struct WildPokemonHeader *header)
 {
     AddMonList(header->landMonsInfo,      LAND_WILD_COUNT);
@@ -202,10 +189,10 @@ static void AddHeader(const struct WildPokemonHeader *header)
     AddMonList(header->fishingMonsInfo,   FISH_WILD_COUNT);
 }
 
-// Whether index `i` is one of Altering Cave's nine headers, and if so whether it
-// is the live one. This is GetCurrentMapWildMonHeaderId's own test
-// (src/wild_encounter.c:310), which is static there, so it is reproduced rather
-// than called. Without it the cave shows table 1 on all nine days.
+// TRUE when index `i` is one of Altering Cave's nine headers, and tells if it
+// is the live one. This copies the test in GetCurrentMapWildMonHeaderId
+// (src/wild_encounter.c), which is static there. Without it, the cave shows
+// table 1 on all nine days.
 static bool8 IsDeadAlteringCaveTable(u32 i, u8 mapGroup, u8 mapNum)
 {
     u16 live;
@@ -217,9 +204,9 @@ static bool8 IsDeadAlteringCaveTable(u32 i, u8 mapGroup, u8 mapNum)
     if (live >= NUM_ALTERING_CAVE_TABLES)
         live = 0;
 
-    // The nine are consecutive and the first is the one a linear scan reaches,
-    // so the live one is `live` entries past it. Walk back to that first index
-    // rather than counting matches, which would depend on scan order.
+    // The nine headers are in sequence, and a linear scan reaches the first
+    // one. Thus the live one is `live` entries after it. Go back to the first
+    // index; do not count matches, which depend on the scan order.
     for (u32 first = i; first > 0; first--)
     {
         if (gWildMonHeaders[first - 1].mapGroup != mapGroup
@@ -230,15 +217,14 @@ static bool8 IsDeadAlteringCaveTable(u32 i, u8 mapGroup, u8 mapNum)
     return i != live;
 }
 
-// Rebuilds sSpecies unless it already holds this exact place.
+// Build sSpecies again, unless it already holds this place.
 static void Ensure(u8 source, mapsec_u16_t mapSecId)
 {
     u8 group = 0, num = 0;
 
-    // VarGet and the location below both read the save block. Every entry point
-    // into this file is gated on there being one (bottom_screen.c: sInGame for
-    // draw and touch, SaveDataLive for the hash), so this is the belt to that
-    // brace rather than an expected path.
+    // VarGet and the location below read the save block. Every entry point into
+    // this file checks that a save block exists (sInGame for draw and touch,
+    // SaveDataLive for the hash). This is only a second guard.
     if (gSaveBlock1Ptr == NULL)
     {
         sCount = 0;
@@ -270,9 +256,9 @@ static void Ensure(u8 source, mapsec_u16_t mapSecId)
     {
         sTitleMapSec = gMapHeader.regionMapSectionId;
 
-        // An indoor map with no mapsec of its own (MAPSEC_DYNAMIC, and anything
-        // past the real ones) borrows the caption's, which is the outdoor place
-        // the region map already resolved the player to.
+        // An indoor map with no mapsec of its own (MAPSEC_DYNAMIC, or a value
+        // past the real ones) uses the caption's mapsec. That is the outdoor
+        // place that the region map already found for the player.
         if (sTitleMapSec >= MAPSEC_NONE)
             sTitleMapSec = mapSecId;
     }
@@ -323,25 +309,21 @@ static void DrawCell(int cx, int ry, u16 species)
     u8 label[16];
     u32 state = DexState(species);
 
-    // A ball only for caught, nothing for merely seen: the same three-state
-    // readout the real dex list gives, in the same glyph and the same column
-    // (tab_dex.c:326). Centred on the name's glyph row, which is what that
-    // list's `y + 4` is.
+    // A ball for caught, nothing for seen, as in the real dex list: the same
+    // glyph in the same column (tab_dex.c). It is centered on the name's glyph
+    // row, which is that list's `y + 4`.
     //
-    // Ahead of the seen branch rather than inside it. Caught implies seen, so
-    // this can only ever land on a row that also draws a name -- but
-    // GetSetPokedexFlag exists precisely because the three seen mirrors can
-    // disagree, and a readout that hides a caught mark to keep its own layout
-    // tidy is the wrong way round.
+    // It comes before the seen branch, not inside it. Caught means seen, so
+    // this always lands on a row with a name. But the three seen mirrors can
+    // disagree, and a caught mark must not hide.
     if (state & DEX_CAUGHT)
         UiPokeball(cx + CELL_BALL_X, ry + (UI_GLYPH_H - UI_BALL_H) / 2);
 
     if (!(state & DEX_SEEN))
     {
-        // The shape and nothing else. Drawn in the frame's own shadow colour
-        // rather than a fixed dark one, because the 20 window frames run
-        // near-white to near-dark and a fixed silhouette vanishes against half
-        // of them.
+        // Only the shape. It uses the frame's shadow color, not a fixed dark
+        // color. The 20 window frames go from near white to near dark, and a
+        // fixed color disappears on half of them.
         UiMonIconSilhouette(cx, ry, species, 0, UiThemeShadow());
         UiText(cx + CELL_TEXT_X, ry, UiAscii(label, "----------", sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
@@ -354,16 +336,16 @@ static void DrawCell(int cx, int ry, u16 species)
 
     UiTypeIcon(cx + CELL_TEXT_X, ry + CELL_TYPE_Y, gSpeciesInfo[species].types[0]);
 
-    // A single-typed mon carries the same type in both slots, so testing them
-    // is what keeps it from drawing the same badge twice.
+    // A mon with one type has the same type in both slots. Test for that, so
+    // the badge does not draw twice.
     if (gSpeciesInfo[species].types[1] != gSpeciesInfo[species].types[0])
         UiTypeIcon(cx + CELL_TYPE2_X, ry + CELL_TYPE_Y, gSpeciesInfo[species].types[1]);
 }
 
 static void DrawHeader(void)
 {
-    // Not MAP_NAME_LENGTH: GetMapNameGeneric's empty-name fallback fills 18
-    // plus a terminator, which is the same reason tab_map.c sizes its own at 32.
+    // Not MAP_NAME_LENGTH: GetMapNameGeneric's empty-name fallback writes 18
+    // and a terminator. tab_map.c uses 32 for the same reason.
     u8 name[32];
     u32 pages = PageCount();
 
@@ -373,9 +355,8 @@ static void DrawHeader(void)
         UiText(HDR_MARGIN, HDR_Y, name, UiThemeText(), UiThemeShadow());
     }
 
-    // Only when there is more than one, so a route that fits on a page says
-    // nothing rather than "1/1". Single digits are enough: UI_ENC_MAX caps the
-    // list at six pages.
+    // Only when there is more than one page, so a short route does not show
+    // "1/1". One digit is enough: UI_ENC_MAX limits the list to six pages.
     if (pages > 1)
     {
         char ascii[4];
@@ -424,9 +405,9 @@ void UiEncountersDraw(void)
 
     Ensure(sSrc, sOpenMapSec);
 
-    // The list is re-derived on every draw, so in PLAYER mode it follows the
-    // player from room to room -- and can shrink under a page that was valid
-    // when it was turned to.
+    // The list is built again on each draw. In PLAYER mode, it follows the
+    // player from room to room. It can then become shorter than the current
+    // page.
     if (sPage >= PageCount())
         sPage = (u8)(PageCount() - 1);
 
@@ -505,8 +486,8 @@ void UiEncountersTouch(const CtrTouchState *t)
 
     pages = PageCount();
 
-    // Both arrows carry the same test their drawing does, so a control that is
-    // not on the screen cannot be tapped.
+    // Both arrows use the same test as their drawing, so a control that does
+    // not show cannot work.
     if (sPage > 0 && UiHit(t, PAGE_UP_X, BTN_Y, PAGE_W, BTN_H))
     {
         sPage--;
@@ -535,31 +516,27 @@ u32 UiEncountersStateKey(void)
 
     key = 1u | ((u32)sPage << 1);
 
-    // Which place is being described. In PLAYER mode this is the only thing in
-    // the whole hash that tracks the map itself: walking from Granite Cave 1F to
-    // B1F moves neither the region map cursor nor the mapsec, so without this
-    // the panel would keep showing 1F's list.
+    // The place that the panel describes. In PLAYER mode, this is the only
+    // value in the hash that tracks the map. A walk from Granite Cave 1F to B1F
+    // moves neither the region map cursor nor the mapsec. Without this, the
+    // panel keeps 1F's list.
     if (sSrc == UI_ENC_SRC_PLAYER)
         key |= ((u32)sBuiltGroup << 4) | ((u32)sBuiltNum << 12);
     else
         key |= (u32)sOpenMapSec << 4;
 
-    // What is actually on the page, and what the dex says about each of it. The
-    // bottom screen is live during battle, so both transitions have to land with
-    // nothing else moving: a mon MET while this panel is up turns from a
-    // silhouette into a name, and one CAUGHT while it is up grows a ball. Both
-    // bits of DexState are folded for that reason -- seen alone would leave the
-    // ball a repaint behind.
+    // What the page shows, and what the dex says about each mon. The bottom
+    // screen is live during a battle, so both changes must show with nothing
+    // else changing. A mon that the player meets changes from a silhouette to a
+    // name. A mon that the player catches gets a ball. Thus both bits of
+    // DexState go into the key.
     //
-    // Eight species ids and their flags do not fit in what is left of the word,
-    // so they are folded through a multiply instead of placed in bits. The slot
-    // index goes into the value being folded: that is what makes each slot's
-    // contribution distinct, and two contributions that cancel are the one
-    // failure this hash exists to prevent (the note in UiMapStateKey).
+    // Eight species ids and their flags do not fit in the rest of the word, so
+    // fold them with a multiply. The slot index goes into each value, so the
+    // values of two slots cannot cancel (see the note in UiMapStateKey).
     //
-    // Sixteen GetSetPokedexFlag calls a frame at eight rows, and deliberately
-    // not GetNationalPokedexCount, which the DEX tab can afford because counting
-    // is what it shows. A key must be O(what is on screen).
+    // This makes 16 GetSetPokedexFlag calls for eight rows. Do not use
+    // GetNationalPokedexCount here. A key must cost O(what is on the screen).
     first = (u32)sPage * UI_ENC_PER_PAGE;
 
     for (u32 i = 0; i < UI_ENC_PER_PAGE && first + i < sCount; i++)

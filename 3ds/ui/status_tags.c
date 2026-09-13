@@ -1,12 +1,12 @@
-// Status tags. See status_tags.h for what a tag is and why a mon can carry two.
+// Status tags. See status_tags.h for what a tag is and why a mon can have two.
 //
-// Pure reads, like matchup.c: the party through GetMonData, and the battle
-// through the same globals the battle engine keeps. Nothing here writes.
+// This file only reads: the party through GetMonData, and the battle through
+// the battle engine's globals.
 
 #include "global.h"
 #include "main.h"                   // gMain.inBattle
 #include "pokemon.h"
-#include "battle.h"                 // struct DisableStruct, for the headers below
+#include "battle.h"                 // struct DisableStruct
 #include "battle_anim.h"            // GetBattlerSide
 #include "battle_controllers.h"     // Ctr3dsPlayerIsChoosingAction
 #include "party_menu.h"             // GetAilmentFromStatus
@@ -18,44 +18,40 @@
 #include "ui_team.h"                // UiPartyMon
 #include "status_tags.h"
 
-// How long each tag holds, in displayed frames: one second.
+// The time for which each tag holds, in displayed frames: one second.
 //
-// A flip only ever happens on a UiAnimStepped() frame, and 60 divides both step
-// periods (6 frames with the rasteriser on its own core, 12 without), so after
-// the first flip every one lands exactly a second after the last AND on a frame
-// the mon icons were stepping anyway. On the single-core path that is the rule
-// the whole screen's frame rate rests on: a private period is a private repaint
-// budget (SECOND_SCREEN_CHEATSHEET.md, section 7).
+// A flip occurs only on a UiAnimStepped() frame. Both step periods (6 and 12)
+// divide 60, so each flip occurs one second after the last one. The icons step
+// on the same frame. On the single-core path, this shares the repaint
+// (SECOND_SCREEN_CHEATSHEET.md, section 7).
 #define TAG_HOLD_FRAMES 60
 
-// Whether this battle has reached the player's first action selection.
+// TRUE after the battle reaches the player's first action selection.
 //
-// gBattleMons is not cleared when a battle starts (see the note in
-// UiCatchableOpponent, matchup.c), and status2 in particular is only zeroed in
-// BattleIntroDrawTrainersOrMonsSprites (src/battle_main.c). Until then it holds
-// whatever the LAST battle ended with, so a lead that won that battle while
-// confused would flash CNF through the whole of the next one's intro. Nothing
-// can inflict confusion before the player has chosen a first action, so
-// waiting for that loses nothing real.
+// gBattleMons is not cleared when a battle starts (see UiCatchableOpponent in
+// matchup.c). BattleIntroDrawTrainersOrMonsSprites clears status2. Before that,
+// status2 holds the values from the previous battle, and CNF could show during
+// the intro. Nothing can cause confusion before the first action, so the wait
+// costs nothing.
 //
-// The cost is battles the player never chooses in: recorded battles, and the
-// Safari Zone, where confusion cannot happen anyway.
+// Battles with no player choice (recorded battles, the Safari Zone) never set
+// this. Confusion does not occur there.
 static bool8 sBattleLive;
 
-static u8    sConfused;     // one bit per party slot
-static bool8 sCycling;      // some slot carries two tags
+static u8    sConfused;     // one bit for each party slot
+static bool8 sCycling;      // a slot has two tags
 static u8    sHold;         // frames since the last flip
-static u8    sPhase;        // which tag each cycling slot shows
-static bool8 sFlipped;      // sPhase moved this frame
+static u8    sPhase;        // the tag that each cycling slot shows
+static bool8 sFlipped;      // sPhase changed on this frame
 
-// Which party slots are confused right now.
+// The party slots that are confused now.
 static u8 ReadConfused(void)
 {
     u8 mask = 0;
 
-    // Decided battles as well as unstarted ones: status2 is not cleared at the
-    // end either, and a win, a catch or a run makes confusion meaningless while
-    // gMain.inBattle is still TRUE through the fade out.
+    // Ended battles too: status2 is not cleared at the end either. After a win,
+    // a catch or a run, confusion means nothing, but gMain.inBattle stays TRUE
+    // through the fade.
     if (!sBattleLive || gBattleOutcome != 0)
         return 0;
 
@@ -74,15 +70,14 @@ static u8 ReadConfused(void)
         if (slot >= PARTY_SIZE)
             continue;
 
-        // The battler really is this party mon. A switch points the party
-        // index at the incoming mon (Cmd_getswitchedmondata) at least a frame
-        // before the battle struct is refilled from it
-        // (Cmd_switchindataupdate, src/battle_script_commands.c), and in
-        // between the struct still holds the outgoing mon, confusion and all.
-        // Without this, CNF would flash on the cell of the mon coming in. The
-        // personality sits in the plaintext header, so this costs no decrypt.
-        // Through UiPartyMon because gBattlerPartyIndexes holds field slots,
-        // and the game's party menu may have the array in battle order.
+        // Make sure that the battler is this party mon. A switch sets the party
+        // index to the new mon (Cmd_getswitchedmondata) one or more frames
+        // before the battle struct gets its data (Cmd_switchindataupdate).
+        // Between the two, the struct still holds the old mon and its
+        // confusion. Without this check, CNF shows on the new mon for that
+        // time. The personality is in the plain header, so the check does not
+        // decrypt. Use UiPartyMon, because gBattlerPartyIndexes holds field
+        // slots and the game's party menu can reorder the array.
         if (gBattleMons[b].personality
             != GetMonData(UiPartyMon((u8)slot), MON_DATA_PERSONALITY))
             continue;
@@ -93,7 +88,7 @@ static u8 ReadConfused(void)
     return mask;
 }
 
-// The slot's tags in the order they show, main status first. At most two.
+// The slot's tags in display order, the main status first. Two at most.
 static u8 GetTags(u8 slot, u8 tags[2])
 {
     struct Pokemon *mon;
@@ -105,11 +100,10 @@ static u8 GetTags(u8 slot, u8 tags[2])
 
     mon = UiPartyMon(slot);
 
-    // GetMonAilment() without its last step, the Pokerus check. That one
-    // decrypts the mon, and its answer draws nothing (the party menu shows no
-    // badge for Pokerus either), while this runs for every slot on every
-    // animation step. HP and status are party fields, outside the encrypted
-    // substructs, so what is left costs no decrypt at all.
+    // GetMonAilment() without its last step, the Pokerus check. That step
+    // decrypts the mon and draws nothing (the party menu shows no Pokerus
+    // badge). This runs for every slot on every animation step. HP and status
+    // are outside the encrypted substructs, so the rest does not decrypt.
     ailment = (GetMonData(mon, MON_DATA_HP) == 0)
             ? AILMENT_FNT
             : GetAilmentFromStatus(GetMonData(mon, MON_DATA_STATUS));
@@ -117,8 +111,8 @@ static u8 GetTags(u8 slot, u8 tags[2])
     if (ailment != AILMENT_NONE)
         tags[n++] = ailment;
 
-    // A fainted mon is FNT and nothing else. Its status2 is cleared when it
-    // faints anyway (FaintClearSetData), but this does not rely on the timing.
+    // A fainted mon shows only FNT. FaintClearSetData clears its status2, but
+    // this does not depend on that timing.
     if ((sConfused & (1 << slot)) && ailment != AILMENT_FNT)
         tags[n++] = UI_STATUS_CNF;
 
@@ -148,9 +142,8 @@ void UiStatusTagsTick(void)
     for (u8 slot = 0; slot < PARTY_SIZE && !sCycling; slot++)
         sCycling = UiStatusTagCycles(slot);
 
-    // Idle while nothing alternates, so a mon that picks up a second tag shows
-    // its main status first and holds it for a full second, rather than
-    // starting partway through a cycle nobody could see.
+    // Stay idle while nothing alternates. A mon that gets a second tag then
+    // shows its main status first for a full second.
     if (!sCycling)
     {
         sHold = 0;
@@ -180,7 +173,7 @@ u8 UiStatusTag(u8 slot)
     return tags[sPhase % n];
 }
 
-// The confused bit first: it is almost always clear, and the tick asks this
+// Check the confused bit first. It is almost always clear, and the tick asks
 // for all six slots on every frame of a battle.
 bool8 UiStatusTagCycles(u8 slot)
 {
@@ -201,7 +194,8 @@ u32 UiStatusTagsKey(bool8 withPhase)
 {
     u32 key = sConfused;
 
-    // Plus one so the first phase is not the same key as "nothing cycles".
+    // Add one, so that the first phase gives a key different from "nothing
+    // cycles".
     if (withPhase && sCycling)
         key |= ((u32)sPhase + 1) << 8;
 

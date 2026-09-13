@@ -1,21 +1,15 @@
-// BAG tab: pockets and item list on the left, details and Use on the right,
-// and a party target picker that opens over both when an item needs one.
+// BAG tab: the pockets and the item list on the left, the details and USE on
+// the right. A party target picker opens over both when an item needs a target.
 //
-// Tapping a row only MOVES THE CURSOR to it; using an item takes a second,
-// deliberate tap on Use. On a resistive panel that matters: a single-tap-to-use
-// list makes a mis-touch cost you a Full Restore.
+// A tap on a row only moves the cursor. The player must then tap USE. On a
+// resistive panel, a single tap must not use a Full Restore by mistake.
 //
-// This is the only place in the bottom-screen UI that MUTATES game state, so
-// the gates in CanUseItemNow(), ItemTargeting() and Ctr3dsQueueBattleItem() are
-// the design, not a detail. Everything else here is a read through the game's
-// own accessors.
+// This file writes game state, so the gates in CanUseItemNow(), ItemTargeting()
+// and Ctr3dsQueueBattleItem() are important. All other code here only reads.
 //
-// What is deliberately NOT used: GetItemFieldFunc(). The game's field-use flows
-// are coupled to the bag menu's task and callback context and render onto the
-// top screen; driving one from here would fight the overworld for BG layers.
-// ItemTargeting() is what keeps that promise honest -- see its comment for the
-// two item classes that would otherwise reach the top screen through the back
-// door.
+// Do not use GetItemFieldFunc(). The game's field-use flows need the bag menu's
+// task and draw on the top screen. ItemTargeting() refuses the two item classes
+// that would reach the top screen another way.
 
 #include "global.h"
 #include "main.h"
@@ -23,7 +17,7 @@
 #include "pokemon.h"
 #include "overworld.h"
 #include "script.h"
-#include "battle.h"              // struct DisableStruct, for the header below
+#include "battle.h"              // struct DisableStruct
 #include "battle_controllers.h"
 #include "party_menu.h"          // GetItemEffectType
 #include "constants/items.h"
@@ -41,13 +35,11 @@
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
 
-// Two panels side by side, both on the player's chosen window frame. 24 + 16
-// tiles exactly fills the 40-tile width, a 60/40 split in the list's favour.
+// Two panels, both on the player's window frame. 24 + 16 tiles fill the 40-tile
+// width.
 //
-// 24 is the largest the list can take. It leaves the details column 108px of
-// text width, and the widest line in any item description ("raises FARFETCH'D's",
-// src/data/text/item_descriptions.h) is exactly 108px. One tile further and
-// descriptions start wrapping into the border.
+// 24 tiles is the maximum for the list. The details column then has 108px of
+// text width. The widest line in an item description is exactly 108px.
 #define PANEL_Y       24
 #define PANEL_TY      (PANEL_Y / 8)
 #define PANEL_TH      ((UI_CONTENT_H - PANEL_Y) / 8)
@@ -58,10 +50,9 @@
 #define LEFT_X        10
 #define LEFT_W        (LEFT_TW * 8 - 20)
 
-// The selected row is marked the way the game's own menus mark one: a cursor in
-// a reserved column, not a box drawn round the text. The column is the glyph
-// plus a 4px gap, and every row's text starts after it whether it is selected
-// or not, so the list does not shuffle sideways as the cursor moves.
+// The selected row gets a cursor in its own column, as in the game's menus. The
+// column is the glyph plus a 4px gap. All rows start their text after it, so
+// the list does not move when the cursor moves.
 #define LIST_CURSOR_X (LEFT_X)
 #define LIST_TEXT_X   (LEFT_X + UI_CHEVRON_W + 4)
 #define LIST_Y        (PANEL_Y + 10)
@@ -71,17 +62,15 @@
 #define PAGE_Y        (LIST_Y + VISIBLE_ROWS * ROW_H + 2)
 #define PAGE_W        56
 #define PAGE_H        20
-// Named the way tab_dex.c names its pair, because they are now the same
-// control drawn the same way and the two files are read side by side.
+// The same names as in tab_dex.c, because it is the same control.
 #define PAGE_UP_X     LEFT_X
 #define PAGE_DN_X     (LEFT_X + PAGE_W + 8)
 
 #define RIGHT_X       (RIGHT_TX * 8 + 10)
 #define RIGHT_W       (RIGHT_TW * 8 - 20)
 
-// The narrower column stacks the icon above the name instead of setting them
-// side by side: at 108px a 32px icon plus the longest item name (72px) does not
-// fit on one line.
+// The narrow column puts the icon above the name. A 32px icon and the longest
+// item name (72px) do not fit on one line of 108px.
 #define ICON_X        (RIGHT_X + (RIGHT_W - 32) / 2)
 #define ICON_Y        (PANEL_Y + 6)
 #define NAME_Y        (PANEL_Y + 40)
@@ -92,17 +81,16 @@
 #define USE_X         (RIGHT_X + (RIGHT_W - USE_W) / 2)
 #define USE_Y         (UI_CONTENT_H - USE_H - 12)
 
-// Target picker: a prompt band over a 2x3 grid of the team. The three bands
-// have to add up to UI_CONTENT_H exactly and land on 8px tile boundaries, or
-// the window frames inside them do not: 24 + 3 * 56 = 192, i.e. 3 + 3 * 7 tiles.
+// Target picker: a prompt band over a 2x3 grid of the team. The bands must add
+// up to UI_CONTENT_H and land on 8px tiles: 24 + 3 * 56 = 192.
 #define PICK_HEAD_H   24
 #define PICK_COLS     2
 #define PICK_ROWS     3
 #define PICK_CELL_W   (CTR_BOTTOM_WIDTH / PICK_COLS)
 #define PICK_CELL_H   ((UI_CONTENT_H - PICK_HEAD_H) / PICK_ROWS)
 
-// Same three-column split as the PARTY tab's cells, and for the same reason:
-// cursor, then icon and status, then everything textual.
+// The same three columns as the PARTY cells: the cursor, the icon with the
+// status, and the text.
 #define PICK_CURSOR_X 8
 #define PICK_ICON_X   18
 #define PICK_TEXT_X   54
@@ -112,17 +100,18 @@
 #define PICK_CANCEL_X (CTR_BOTTOM_WIDTH - PICK_CANCEL_W - 8)
 #define PICK_CANCEL_Y 2
 
-static u8  sPocket = POCKET_ITEMS;   // pocket ids are 1-based
+static u8  sPocket = POCKET_ITEMS;   // pocket ids start at 1
 static u16 sScroll;
-static u16 sCursor;                  // row the cursor is on, absolute
-// One counter per pager, so holding UP or DN runs the list. See UiHoldRepeat.
+static u16 sCursor;                  // the row of the cursor, absolute
+// One counter for each pager, so a held UP or DN scrolls the list. See
+// UiHoldRepeat.
 static UiHold sHoldUp, sHoldDn;
 
-// The picker is modal over the whole content area, the same shape the PARTY
-// tab's detail view uses.
+// The picker is modal over the full content area, like the detail view of the
+// PARTY tab.
 enum { VIEW_LIST, VIEW_PICK_MON };
 static u8  sView;
-static u16 sPickItem;                // the item USE was tapped for
+static u16 sPickItem;                // the item that USE was tapped for
 
 enum { MSG_NONE, MSG_USED, MSG_NO_EFFECT, MSG_NOT_NOW, MSG_QUEUED, MSG_USE_IN_MENU };
 static u8 sMessage;
@@ -130,7 +119,7 @@ static u8 sMessage;
 static const char *const sPocketNames[POCKET_COUNT] =
     { "ITEM", "BALL", "TM", "BERRY", "KEY" };
 
-// The game keeps pockets compacted (CompactItemsInBagPocket), so the first
+// The game keeps the pockets compact (CompactItemsInBagPocket), so the first
 // empty slot is the end of the list.
 static u16 PocketCount(u8 pocket)
 {
@@ -153,11 +142,9 @@ static u16 CursorItem(void)
 
 // ------------------------------------------------------------- using it ----
 //
-// Item use is only safe out in the overworld with no script holding the
-// player: mutating party data mid-script can contradict whatever the script is
-// about to do. CtrBottomUpdate itself runs between frames (from
-// Rp2350PresentFrame, after VBlankIntr), so the frame's own callbacks have
-// already finished.
+// Use an item only in the overworld, with no script in control. A change to the
+// party during a script can conflict with the script. CtrBottomUpdate runs
+// after the frame's callbacks, so they are complete.
 static bool8 CanUseItemNow(void)
 {
     if (gMain.inBattle)
@@ -172,10 +159,9 @@ static bool8 CanUseItemNow(void)
     return TRUE;
 }
 
-// Ether restores one move and Elixir restores all four. The party menu tells
-// them apart on this bit and opens a move list for the first kind
-// (ItemUseCB_PPRecovery, src/party_menu.c); this UI has no move list, so it
-// makes the same split and refuses that half.
+// An Ether restores one move and an Elixir restores all four. The party menu
+// uses this bit to open a move list for the first kind (ItemUseCB_PPRecovery).
+// This UI has no move list, so it refuses that kind.
 static bool8 PpItemNeedsMoveChoice(u16 item)
 {
     const u8 *effect;
@@ -188,26 +174,24 @@ static bool8 PpItemNeedsMoveChoice(u16 item)
     return (effect[4] & ITEM4_HEAL_PP_ONE) != 0;
 }
 
-// What a USE tap needs before it can do anything. Driven entirely off the
-// game's own tables rather than a list of item ids, so it classifies every item
-// of a class the same way and cannot fall behind the data.
+// What a USE tap needs before it can act. It uses the game's own tables, not a
+// list of item ids, so it treats all items of a class the same.
 enum { TARGET_MON, TARGET_NONE, TARGET_UNSUPPORTED };
 
 static u8 ItemTargeting(u16 item)
 {
     u8 effect = GetItemEffectType(item);
 
-    // Needs a MOVE chosen as well as a mon. Defaulting to the first move slot
-    // would silently top up the wrong move, so these are refused outright.
+    // The item needs a move as well as a mon. The first move slot is not a safe
+    // default, so refuse the item.
     if (effect == ITEM_EFFECT_PP_UP || effect == ITEM_EFFECT_PP_MAX)
         return TARGET_UNSUPPORTED;
     if (effect == ITEM_EFFECT_HEAL_PP && PpItemNeedsMoveChoice(item))
         return TARGET_UNSUPPORTED;
 
-    // In battle the engine's own table already says which items are offerable
-    // and whether they need a party choice: MEDICINE is the class the vanilla
-    // bag follows with a party menu, OTHER is balls, X items and the escape
-    // items, all of which act without one.
+    // In battle, the engine's table tells which items are available and if they
+    // need a party choice. MEDICINE needs a party menu in the game's bag. OTHER
+    // is balls, X items and escape items, which need no choice.
     if (gMain.inBattle)
     {
         switch (GetItemBattleUsage(item))
@@ -238,39 +222,36 @@ static u8 ItemTargeting(u16 item)
     case ITEM_EFFECT_DEF_EV:
         return TARGET_MON;
 
-    // Everything else out of battle is refused, and two of those are refused
-    // for correctness rather than tidiness:
+    // Refuse all other items out of battle. Two of them must be refused:
+    // - EVO_STONE: PokemonUseItemEffects() calls BeginEvolutionScene() directly
+    //   (src/pokemon.c). That takes gMain.callback2 during CtrBottomUpdate,
+    //   which is in the middle of the frame.
+    // - RAISE_LEVEL: the table effect is only the level-up. ItemUseCB_RareCandy
+    //   checks for a new move after it (src/party_menu.c), so the bare effect
+    //   skips a learnset move.
     //
-    //   EVO_STONE -- PokemonUseItemEffects() calls BeginEvolutionScene()
-    //   directly (src/pokemon.c), which would seize gMain.callback2 from inside
-    //   CtrBottomUpdate, mid-frame. That is exactly the top-screen fight this
-    //   file's header promises not to pick.
-    //
-    //   RAISE_LEVEL -- the table effect is only the level-up. The new-move
-    //   check runs afterwards in ItemUseCB_RareCandy (src/party_menu.c), so
-    //   applying the bare effect walks a mon straight past a learnset move.
-    //
-    // X_ITEM does nothing outside battle, SACRED_ASH needs a whole-party sweep,
-    // and NONE has no effect table at all.
+    // X_ITEM does nothing out of battle. SACRED_ASH needs the full party. NONE
+    // has no effect table.
     default:
         return TARGET_UNSUPPORTED;
     }
 }
 
-// The gate both routes share, checked before the picker opens and again when it
-// commits: a turn can pass, or a script can start, while the picker is up.
+// The gate for both routes. Check it before the picker opens and again when the
+// player commits. A turn can pass, or a script can start, while the picker is
+// up.
 static bool8 CanStartUse(void)
 {
     return gMain.inBattle ? Ctr3dsPlayerIsChoosingAction() : CanUseItemNow();
 }
 
-// `slot` is ignored for TARGET_NONE items: a ball targets nobody and an X item
-// targets whichever mon is out, which the battle controller resolves itself.
+// TARGET_NONE items ignore `slot`. A ball has no target, and an X item acts on
+// the mon that is out, which the battle controller finds itself.
 static void UseItemOn(u16 item, u8 slot)
 {
-    // In battle this does not apply the effect itself: the controller does,
-    // and then registers B_ACTION_USE_ITEM so the item costs a turn and the
-    // opponent gets to respond, which is what the d-pad route does.
+    // In battle, the controller applies the effect. It then registers
+    // B_ACTION_USE_ITEM, so the item costs a turn and the opponent can respond,
+    // as on the d-pad route.
     if (gMain.inBattle)
     {
         switch (Ctr3dsQueueBattleItem(item, slot))
@@ -284,9 +265,10 @@ static void UseItemOn(u16 item, u8 slot)
     {
         sMessage = MSG_NOT_NOW;
     }
-    // Inverted return, matching the game: FALSE means the item DID something.
-    // gPlayerParty directly rather than UiPartyMon: out of battle the party is
-    // always in field order, and the effect takes `slot` as an index into it.
+    // The return value is inverted, as in the game: FALSE means that the item
+    // had an effect. Use gPlayerParty directly, not UiPartyMon. Out of battle,
+    // the party is always in field order, and the effect uses `slot` as an
+    // index into it.
     else if (PokemonUseItemEffects(&gPlayerParty[slot], item, slot, 0, FALSE) == FALSE)
     {
         RemoveBagItem(item, 1);
@@ -297,15 +279,14 @@ static void UseItemOn(u16 item, u8 slot)
         sMessage = MSG_NO_EFFECT;
     }
 
-    // The list may have shrunk under the cursor. Both routes consume the item --
-    // the battle one inside Ctr3dsQueueBattleItem -- so this is checked once
-    // here rather than in the branch that happens to be looking.
+    // The list can become shorter under the cursor. Both routes use up the
+    // item, so check this once here.
     if (sCursor > 0 && sCursor >= PocketCount(sPocket))
         sCursor--;
 }
 
-// Which slots the picker will accept. Empty slots are obvious; eggs match the
-// party menu, which refuses to use an item on one (IsSelectedMonNotEgg).
+// The slots that the picker accepts. Not empty slots. Not eggs, which the party
+// menu also refuses (IsSelectedMonNotEgg).
 static bool8 IsPickable(u8 slot)
 {
     struct Pokemon *mon = UiPartyMon(slot);
@@ -361,8 +342,7 @@ static void DrawList(void)
 
         item = BagGetItemIdByPocketPosition(sPocket, pos);
 
-        // The cursor is what the Use button acts on, so it has to be
-        // unmistakable rather than a subtle tint.
+        // USE acts on the cursor row, so the cursor must be clear.
         if (pos == sCursor)
             UiChevron(LIST_CURSOR_X, y + (UI_GLYPH_H - UI_CHEVRON_H) / 2);
 
@@ -372,13 +352,11 @@ static void DrawList(void)
                    UI_COL_DIM, UiThemeShadow());
     }
 
-    // Paging lives below the list rather than beside it: the column is too
-    // narrow to give up width to a pager standing alongside the rows.
+    // The pagers go below the list. The column is too narrow for a pager next
+    // to the rows.
     //
-    // The same UiArrow the DEX list pages with, centred in the same way, rather
-    // than the words UP and DN. Two lists on the same screen that scroll
-    // identically should not need to be learned twice, and an arrow says which
-    // way it goes in any language.
+    // They use the same UiArrow as the DEX list, centered the same way. The two
+    // lists scroll the same, so they look the same.
     if (sScroll > 0)
     {
         UiRect(PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
@@ -405,22 +383,22 @@ static void DrawDetails(void)
     if (item == ITEM_NONE)
         return;
 
-    // Icon and name centred. Left-aligning a 32px icon in a column this narrow
-    // reads as though it slipped rather than as a layout.
+    // Center the icon and the name. A 32px icon on the left of a narrow column
+    // looks misaligned.
     UiItemIcon(ICON_X, ICON_Y, item);
 
     name = GetItemName(item);
     UiText(RIGHT_X + (RIGHT_W - UiTextWidth(name)) / 2, NAME_Y, name,
            UiThemeText(), UiThemeShadow());
 
-    // Carries its own line breaks, which UiText honours. Left-aligned, unlike
-    // the two above it: this is prose, and three centred lines read as ragged.
+    // The description has its own line breaks, which UiText follows. It is
+    // aligned to the left, because centered lines of text look ragged.
     UiText(RIGHT_X, DESC_Y, GetItemDescription(item),
            UiThemeText(), UiThemeShadow());
 
     if (sMessage != MSG_NONE)
     {
-        // Kept inside the 108px column: at 6px a glyph that is 18 characters.
+        // Keep this inside the 108px column: 18 characters at 6px.
         static const char *const text[] = {
             [MSG_USED]        = "Used it.",
             [MSG_NO_EFFECT]   = "It had no effect.",
@@ -439,9 +417,9 @@ static void DrawDetails(void)
            UiThemeText(), UiThemeShadow());
 }
 
-// One target cell. A 56px-tall relative of the PARTY tab's grid cell: same
-// icon-left, text-right split, eight pixels shorter, so the two read as the
-// same object in two places rather than as two designs.
+// One target cell. It is like the PARTY grid cell, 8px shorter, with the icon
+// on the left and the text on the right. Thus the two look like the same
+// object.
 static void DrawPickCell(u8 slot)
 {
     struct Pokemon *mon = UiPartyMon(slot);
@@ -454,23 +432,22 @@ static void DrawPickCell(u8 slot)
 
     UiWindowFrame(cx / 8, cy / 8, PICK_CELL_W / 8, PICK_CELL_H / 8);
 
-    // A battle partner's Pokemon in the partner's colour, as on the PARTY tab.
-    // Still pickable: the game's own bag lets you use an item on one of them,
-    // and this is a second route to the same thing, not a stricter one. The
-    // colour is so that healing one of Steven's is a choice, not a slip.
+    // A battle partner's Pokemon gets the partner's color, as on the PARTY tab.
+    // It stays pickable, because the game's own bag lets the player use an item
+    // on it. The color makes sure that the player sees whose Pokemon it is.
     if (UiAllySlot(slot) && species != SPECIES_NONE)
         UiAllyFrameGround(cx, cy, PICK_CELL_W, PICK_CELL_H);
 
-    // Drawn before the checks below, so an empty or egg slot still shows where
-    // the cursor is rather than looking like the selection vanished.
+    // Draw the cursor before the checks below, so an empty slot or an egg still
+    // shows the selection.
     if (slot == UiSelectedMon())
         UiChevron(cx + PICK_CURSOR_X, cy + (PICK_CELL_H - UI_CHEVRON_H) / 2);
 
     if (species == SPECIES_NONE)
         return;
 
-    // An egg's species would spoil what is inside it, so it gets neither its
-    // icon nor its stats -- just enough to show the slot is taken.
+    // An egg shows no icon and no stats, because the species is a secret. It
+    // shows only that the slot is full.
     if (GetMonData(mon, MON_DATA_IS_EGG))
     {
         UiText(cx + PICK_ICON_X, cy + 16, UiAscii(label, "EGG", sizeof(label)),
@@ -481,10 +458,10 @@ static void DrawPickCell(u8 slot)
     UiMonIcon(cx + PICK_ICON_X, cy + 8, (u16)species,
               GetMonData(mon, MON_DATA_PERSONALITY));
 
-    // The same tag the PARTY cell shows at the same moment, CNF included, which
-    // matters here: this is where a Persim Berry or a Full Heal gets its
-    // target. The picker has no animated layer, so a mon with two tags flips
-    // by full repaint, keyed in the shell's hash (UiStatusTagsKey).
+    // The same tag as the PARTY cell, CNF included. This is where a Persim
+    // Berry or a Full Heal gets its target. The picker has no animated layer,
+    // so a mon with two tags flips by a full repaint (UiStatusTagsKey in the
+    // shell's hash).
     UiStatusIcon(cx + PICK_ICON_X, cy + 40, UiStatusTag(slot));
 
     GetMonData(mon, MON_DATA_NICKNAME, name);
@@ -495,15 +472,14 @@ static void DrawPickCell(u8 slot)
     UiNum(cx + PICK_TEXT_X + 18, cy + 24, (s32)GetMonData(mon, MON_DATA_LEVEL),
           UiThemeText(), UiThemeShadow());
 
-    // The true value, not the PARTY tab's animated one: choosing who to heal
-    // should be answered by what the mon's HP actually is right now.
+    // The true HP, not the PARTY tab's animated value. The player chooses who
+    // to heal from the real HP.
     hp    = GetMonData(mon, MON_DATA_HP);
     maxHp = GetMonData(mon, MON_DATA_MAX_HP);
 
-    // Labelled to match the PARTY cell this is a relative of. Same reasoning
-    // there: beside "Lv 42" a bare number reads as another stat rather than as
-    // health. Measured the same way too, off maxHp, even though nothing here
-    // animates -- one rule for both cells is what keeps them looking alike.
+    // The label matches the PARTY cell, where a bare number next to "Lv 42"
+    // looks like a different stat. The position also comes from maxHp, so both
+    // cells look the same.
     UiAscii(label, "HP", sizeof(label));
     UiText(cx + PICK_CELL_W - 10 - UiNumWidth((s32)maxHp) - UiTextWidth(label) - 2,
            cy + 24, label, UI_COL_DIM, UiThemeShadow());
@@ -556,8 +532,7 @@ static void UseTapped(void)
     if (item == ITEM_NONE)
         return;
 
-    // Refuse before the picker rather than after it. Making the player choose a
-    // target and only then saying no is worse than saying no immediately.
+    // Refuse before the picker opens, not after the player chooses a target.
     if (!CanStartUse())
     {
         sMessage = MSG_NOT_NOW;
@@ -602,9 +577,8 @@ static void PickerTouch(const CtrTouchState *t)
         if (!IsPickable(i))
             return;
 
-        // A single tap commits here. The USE button was already the deliberate
-        // second tap this file's header is about, and a 160x56 cell is not a
-        // 24px list row that a resistive panel can slip onto.
+        // A single tap commits here. The USE tap was the second, deliberate
+        // tap, and a 160x56 cell is too large for a slip.
         UiSetSelectedMon(i);
         UseItemOn(sPickItem, i);
         sView = VIEW_LIST;
@@ -624,11 +598,9 @@ void UiBagTouch(const CtrTouchState *t)
         return;
     }
 
-    // Both pagers are tested ahead of the justReleased guard below, because a
-    // held one has to act on frames where nothing has been released. A plain
-    // tap still fires exactly once, on its release, so tapping is unchanged.
-    // They sit below the list and the pocket bar is above it, so nothing else
-    // wants these rects and testing them first costs the other controls nothing.
+    // Test both pagers before the justReleased guard below, because a held
+    // pager acts on frames with no release. A plain tap still acts once, on
+    // release. Nothing else uses these rects.
     if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         if (sScroll > 0)
@@ -660,10 +632,9 @@ void UiBagTouch(const CtrTouchState *t)
         {
             sPocket = (u8)(i + 1);
 
-            // Keep the list in the order the player asked for. Cheap enough
-            // here (it runs on a pocket tap, never on a repaint) and it is the
-            // only place this tab can pick up items gained out in the field,
-            // which never go through the in-game bag's own sort.
+            // Keep the list in the order that the player selected. This runs on
+            // a pocket tap, not on a repaint. It is the only place where this
+            // tab sorts items that the player got in the field.
             Ctr3dsSortBagNow();
             sScroll = 0;
             sCursor = 0;
@@ -682,7 +653,7 @@ void UiBagTouch(const CtrTouchState *t)
         return;
     }
 
-    // Selecting only moves the cursor. Using takes a second tap on USE.
+    // A tap only moves the cursor. USE needs a second tap.
     if (t->x < LEFT_TW * 8 && t->y >= LIST_Y && t->y < LIST_Y + VISIBLE_ROWS * ROW_H)
     {
         u16 pos = sScroll + (u16)((t->y - LIST_Y) / ROW_H);

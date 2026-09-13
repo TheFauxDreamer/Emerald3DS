@@ -1,17 +1,13 @@
 // Bottom-screen shell (game side).
 //
-// This translation unit is compiled with the game's headers, NOT libctru's --
-// see 3ds/bridge.h for why. That is the whole point of the split: Emerald's
-// party data, item tables, fonts, mon icons and palettes are ordinary symbols
-// here, so the UI reads real game state directly instead of scraping RAM.
+// This file compiles with the game's headers, not libctru's (see 3ds/bridge.h).
+// Thus the UI reads the party, the items, the fonts and the icons directly.
 //
-// This file owns only the frame: which tabs exist, which view is active, and
-// when the screen needs repainting. Each tab draws its own content area
-// (tab_party.c, tab_bag.c, tab_map.c, tab_dex.c, tab_trophy.c, tab_extra.c)
-// through the primitives in ui_draw.h and ui_text.h.
+// This file owns the frame: the tabs, the active view and the repaint policy.
+// Each tab draws its own content area with ui_draw.h and ui_text.h.
 //
-// Redraw policy matters. A repaint is 76,800 pixels of software fill, so the
-// screen is only rebuilt when something it depends on actually changed.
+// A repaint fills 76,800 pixels in software. Thus the screen repaints only when
+// an input changes.
 
 #include "global.h"
 #include "main.h"
@@ -34,9 +30,8 @@
 #include "ui_title.h"
 #include "ui_team.h"
 
-// Two distinct flags: sNeedsRepaint means the framebuffer contents are stale,
-// sDirty means the host has not uploaded the current contents yet. Conflating
-// them repaints every frame the host happens to be behind.
+// Two flags. sNeedsRepaint: the framebuffer is stale. sDirty: the host has not
+// uploaded the framebuffer yet. Do not merge them.
 static int sNeedsRepaint = 1;
 static int sDirty = 1;
 static u32 sLastStateHash;
@@ -51,10 +46,9 @@ void UiSetSelectedMon(u8 index) { sSelectedMon = index; }
 
 // ---------------------------------------------------------------- tabs -----
 //
-// Which tabs exist mirrors BuildNormalStartMenu() (src/start_menu.c): the
-// second screen must not offer the Pokedex or the map before the player has
-// been given them. A zero flag means always available, which is what the start
-// menu does for the bag.
+// The tabs follow BuildNormalStartMenu() (src/start_menu.c). Do not show a tab
+// before the player has its item. A zero flag means "always available", as the
+// start menu does for the bag.
 struct UiTabDef
 {
     const char *name;
@@ -67,30 +61,21 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
     [UI_TAB_BAG]   = { "BAG",   0                    },
     [UI_TAB_MAP]   = { "MAP",   FLAG_SYS_POKENAV_GET },
     [UI_TAB_DEX]   = { "DEX",   FLAG_SYS_POKEDEX_GET },
-    // Always available. A locked list is a list of goals, and there is no
-    // start-menu entry for it to mirror.
+    // Always available. The list has no start-menu entry to follow.
     [UI_TAB_TROPHY] = { "TROPHY", 0                  },
-    // Not a game feature, so nothing to unlock: always available.
+    // Not a game feature, so it is always available.
     [UI_TAB_EXTRA] = { "EXTRA", 0                    },
 };
 
-// Whether the game's save data exists to be read yet.
+// TRUE when there is save data to read.
 //
-// gSaveBlock1Ptr and gSaveBlock2Ptr start as NULL (src/load_save.c:41-42) and
-// are only assigned once a file is loaded or started. Every flag read below
-// goes through gSaveBlock1Ptr, so before that point FlagGet() is a null
-// dereference plus a field offset: flags[] sits at offset 0x1270, which puts
-// the read at roughly 0x1300 with nothing mapped there.
+// gSaveBlock1Ptr and gSaveBlock2Ptr are NULL until a file loads
+// (src/load_save.c). FlagGet() reads through gSaveBlock1Ptr, so an earlier call
+// reads near address 0x1300. A real ARM11 faults there. The state hash polls
+// every frame, so gate every save read on this function.
 //
-// Azahar tolerated that for months of testing. A real ARM11 does not, and
-// faulted on the first hardware boot with "data abort, translation - section,
-// access type Read" at exactly that address. CtrBottomUpdate gates touch input
-// and Redraw() on sInGame, but the state hash is polled unconditionally, so
-// this was reached on literally the first frame.
-//
-// Deliberately not the same question as sInGame. That latches on reaching the
-// overworld and stays true through battles and menus, which is what the screen
-// wants; this asks only whether there is save data to read at all.
+// This is not the same test as sInGame. sInGame stays TRUE through battles and
+// menus. This function only says if save data exists.
 static bool8 SaveDataLive(void)
 {
     return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
@@ -98,14 +83,13 @@ static bool8 SaveDataLive(void)
 
 static bool8 TabUnlocked(u32 tab)
 {
-    // The EXTRA tab's testing override. Deliberately checked before the flag
-    // rather than folded into it, so the normal path is unchanged and the
-    // override reads as the exception it is.
+    // The EXTRA tab's test override. It comes before the flag so that the
+    // normal path stays the same.
     if (Ctr3dsGetShowAllTabs())
         return TRUE;
 
-    // Ordered so the two answers that need no save data come first, and the
-    // flag read is only reached once there is a save block to read it from.
+    // The two answers that need no save data come first. The flag read occurs
+    // only when a save block exists.
     if (sTabs[tab].flag == 0)
         return TRUE;
 
@@ -115,8 +99,8 @@ static bool8 TabUnlocked(u32 tab)
     return FlagGet(sTabs[tab].flag);
 }
 
-// Fills `out` with the visible tab ids in order and returns how many. The bag
-// has no flag, so this can never return zero.
+// Fill `out` with the visible tab ids and return their count. The bag has no
+// flag, so the count is never zero.
 static u32 VisibleTabs(u8 *out)
 {
     u32 n = 0;
@@ -128,8 +112,8 @@ static u32 VisibleTabs(u8 *out)
     return n;
 }
 
-// Flags only ever get set, so an active tab cannot normally vanish. Guard it
-// anyway rather than indexing a hidden tab.
+// Flags never clear, so the active tab cannot usually disappear. This guard
+// stops an index into a hidden tab.
 static void EnsureTabVisible(void)
 {
     u8 vis[UI_TAB_COUNT];
@@ -144,27 +128,16 @@ static void EnsureTabVisible(void)
 
 // --------------------------------------------------------- shiny notice ----
 //
-// A shiny you can actually catch is the one thing on this screen worth
-// interrupting the player for. Emerald says so twice already -- the sprite is
-// recoloured and the encounter opens with a sparkle -- but both land in the
-// first second of a battle whose transition the player may not have been
-// watching, and neither of them survives being missed.
+// A catchable shiny is the one event on this screen that interrupts the player.
+// The game shows it only in the first second of the battle, and the player can
+// miss it.
 //
-// It is a MODAL PANEL, centred, not a strip along an edge. A thin band at the
-// top was the first attempt and it was easy to miss entirely: it sat where the
-// eye is not, it was the height of one line, and on the PARTY tab it looked
-// like part of the cheat tag strip. This takes the middle of the screen, states
-// the species at double size, and has to be dismissed on purpose.
+// The notice is a modal panel in the center of the content area. The player
+// must dismiss it. The tabs keep their layouts, and the panel covers them.
+// UiWindowFrame fills its center tiles, so the panel is opaque.
 //
-// Nothing is reserved for it. Every tab's layout is hand-fitted to a 192px
-// content area, which 3ds/UI_SKIN_PLAN.md declares load bearing, so the panel
-// is drawn over whatever is behind it and takes every touch inside its rect.
-// UiWindowFrame's centre tiles are opaque, so it genuinely covers rather than
-// floating over a readable background.
-//
-// 30x14 tiles is 240x112, which centres exactly in 320x192 on whole 8px
-// boundaries -- (320-240)/2 and (192-112)/2 are both 40 -- and UiWindowFrame
-// takes tiles, so that is not a coincidence to be broken casually.
+// 30x14 tiles is 240x112. It centers exactly in 320x192 on 8px boundaries, 40px
+// from each side. Keep these numbers in whole tiles.
 #define NOTICE_TX     5
 #define NOTICE_TY     5
 #define NOTICE_TW     30
@@ -175,15 +148,14 @@ static void EnsureTabVisible(void)
 #define NOTICE_W      (NOTICE_TW * 8)     // 240
 #define NOTICE_H      (NOTICE_TH * 8)     // 112
 
-// The interior, inside the frame's 8px border: x 48..272, y 48..144.
+// The interior, inside the 8px border: x 48..272, y 48..144.
 #define NOTICE_IN_X   (NOTICE_X + 8)
 #define NOTICE_IN_W   (NOTICE_W - 16)
 #define NOTICE_IN_Y   (NOTICE_Y + 8)
 #define NOTICE_IN_H   (NOTICE_H - 16)
 
-// Three rows. The headline pairs the mon's icon with SHINY! at double size, the
-// species gets a line of its own also at double size, and the dismiss button
-// closes it. 52+30, 84+30, 118+22 ends at 140 inside the 144px floor.
+// Three rows: the icon with SHINY! at double size, the species at double size,
+// and the DISMISS button. The last row ends at y 140, inside the 144px floor.
 #define NOTICE_HEAD_Y  (NOTICE_IN_Y + 4)                  // 52
 #define NOTICE_NAME_Y  (NOTICE_HEAD_Y + UI_GLYPH_BIG_H + 2)   // 84
 #define NOTICE_ICON_W  32
@@ -194,15 +166,12 @@ static void EnsureTabVisible(void)
 #define NOTICE_BTN_X  (NOTICE_IN_X + (NOTICE_IN_W - NOTICE_BTN_W) / 2)
 #define NOTICE_BTN_Y  (NOTICE_NAME_Y + UI_GLYPH_BIG_H + 4)    // 118
 
-// Which encounter the player has already dismissed the notice for. Keyed on the
-// mon rather than on a bare flag, so the next shiny still gets its own notice.
-// The separate "is set" flag is not redundant: a personality of 0 is legal, and
-// without it that mon's notice could never be shown.
+// The encounter that the player dismissed the notice for. The key is the mon,
+// not a flag, so the next shiny gets its own notice. The "is set" flag is
+// necessary because a personality of 0 is valid.
 //
-// Nothing has to clear this when the battle ends. UiShinyOpponent goes FALSE on
-// gBattleOutcome, so the panel dismisses itself on a catch or a faint or a run
-// whether or not the player ever touched it, and the next encounter carries a
-// different identity anyway.
+// Nothing clears this when the battle ends. UiShinyOpponent is FALSE when
+// gBattleOutcome is set, so the panel closes by itself.
 static u32   sNoticeDismissed;
 static bool8 sNoticeDismissedSet;
 
@@ -221,66 +190,39 @@ static bool8 NoticeActive(u16 *species, u32 *identity)
 
 // -------------------------------------------------------- animation clock --
 //
-// The step clock the party grid's icons advance on, and on the single-core path
-// the one clock for every animation on this screen. Which path the port is on
-// (Ctr3dsRasteriserOnOwnCore) picks the period, because the two have different
-// budgets.
+// The step clock for the party icons. On the single-core path, every animation
+// uses it. Ctr3dsRasteriserOnOwnCore() selects the period.
 //
-// ON ONE CORE (no second core could be had, or a CTR_PPU_THREAD=0 build), a
-// repaint costs the game an entire extra VBlank. Measured, not assumed: at 60
-// repaints a second the game ran at 30fps and at 10 it ran at 53, which is
-// fps = 3600 / (60 + repaints per second) to within the reading error. So the
-// frame rate is set by HOW OFTEN this screen repaints and barely at all by what
-// it draws, and the reason there is only one clock there is arithmetic rather
-// than tidiness.
+// On one core, each repaint costs a full VBlank: fps = 3600 / (60 + repaints
+// per second). Two animations on different periods cost two repaints. On one
+// shared clock, their repaints occur together. The step is 12 frames. The host
+// uploads a repaint in five frames (3ds/host/video.c), so the step must be
+// longer than five.
 //
-// Every animation asks for its repaint through the same sNeedsRepaint flag, so
-// two of them coalesce into one repaint only when they land on the SAME frames.
-// On separate periods a shiny panel over an animating party grid would ask
-// twice as often and cost twice as much. Sharing one step clock makes the frame
-// rate a property of this screen rather than of how many things happen to be
-// moving on it.
-//
-// 12 frames is 5 steps a second. On that path it also has to stay clear of the
-// host's upload: 3ds/host/video.c hands a repaint to the GPU 48 rows at a time,
-// five frames per repaint, so that the top screen keeps its 60fps. A step
-// period shorter than five frames would ask for the next picture before the
-// last one had finished arriving, and the bottom screen would be uploading on
-// every frame -- which is the cost this is all avoiding. 12 leaves seven idle
-// frames between runs.
-//
-// WITH A SECOND CORE the rasteriser runs there while this paints, and the host
-// uploads the whole screen inside that same overlap, before it collects the
-// render. A step then costs the frame nothing and reaches the panel on the
-// frame it was painted, so there is nothing for a slow clock to save. It runs
-// at 6, which is Emerald's own party menu pace (sAnim_0, src/pokemon_icon.c),
-// and the shiny notice leaves it for a frame count of its own (NoticeTick).
+// With a second core, a repaint costs the frame nothing. The step is 6 frames,
+// the pace of the game's own party menu (sAnim_0, src/pokemon_icon.c). The
+// shiny notice uses its own frame count (NoticeTick).
 #define UI_ANIM_STEP_FRAMES (Ctr3dsRasteriserOnOwnCore() ? 6 : 12)
 
 static u8    sAnimSub;
 static bool8 sAnimStepped;
 
-// TRUE on the frames the animations are allowed to advance on. Ticks call this
-// instead of counting frames themselves, which is what keeps them in step.
+// TRUE on the frames when animations can advance. Ticks use this and do not
+// count frames, so they stay in step.
 bool8 UiAnimStepped(void)
 {
     return sAnimStepped;
 }
 
-// TRUE while a modal overlay is covering the tab.
+// TRUE while an overlay covers the tab.
 //
-// A tab asks this to know that the animated layer will not be run for it this
-// frame, because the overlay has that layer to itself -- anything drawn there
-// while the panel is up would land ON TOP of the panel, the overlay being part
-// of the snapshot the layer paints over. A tab with a piece deferred to that
-// layer has to draw it into its own paint instead, or the piece is simply
-// missing for as long as the panel is up. See DrawCell in tab_party.c, which is
-// the case that found this. On the second-core path the shell then asks for a
-// full repaint on every frame that piece moves (CtrBottomUpdate), so it keeps
-// moving under the panel; on the single-core path it is drawn still.
+// While an overlay is up, it owns the animated layer. That layer paints over a
+// snapshot that contains the overlay. Thus a tab must draw its animated pieces
+// into its own paint while this is TRUE (see DrawCell in tab_party.c). On the
+// second-core path, the shell then repaints fully when a piece moves. On the
+// single-core path, the piece stays still.
 //
-// The achievement toast counts too: the party grid's top row of icons sits
-// inside its y 0..40, and the cheat tag strip with them.
+// The achievement toast counts too: it covers the top row of party icons.
 bool8 UiOverlayActive(void)
 {
     return NoticeActive(NULL, NULL) || UiQuickBallActive() || UiAchToastActive();
@@ -288,75 +230,52 @@ bool8 UiOverlayActive(void)
 
 // ------------------------------------------------------- notice animation --
 //
-// The only thing on this screen that moves on its own, and the only reason it
-// is affordable: NoticeTick returns FALSE whenever the panel is down, so not a
-// single extra repaint is asked for on any frame without a shiny on screen.
-// This screen is static by design -- a repaint is 76,800 pixels of software
-// fill plus a blocking texture upload on the host -- and an ambient animation
-// would pay that on every frame of the game rather than on the handful of
-// seconds a shiny is being announced.
+// NoticeTick returns FALSE while the panel is down, so the animation asks for
+// no repaints at other times. It counts calls, not milliseconds. A call is one
+// displayed frame, so the twinkle keeps its speed under fast-forward.
 //
-// It follows UiPartyTick's shape (tab_party.c): file statics, one step per
-// call, TRUE while it still wants frames. The counter counts CALLS, not
-// milliseconds, which is the same idiom UiHold uses -- CtrBottomUpdate runs
-// once per DISPLAYED frame, so a call is a 60th of a second even under
-// fast-forward, and the twinkle does not speed up with the game.
-//
-// Two tunings, and Ctr3dsRasteriserOnOwnCore() picks between them:
-//
-//   With a second core, the animation as it was first written. The counter
-//   counts frames, the corners twinkle on a 64-frame cycle, and a slanted gold
-//   glint crosses the panel as it opens. A repaint costs the frame nothing on
-//   that path, so there is nothing to be saved by waiting for a step.
-//
-//   On one core, what that path can afford. The counter counts steps of the
-//   shared clock (UI_ANIM_STEP_FRAMES), the twinkle is 8 steps long, and a
-//   two-step burst stands in for the glint.
+// Ctr3dsRasteriserOnOwnCore() selects one of two tunings:
+// - Second core: the counter counts frames. The corners twinkle on a 64-frame
+//   cycle, and a gold glint crosses the panel when it opens.
+// - One core: the counter counts steps of the shared clock. The twinkle is 8
+//   steps long, and a two-step burst replaces the glint.
 
-// The twinkle's length on each path, in whatever the counter counts: 64 frames
-// is about 1.1 seconds, and 8 steps of 12 frames is 96 frames, about 1.6.
+// The twinkle length on each path: 64 frames, or 8 steps.
 //
-// Powers of two on purpose. sNoticeTime is a u16, and wraps after eighteen
-// minutes of an undismissed panel counting frames, or three and a half hours
-// counting steps. 65536 divides by both, so the wrap lands on a cycle boundary
-// instead of jumping the twinkle mid-cycle. On the frame path it also plays
-// the glint again, which is harmless.
+// Both are powers of two. sNoticeTime is a u16, and 65536 divides by both, so
+// the wrap occurs on a cycle boundary.
 #define NOTICE_FRAME_CYCLE  64
 #define NOTICE_STEP_CYCLE   8
 #define NOTICE_CORNERS      4
 
-// The opening glint on the second-core path: NOTICE_SWEEP_END frames to cross
-// the panel, as a SWEEP_W band slanted SWEEP_SLANT pixels over the interior's
-// height. See DrawSweep.
+// The opening glint on the second-core path. A SWEEP_W band, slanted by
+// SWEEP_SLANT pixels, crosses the panel in NOTICE_SWEEP_END frames. See
+// DrawSweep.
 #define NOTICE_SWEEP_END    24
 #define SWEEP_W             4
 #define SWEEP_SLANT         24
 
-// The opening flourish on the single-core path, in steps: every corner at the
-// largest frame at once, before the staggered twinkle takes over.
+// The opening burst on the single-core path, in steps. All corners show the
+// largest frame before the twinkle starts.
 #define NOTICE_BURST        2
 
-// How far in from the interior edge a corner sparkle is CENTRED. The big frame
-// reaches 8px left and right of its axis, so 12 clears the 2px gold rule.
+// The distance from the interior edge to a corner sparkle's center. The big
+// frame extends 8px each side, so 12 clears the 2px gold rule.
 #define NOTICE_SPK_IN_X   12
 #define NOTICE_SPK_IN_T   10
 #define NOTICE_SPK_IN_B   12
 
-static u16   sNoticeTime;     // frames (own core) or steps (one core) it has been up
-static u32   sNoticeAnimId;   // the encounter that count belongs to
+static u16   sNoticeTime;     // frames or steps since it opened
+static u32   sNoticeAnimId;   // the encounter that owns the count
 static bool8 sNoticeAnimSet;
-static bool8 sNoticeFull;     // this tick needs the panel painted, not just its sparkles
+static bool8 sNoticeFull;     // this tick needs the full panel
 
-// Which frame of the art a corner shows at `phase`, or -1 for nothing. One table
-// per path.
+// The art frame that a corner shows at `phase`, or -1 for nothing. There is one
+// table for each path.
 //
-// Thresholds rather than arithmetic because the three frames are 3, 6 and 16px
-// wide: an even hold on each reads as a jump into the big one, so the holds are
-// tuned against that.
-//
-// The frame table holds the sizes for 4, 4, 6, 4 and 4 frames, then goes dark
-// for the other 42. Dark for most of the cycle, which is what makes this a
-// twinkle rather than a pulse.
+// The three frames are 3, 6 and 16px wide. Equal holds look like a jump to the
+// big frame, so the thresholds are tuned. The frame table shows the sizes for
+// 4, 4, 6, 4 and 4 frames, and is dark for the other 42.
 static int TwinkleSizeFrames(u16 phase)
 {
     if (phase < 4)  return 0;
@@ -368,9 +287,8 @@ static int TwinkleSizeFrames(u16 phase)
     return -1;
 }
 
-// The step table has one step per size, so each corner is lit for five steps
-// of the eight and dark for three. The stagger round the panel is what keeps
-// that reading as a twinkle at this rate.
+// The step table has one step for each size. Each corner is lit for five steps
+// and dark for three.
 static int TwinkleSizeSteps(u16 phase)
 {
     if (phase < 1) return 0;
@@ -382,8 +300,8 @@ static int TwinkleSizeSteps(u16 phase)
     return -1;
 }
 
-// What corner `i` shows at count `t`, on whichever path this is, or -1 for
-// nothing. Each corner is a quarter cycle behind the last.
+// The frame that corner `i` shows at count `t`, or -1 for nothing. Each corner
+// is a quarter cycle behind the previous one.
 static int CornerSize(u32 i, u16 t)
 {
     if (Ctr3dsRasteriserOnOwnCore())
@@ -407,17 +325,15 @@ static bool8 NoticeTick(void)
         return FALSE;
     }
 
-    // A different encounter is a different panel. Restarting on the same
-    // identity the dismiss logic keys on means the second shiny of a session
-    // gets its own opening glint or burst instead of inheriting the first one's
-    // phase.
+    // A different encounter is a different panel. Restart the count, so that
+    // the next shiny gets its own glint or burst.
     if (!sNoticeAnimSet || id != sNoticeAnimId)
     {
         sNoticeAnimId = id;
         sNoticeAnimSet = TRUE;
         sNoticeTime = 0;
-        sNoticeFull = TRUE;     // the panel itself has to be painted, not just
-        return TRUE;            // its sparkles
+        sNoticeFull = TRUE;     // the full panel,
+        return TRUE;            // not only the sparkles
     }
 
     sNoticeFull = FALSE;
@@ -426,20 +342,17 @@ static bool8 NoticeTick(void)
     {
         sNoticeTime++;
 
-        // The glint is drawn into the panel itself (DrawNotice), so every one
-        // of its frames is a full repaint. So is the frame after its last,
-        // which paints the panel without it: skip that one and the band's last
-        // position stays in the snapshot, where every sparkle step after it
-        // would put it back.
+        // DrawNotice draws the glint into the panel, so each glint frame is a
+        // full repaint. So is the frame after the last one. Without it, the
+        // snapshot keeps the band, and each later sparkle step puts it back.
         if (sNoticeTime <= NOTICE_SWEEP_END)
         {
             sNoticeFull = TRUE;
             return TRUE;
         }
 
-        // After that only on a frame where some corner actually changes size,
-        // which is 24 of the 64 in a cycle. The other 40 would restore and
-        // redraw exactly what is already there, and upload an unchanged screen.
+        // After the glint, repaint only when a corner changes size: 24 of the
+        // 64 frames in a cycle.
         for (u32 i = 0; i < NOTICE_CORNERS; i++)
             if (CornerSize(i, sNoticeTime) != CornerSize(i, (u16)(sNoticeTime - 1)))
                 return TRUE;
@@ -447,9 +360,8 @@ static bool8 NoticeTick(void)
         return FALSE;
     }
 
-    // On one core, only on a step frame. Returning TRUE on the other eleven
-    // would repaint the screen to draw exactly what is already on it, which is
-    // the whole of what took the game to 30fps.
+    // On one core, repaint only on a step frame. More repaints lower the frame
+    // rate.
     if (!UiAnimStepped())
         return FALSE;
 
@@ -458,39 +370,31 @@ static bool8 NoticeTick(void)
     return TRUE;
 }
 
-// The glint that crosses the panel as it opens, once, on the second-core path.
-// Drawn on the bare ground before the rule and the text, so it passes BEHIND
-// the headline the way light crosses glass rather than washing over the words.
+// The glint that crosses the panel when it opens, on the second-core path only.
+// It goes on the bare ground, before the rule and the text, so it passes behind
+// the headline.
 //
-// There is no alpha anywhere in this drawing layer -- UiFillRect writes solid
-// colour -- so a soft glow is not on offer. A narrow hard band moving quickly
-// is, and carrying the orange edge either side of the gold core is the same
-// trick the headline uses to keep a flat fill from reading as a flat bar.
+// The drawing layer has no alpha, so the glint is a narrow hard band with an
+// orange edge on each side of a gold core.
 //
-// Not on the single-core path. There it could only move on the step clock, and
-// a 4px band crossing 224px needs roughly a position every 4px to read as
-// movement, which at five steps a second would take eleven seconds. Five
-// positions is not a sweep, it is four gold bars flashing in sequence, so that
-// path opens with the burst instead (CornerSize): a state CHANGE rather than
-// motion, which reads the same at any rate that clock can be set to.
+// The single-core path has no glint. At five steps a second, the band cannot
+// move smoothly, so that path uses the burst (CornerSize).
 static void DrawSweep(u16 phase)
 {
-    // The leading edge travels the interior plus the slant plus its own width,
-    // so the band starts fully off the left and finishes fully off the right
-    // rather than appearing and vanishing inside the panel.
+    // The leading edge crosses the interior, the slant and the band width. Thus
+    // the band starts and ends fully outside the panel.
     int travel = NOTICE_IN_W + SWEEP_SLANT + SWEEP_W;
     int lead = -(SWEEP_SLANT + SWEEP_W) + (int)phase * travel / NOTICE_SWEEP_END;
 
     for (int r = 0; r < NOTICE_IN_H; r++)
     {
-        // Lower rows lag, which is the whole of the tilt.
+        // Lower rows lag, which gives the tilt.
         int x = NOTICE_IN_X + lead
               + (NOTICE_IN_H - 1 - r) * SWEEP_SLANT / NOTICE_IN_H;
         int w = SWEEP_W;
 
-        // UiFillRect clamps to the SCREEN, and this layer has no clip
-        // rectangle at all, so the band has to be cut to the interior by hand
-        // or it paints straight out over the window frame.
+        // UiFillRect clips only to the screen. Clip the band to the interior
+        // here, or it paints over the window frame.
         if (x < NOTICE_IN_X)
         {
             w += x - NOTICE_IN_X;
@@ -507,22 +411,18 @@ static void DrawSweep(u16 phase)
     }
 }
 
-// One sparkle per interior corner, each a quarter cycle behind the last and
-// ordered around the panel rather than in reading order, so the twinkle travels
-// round it instead of hopping across it.
+// One sparkle for each interior corner. The text rows are centered, so the four
+// corners are empty.
 //
-// All four corners are bare ground to draw on: the headline block, the species
-// line and the 100px DISMISS button are every one of them centred, which leaves
-// the ends of the top and bottom rows empty.
-// The four corner rects, big enough for the largest frame of the art: it is
-// 16x14 around its axis, which sits 8 left and 5 above the centre.
+// The four corner rects fit the largest frame of the art: 16x14 around its
+// axis, 8px to the left and 5px above the center.
 #define NOTICE_SPK_W  16
 #define NOTICE_SPK_H  14
 #define NOTICE_SPK_AX 8
 #define NOTICE_SPK_AY 5
 
-// Ordered around the panel rather than in reading order, so the twinkle travels
-// round it. Shared by the full paint and the sparkles-only step below.
+// In order around the panel, so the twinkle travels around it. The full paint
+// and the sparkle step both use this.
 static const struct { s16 dx, dy; } sCorners[NOTICE_CORNERS] =
 {
     { NOTICE_SPK_IN_X,               NOTICE_SPK_IN_T },
@@ -546,10 +446,8 @@ static void DrawCornerSparkles(void)
     }
 }
 
-// The same four sparkles, over the snapshot rather than over a fresh panel.
-// This is the whole of an animation step's drawing when the notice is up: four
-// 16x14 restores and four glyphs, against a rebuild of the whole screen for
-// them, which was 4.9 ms on the single-core path.
+// The four sparkles over the snapshot, not over a new panel. When the notice is
+// up, this is all that an animation step draws.
 static void RedrawNoticeSparkles(void)
 {
     for (u32 i = 0; i < NOTICE_CORNERS; i++)
@@ -567,40 +465,30 @@ static void DrawNotice(u16 species, u32 personality)
 
     UiWindowFrame(NOTICE_TX, NOTICE_TY, NOTICE_TW, NOTICE_TH);
 
-    // The panel paints its own ground instead of sitting on the frame's.
+    // The panel paints its own dark ground.
     //
-    // This is what makes a fixed gold safe. Everything else on this screen uses
-    // UiThemeText/UiThemeShadow precisely because the 20 frames run from
-    // near-white to near-black, and the sparkle gold is one colour that cannot
-    // follow them: on the light half of that range it would be a pale mark on a
-    // pale field, which is the "easy to miss" failure the modal panel exists to
-    // fix. A dark ground makes it read identically on all 20. The frame still
-    // draws the border, so the panel is still visibly the player's.
+    // A fixed gold is not legible on the light frames. A dark ground makes it
+    // legible on all 20. The frame still draws the player's border.
     UiFillRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHADOW);
 
-    // On the bare ground and under everything else, so the opening glint passes
-    // behind the headline rather than over it. Second-core path only, and once
-    // per encounter: NoticeTick restarts the count for each new shiny, and asks
-    // for a full repaint on every glint frame plus one after, which is what
-    // takes the band back out of the snapshot the sparkles restore from.
+    // The glint goes on the bare ground, under everything else. Second-core
+    // path only, once for each encounter. NoticeTick repaints fully for each
+    // glint frame and one frame after, which removes the band from the
+    // snapshot.
     if (Ctr3dsRasteriserOnOwnCore() && sNoticeTime < NOTICE_SWEEP_END)
         DrawSweep(sNoticeTime);
 
-    // Gold rule just inside the frame, two passes for a 2px line -- the same
-    // idiom the selected move row and the EXTRA toggles use for emphasis.
+    // A gold rule inside the frame. Two passes make a 2px line, as for the
+    // selected move row and the EXTRA toggles.
     UiRect(NOTICE_IN_X, NOTICE_IN_Y, NOTICE_IN_W, NOTICE_IN_H, UI_COL_SHINY);
     UiRect(NOTICE_IN_X + 1, NOTICE_IN_Y + 1, NOTICE_IN_W - 2, NOTICE_IN_H - 2,
            UI_COL_SHINY_EDGE);
 
-    // Icon and headline as one centred block, so the pair stays balanced rather
-    // than the icon hanging off a fixed left margin.
+    // The icon and the headline are one centered block.
     //
-    // The icon is the party icon, not the Pokedex front sprite. Neither has a
-    // shiny palette in Gen 3 -- the shiny colours are a battle-sprite palette
-    // the dex art never loads -- and a 64x64 portrait in ordinary colours on a
-    // panel shouting SHINY would read as a contradiction. An icon is small
-    // enough to be taken as a label for the species rather than a picture of
-    // this individual.
+    // The icon is the party icon, not the Pokedex picture. In Gen 3, neither
+    // has a shiny palette. A small icon identifies the species. A large picture
+    // in normal colors on a SHINY panel is confusing.
     UiAscii(label, "SHINY!", sizeof(label));
     w = NOTICE_ICON_W + NOTICE_ICON_GAP + UiTextBigWidth(label);
     x = NOTICE_IN_X + (NOTICE_IN_W - w) / 2;
@@ -608,45 +496,37 @@ static void DrawNotice(u16 species, u32 personality)
     UiMonIcon(x, NOTICE_HEAD_Y + (UI_GLYPH_BIG_H - NOTICE_ICON_W) / 2,
               species, personality);
 
-    // Gold body over an orange shadow, which is the sprite's own ramp rather
-    // than a generic drop shadow: the star art shades from gold into orange at
-    // its edges, so the headline picks up depth the same way it does.
+    // Gold over an orange shadow: the ramp of the star sprite.
     UiTextBig(x + NOTICE_ICON_W + NOTICE_ICON_GAP, NOTICE_HEAD_Y, label,
               UI_COL_SHINY, UI_COL_SHINY_EDGE);
 
-    // The species on its own line, also doubled: it is the half of the message
-    // the player actually has to act on.
+    // The species, on its own line at double size. The player acts on this.
     //
-    // The pale step of the ramp, not UiThemeText(): the theme colours track the
-    // frame, and on a light frame they are dark ink meant for a light field,
-    // which on this panel's own dark ground would be near-invisible. Cream also
-    // keeps the hierarchy right, sitting a step under the gold headline instead
-    // of competing with it.
+    // Use the pale step of the ramp, not UiThemeText(). The theme colors are
+    // for a light ground, and this ground is dark.
     UiTextBig(NOTICE_IN_X + (NOTICE_IN_W - UiTextBigWidth(gSpeciesNames[species])) / 2,
               NOTICE_NAME_Y, gSpeciesNames[species],
               UI_COL_SHINY_PALE, UI_COL_SHADOW);
 
-    // A real control rather than "tap anywhere". Only this rect dismisses, so
-    // a stray touch on a panel the player is still reading does not throw it
-    // away; the rest of the panel absorbs touches without acting on them.
+    // A real control. Only this rect dismisses the panel, so a stray touch does
+    // not close it. The rest of the panel absorbs touches.
     UiRect(NOTICE_BTN_X, NOTICE_BTN_Y, NOTICE_BTN_W, NOTICE_BTN_H, UI_COL_SHINY);
     UiAscii(label, "DISMISS", sizeof(label));
     UiText(NOTICE_BTN_X + (NOTICE_BTN_W - UiTextWidth(label)) / 2,
            NOTICE_BTN_Y + (NOTICE_BTN_H - UI_GLYPH_H) / 2,
            label, UI_COL_SHINY_PALE, UI_COL_SHADOW);
 
-    // The sparkles are NOT drawn here. They are the animated layer, painted
-    // after the shell snapshots this panel, so the snapshot is the still panel
-    // beneath them -- see DrawAnimatedLayer. Baking a sparkle into the
-    // background would leave it behind when a smaller frame is drawn over it.
+    // Do not draw the sparkles here. They are on the animated layer, which
+    // paints after the snapshot (see DrawAnimatedLayer). A sparkle in the
+    // snapshot stays behind when a smaller frame replaces it.
 }
 
 // ------------------------------------------------------------- lifecycle ---
 //
-// The screen must stay blank through the intro, show nothing but TOUCH TO START
-// on the title screen (ui_title.c), and stay up during battles and menus once
-// the game proper is running. A live "are we in the overworld" test would blink
-// it out on every battle, so latch on having reached the overworld once instead.
+// The screen is blank during the intro. On the title screen, it shows only
+// TOUCH TO START (ui_title.c). After the game starts, it stays up in battles
+// and menus. A live overworld test would hide it in each battle, so latch the
+// first arrival at the overworld.
 static void UpdateInGameLatch(void)
 {
     if (gMain.callback2 == CB2_Overworld)
@@ -655,11 +535,9 @@ static void UpdateInGameLatch(void)
 
 // --------------------------------------------------------------- redraw ----
 //
-// Everything the display depends on is hashed and compared, so the screen is
-// rebuilt only when one of those inputs actually moved. That is not just the
-// party: the window border and the unlock flags can change at any time, and
-// without them here the screen would keep the stale version until something
-// unrelated happened to dirty it.
+// Hash each input that the display uses, and repaint only when the hash
+// changes. The inputs include the window border and the unlock flags, not only
+// the party.
 static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
@@ -667,29 +545,24 @@ static u32 UiStateHash(void)
     u32 top[10];
     top[0] = UiFrameId();
     top[1] = sInGame;
-    // The override is host-side and always safe to read; the three flags are
-    // not, so they are only folded in once there is a save block behind them.
-    // Before that the hash simply reports "no tabs unlocked", which is both
-    // true and what the blank pre-game screen already shows.
+    // The override is host side and always safe to read. Fold the three flags
+    // only when a save block exists. Before that, the hash shows "no tabs",
+    // which is correct.
     top[2] = (u32)(Ctr3dsGetShowAllTabs() != 0) << 3;
 
     if (SaveDataLive())
         top[2] |= (u32)FlagGet(FLAG_SYS_POKEMON_GET)
                |  ((u32)FlagGet(FLAG_SYS_POKENAV_GET) << 1)
                |  ((u32)FlagGet(FLAG_SYS_POKEDEX_GET) << 2);
-    // The matchup badges depend on who we are facing, so the opponent has to be
-    // in here or they would go stale when it switches.
+    // The matchup badges depend on the opponent. Without it here, the badges
+    // are stale after the opponent switches.
     top[3] = UiMatchupOpponentKey();
 
-    // Tab-conditional state, in a slot of its own rather than XORed onto the
-    // always-live matchup key above: two keys sharing a slot can cancel. Only
-    // one of these can ever be live, and each is asked for only while its tab is
-    // up, because both walk data the other tabs have no reason to touch --
-    // counting the dex means every entry, and the map position means the whole
-    // of InitMapBasedOnPlayerLocation.
-    // Every one of these walks save data: the dex counts live in
-    // gSaveBlock2Ptr->pokedex, the map position reads gSaveBlock1Ptr, and the
-    // level cap behind the party's cheat tags reads badge flags.
+    // Tab state, in its own slot. Two keys in one slot can cancel.
+    //
+    // Only one of these keys is live at a time. Each walks data that the other
+    // tabs do not use, so each runs only while its tab is up. All of them read
+    // save data.
     top[4] = 0;
     if (SaveDataLive())
     {
@@ -699,47 +572,38 @@ static u32 UiStateHash(void)
             top[4] = UiMapStateKey();
         else if (sTab == UI_TAB_EXTRA)
             top[4] = UiExtraStateKey();
-        // The party grid's cheat tags print the live level cap, which steps
-        // up the moment a badge is earned, and the detail view's IV/EV panel
-        // prints EVs, which move after a battle without necessarily moving
-        // anything else in this hash. Neither touches another slot.
+        // The cheat tags show the live level cap, which changes when the player
+        // gets a badge. The IV/EV panel shows EVs, which change after a battle.
+        // Neither is in another slot.
         else if (sTab == UI_TAB_PARTY)
             top[4] = UiPartyStateKey();
-        // The list's counters, which a catch or a battle moves with no touch.
+        // The list counters. A catch or a battle changes them without a touch.
         else if (sTab == UI_TAB_TROPHY)
             top[4] = UiTrophyStateKey();
     }
 
-    // The shiny notice, which nothing else here covers: it appears when a
-    // catchable shiny does, disappears when the player dismisses it, and
-    // disappears again when the battle ends. Safe before there is a save block,
-    // because everything behind it is a plain global gated on gMain.inBattle.
+    // The shiny notice. It opens with a catchable shiny and closes on DISMISS
+    // or at the end of the battle. It reads only globals, so it is safe before
+    // a save exists.
     top[5] = NoticeActive(NULL, NULL);
 
-    // The quick-throw strip, in a slot of its own for the same reason the
-    // tab-conditional key above has one: two keys sharing a slot can cancel.
-    // Nothing else in this hash moves when action selection opens or closes,
-    // which is exactly when the strip appears and disappears, so without this
-    // it would never be drawn at all. Zero while it is down.
+    // The quick-throw strip, in its own slot. Nothing else in the hash changes
+    // when action selection opens or closes. Without this key, the strip does
+    // not appear. Zero while it is down.
     top[6] = UiQuickBallStateKey();
 
-    // The title screen's TOUCH TO START, which blinks on the PRESS START
-    // banner's clock. A slot of its own for the same reason as the two above,
-    // and just as necessary: nothing else here moves when the prompt blinks, so
-    // without it the prompt would never appear. Zero once the game runs. Safe
-    // before there is a save block, because it reads only gMain, the tasks and
-    // the sprites.
+    // TOUCH TO START on the title screen, in its own slot. Nothing else changes
+    // when the prompt blinks. Zero after the game starts. It reads only gMain,
+    // the tasks and the sprites, so it is safe before a save exists.
     top[7] = sInGame ? 0 : UiTitleStateKey();
 
-    // Achievements: how many are unlocked and whether any is unseen. On every
-    // tab, not just TROPHY, because the tab bar's dot depends on it and an
-    // unlock can land on any of them. Reads only the provider's own bits, so it
-    // is safe before there is a save block.
+    // The unlocked count, and whether any achievement is unseen. On every tab,
+    // because the tab bar dot uses it. It reads only the provider's bits, so it
+    // is safe before a save exists.
     top[8] = AchActive()->stateKey();
 
-    // The achievement toast, in a slot of its own for the reason the strip and
-    // the notice have theirs: nothing else here moves when it comes up or goes,
-    // so without this it would never be drawn. Zero while it is down.
+    // The achievement toast, in its own slot. Nothing else changes when it
+    // opens or closes. Zero while it is down.
     top[9] = UiAchToastStateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
@@ -748,22 +612,17 @@ static u32 UiStateHash(void)
         hash *= 16777619u;
     }
 
-    // The party, but only where it is drawn: the PARTY tab, and BAG's target
-    // picker. This used to be folded in on every tab, so in a battle each hit,
-    // status change and level-up repainted BAG, MAP, DEX and EXTRA as well: a
-    // full repaint apiece for a screen that shows none of it. It is also 30
-    // GetMonData calls a frame, six of them decrypting, that the other tabs no
-    // longer pay.
+    // The party, only where it shows: the PARTY tab and the BAG target picker.
+    // On other tabs, a hit in battle must not cause a repaint.
     //
-    // Nothing else goes stale for it. MAP's fly row does depend on the party,
-    // and UiMapStateKey folds exactly that itself. Switching to PARTY or
-    // opening the picker repaints on its own, and UiPartyTick adopts the real
-    // HP on the frame the tab comes back.
+    // MAP's fly row also uses the party, and UiMapStateKey folds that itself. A
+    // switch to PARTY repaints anyway, and UiPartyTick takes the real HP on
+    // that frame.
     if (sTab == UI_TAB_PARTY || (sTab == UI_TAB_BAG && UiBagPickerOpen()))
     {
-        // Through UiPartyMon, as the views read it: the game's own party
-        // menu shuffles gPlayerParty into battle order while it is up, and
-        // that is not a change to anything this screen shows.
+        // Read through UiPartyMon, as the views do. The game's party menu
+        // reorders gPlayerParty while it is up. That is not a change on this
+        // screen.
         for (u32 i = 0; i < PARTY_SIZE; i++)
         {
             struct Pokemon *mon = UiPartyMon((u8)i);
@@ -782,19 +641,16 @@ static u32 UiStateHash(void)
             }
         }
 
-        // Confusion, which is not in MON_DATA_STATUS or anywhere else on the
-        // mon (status_tags.h), so gaining or losing CNF would otherwise leave
-        // the badge stale. Which tag a two-tag mon is showing is folded only
-        // for the picker: it has no animated layer, so a repaint is its only
-        // way to flip. The grid flips on its animated layer, and folding the
-        // phase there would turn every flip into a full repaint.
+        // Confusion. It is not in MON_DATA_STATUS (see status_tags.h), so fold
+        // it here. Fold the badge phase only for the picker, which has no
+        // animated layer. On the grid, the phase would make each flip a full
+        // repaint.
         hash ^= UiStatusTagsKey(sTab == UI_TAB_BAG);
         hash *= 16777619u;
 
-        // Which slots are a battle partner's (ui_team.h). Their Pokemon are
-        // already in the party during the battle transition, so nothing above
-        // moves when the battle proper starts and they take the partner's
-        // colour, or when it ends and they lose it.
+        // The slots that belong to a battle partner (ui_team.h). Their Pokemon
+        // are in the party before the battle starts, so nothing above changes
+        // when the tint must appear or go.
         hash ^= UiTeamKey();
         hash *= 16777619u;
     }
@@ -809,7 +665,7 @@ static void DrawTabBar(const u8 *vis, u32 n)
     for (u32 i = 0; i < n; i++)
     {
         int x = (int)i * tabW;
-        // The last tab absorbs the rounding remainder so the bar fills the width.
+        // The last tab takes the remainder, so the bar fills the width.
         int w = (i == n - 1) ? (CTR_BOTTOM_WIDTH - x) : tabW;
         int active = (vis[i] == sTab);
         u8 label[12];
@@ -823,10 +679,9 @@ static void DrawTabBar(const u8 *vis, u32 n)
                UI_CONTENT_H + (UI_TABBAR_H - UI_GLYPH_H) / 2,
                label, active ? UI_COL_ACCENT : UI_COL_DIM, UI_COL_SHADOW);
 
-        // Something unlocked that the player has not looked at yet: a gold dot
-        // in the TROPHY tab's corner, until the tab is opened. It is what is
-        // left of a toast that expired unread, so it is the toast's gold. Never
-        // on the active tab, which marks everything seen as it shows.
+        // A gold dot on the TROPHY tab when an unlock is unseen. It is what
+        // stays after a toast that nobody read, so it uses the toast's gold.
+        // Never on the active tab, which marks all rows as seen.
         if (vis[i] == UI_TAB_TROPHY && !active && AchActive()->anyUnseen())
         {
             UiFillRect(x + w - 12, UI_CONTENT_H + 6, 7, 7, UI_COL_SHINY_EDGE);
@@ -835,7 +690,7 @@ static void DrawTabBar(const u8 *vis, u32 n)
     }
 }
 
-// Defined below, next to the animation-step path that shares it.
+// Defined below, next to the animation-step path.
 static void DrawAnimatedLayer(void);
 
 static void Redraw(void)
@@ -844,22 +699,17 @@ static void Redraw(void)
     u32 n;
     u16 noticeSpecies = SPECIES_NONE;
     u32 noticePersonality = 0;
-    // A repaint is 76,800 pixels of software fill plus the active tab's own
-    // drawing, and it is what every touch handler asks for through
-    // UiMarkDirty(). That makes it the first thing to rule in or out when a tap
-    // costs the player a visible pause. CtrLogSlow reports nothing on a healthy
-    // frame, so this costs one clock read per repaint. See 3ds/bridge.h.
+    // A repaint fills 76,800 pixels and draws the active tab. Each touch
+    // handler asks for one through UiMarkDirty(), so check it first when a tap
+    // causes a pause. CtrLogSlow reports nothing on a normal frame. See
+    // 3ds/bridge.h.
     unsigned int t0 = CtrTimeNowMs();
-    // And the same bracket in ticks, because the millisecond clock above cannot
-    // resolve this at all: the paint is the OTHER half of the repaint cost, and
-    // the whole question is how it compares with the upload the host does after
-    // it. See CtrProfile in 3ds/bridge.h.
+    // The same interval in ticks, for CtrProfile. The millisecond clock is too
+    // coarse for the paint. See 3ds/bridge.h.
     unsigned long long tp = CtrTicksNow();
 
-    // Before the game proper is running there is nothing meaningful to show,
-    // and a menu floating under the title screen looks broken. The one thing
-    // drawn here is the title's TOUCH TO START, only in the lit half of its
-    // blink, with the build id in the corner while it is up.
+    // Before the game starts, show only the title's TOUCH TO START, in the lit
+    // half of its blink. While it is up, also show the build id in the corner.
     if (!sInGame)
     {
         UiClear(0);
@@ -886,11 +736,9 @@ static void Redraw(void)
     case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
-    // The overlays, over the top of whichever tab just drew. The strip and the
-    // achievement toast first and the notice last, so that if the geometry is
-    // ever changed such that they do overlap, the ALERT is the one that
-    // survives -- an alert a view can paint over is not one. As they stand the
-    // three abut exactly (y 40 and y 152) and none touches another.
+    // The overlays go over the tab. The strip and the toast come first and the
+    // notice last. If the geometry changes and they overlap, the alert stays on
+    // top. At present they touch at y 40 and y 152 and do not overlap.
     if (UiQuickBallActive())
         UiQuickBallDraw();
 
@@ -903,60 +751,41 @@ static void Redraw(void)
     DrawTabBar(vis, n);
 
     sNeedsRepaint = 0;
-    sDirty = 1;          // tell the host to re-upload
+    sDirty = 1;          // tell the host to upload again
 
-    // Remember the finished screen, so the next animation step can put back
-    // what it covers rather than rebuilding all of this. Composited -- tab,
-    // overlay and bar -- which is what makes restoring a rect correct whatever
-    // happened to be on top of it.
+    // Keep the finished screen, so that an animation step can restore a rect
+    // and not repaint everything. The snapshot contains the tab, the overlay
+    // and the bar.
     UiSnapshot();
 
-    // ...and only now the moving parts, so they are never inside the thing an
-    // animation step restores from.
+    // The moving parts come after the snapshot, so a step never restores them.
     DrawAnimatedLayer();
 
     CtrLogSlow("redraw", t0);
     CtrProfile("paint", tp);
 }
 
-// Everything on this screen that moves, drawn OVER the snapshot rather than
-// into it. Each of these restores its own rects first, which is a no-op right
-// after a full paint and is the whole trick on an animation step.
+// Each moving part draws over the snapshot, not into it. Each one restores its
+// rects first.
 //
-// The overlay has this layer to itself while it is up, and it has to: the
-// snapshot this paints over already includes the panel, so a tab drawing here
-// would draw on top of it.
-//
-// That is why it is an else rather than both. What it does NOT mean is that the
-// tab's deferred pieces stop existing -- the panel is 240x112 in the middle of a
-// 320x192 area, and only one of the party's six icons is fully behind it. A tab
-// with a piece deferred to this layer draws it into its own paint while
-// UiOverlayActive(), which is where the other five come from.
+// While an overlay is up, it owns this layer, because the snapshot already
+// contains the panel. Thus this is an "else". The tab draws its moving pieces
+// into its own paint while UiOverlayActive() is TRUE.
 static void DrawAnimatedLayer(void)
 {
     if (NoticeActive(NULL, NULL))
         RedrawNoticeSparkles();
-    // Not while the quick-throw strip is up. It has no animation of its own, so
-    // there is nothing to draw here for it -- but the snapshot this layer
-    // paints over now CONTAINS the strip, and the party grid's bottom row of
-    // icons sits under it, so redrawing them here would punch them straight
-    // through the panel. UiOverlayActive() is TRUE for the strip precisely so
-    // that DrawCell paints the icons into the tab instead. The achievement
-    // toast is the same case at the other end: the top row sits under it.
+    // Not while the quick-throw strip is up. The snapshot contains the strip,
+    // and the bottom row of party icons is under it. A redraw here puts the
+    // icons on top of the strip. The achievement toast has the same problem
+    // with the top row.
     else if (!UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY)
         UiPartyRedrawAnimated();
 }
 
-// An animation step, and nothing else: a few rects put back from the snapshot
-// and the moving pieces drawn again over them.
-//
-// This exists because of one measurement, taken on the single-core path, where
-// it still holds: a full repaint was 4.9 ms and the frame had 5.7 ms of slack,
-// so rebuilding the screen five times a second to step some icons spent nearly
-// all of it and the game dropped to 55fps. The same step through here is a few
-// thousand pixels. On the second-core path a full repaint is mostly hidden
-// behind the rasteriser, but a step through here still leaves core 0 more of
-// that overlap for the whole-screen upload that follows it.
+// An animation step: restore a few rects from the snapshot and draw the moving
+// pieces again. This is much cheaper than a full repaint, which matters most on
+// the single-core path.
 static void RedrawAnimated(void)
 {
     unsigned long long tp = CtrTicksNow();
@@ -983,49 +812,42 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     u32 hash;
     u32 noticeIdentity = 0;
     int animParty = 0, animNotice = 0;
-    // The whole of the touch response, so the log can separate it from the
-    // repaint it usually ends in: `update` slow with `redraw` fast means the
-    // cost is in a touch handler or in UiStateHash, not in the painting.
+    // The full touch response. If `update` is slow and `redraw` is fast, the
+    // cost is in a touch handler or in UiStateHash.
     unsigned int t0 = CtrTimeNowMs();
 
     UpdateInGameLatch();
 
-    // Achievements first, so everything below -- the list, the toast, the
-    // hash -- sees this frame's unlocks. Per displayed frame and never gated on
-    // sInGame: it gates itself on there being a save to read, and adopts a
-    // playthrough only on a CB2_Overworld frame (see Adopt in achievements.c).
+    // Achievements first, so the list, the toast and the hash see this frame's
+    // unlocks. Each displayed frame, not gated on sInGame. It checks for a save
+    // itself, and adopts a playthrough only on a CB2_Overworld frame (see Adopt
+    // in achievements.c).
     AchTick();
 
-    // The step clock, advanced before any tick reads it. See
-    // UI_ANIM_STEP_FRAMES: on the single-core path this is what stops two
-    // animations costing twice the frame rate of one.
+    // Advance the step clock before a tick reads it. See UI_ANIM_STEP_FRAMES.
     sAnimStepped = (++sAnimSub >= UI_ANIM_STEP_FRAMES);
     if (sAnimStepped)
         sAnimSub = 0;
 
-    // Which party mons are confused, and which of a mon's two tags is showing.
-    // After the step clock, because a tag only flips on a step, and before
-    // anything that draws a badge or hashes one. Every tab, not just PARTY:
-    // it has to see the battle's first action selection whichever tab is up,
-    // and BAG's target picker shows the same badges.
+    // The confused party mons, and which tag a two-tag mon shows. After the
+    // step clock, because a tag flips only on a step. Before any badge draw or
+    // hash. On every tab, because it must see the first action selection of the
+    // battle.
     UiStatusTagsTick();
 
-    // Nothing is interactive before the game starts, except that a tap anywhere
-    // on the title screen counts as START (ui_title.c).
+    // Before the game starts, nothing is interactive. The one exception: a tap
+    // on the title screen is START (ui_title.c).
     if (!sInGame)
     {
         UiTitleTouch(touch);
         touch = NULL;
     }
 
-    // The panel is modal, so it takes every touch inside its rect before the
-    // tabs see it -- a press that never becomes a release included, or a drag
-    // begun on the panel would carry on into whatever it is covering. Only the
-    // DISMISS button does anything; the rest of the panel absorbs and ignores.
+    // The panel is modal. It takes every touch in its rect before the tabs, a
+    // press without a release too. Only DISMISS acts.
     //
-    // The tab bar is deliberately still live. The panel sits entirely in the
-    // content area, so a player who wants to check their party before throwing
-    // a ball can still switch tabs, and the panel follows them there.
+    // The tab bar stays live. The panel is in the content area, so the player
+    // can check the party before a throw, and the panel follows them.
     if (touch != NULL
         && UiHit(touch, NOTICE_X, NOTICE_Y, NOTICE_W, NOTICE_H)
         && NoticeActive(NULL, &noticeIdentity))
@@ -1039,10 +861,8 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             sNeedsRepaint = 1;
         }
     }
-    // The achievement toast, on the same terms: the whole strip absorbs, and
-    // only VIEW acts, by opening the TROPHY tab. The notice and the toast abut
-    // at y 40 rather than overlap, so this order only decides a tie that the
-    // geometry does not allow.
+    // The achievement toast, on the same terms: the strip absorbs all touches,
+    // and only VIEW acts. It opens the TROPHY tab.
     else if (touch != NULL
              && UiHit(touch, UI_AT_X, UI_AT_Y, UI_AT_W, UI_AT_H)
              && UiAchToastActive())
@@ -1053,20 +873,17 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             sNeedsRepaint = 1;
         }
     }
-    // The quick-throw strip, on the same terms and for the same reasons: it
-    // takes every touch inside its rect, release or not, so a drag begun on it
-    // cannot carry through into the tab it is covering. Below the notice in
-    // this chain because the two can be up together and the notice is the
-    // alert, though as drawn they do not overlap.
+    // The quick-throw strip, on the same terms. It takes every touch in its
+    // rect, so a drag that starts on it does not reach the tab.
     else if (touch != NULL
              && UiHit(touch, UI_QB_X, UI_QB_Y, UI_QB_W, UI_QB_H)
              && UiQuickBallActive())
     {
         UiQuickBallTouch(touch);
     }
-    // A tap on the tab bar switches views; anything above it belongs to the
-    // active view. Acting on release rather than press means a touch that
-    // slides off a tab does not trigger it.
+    // A tap on the tab bar switches the view. Touches above it go to the active
+    // view. Act on release, so a touch that slides off a tab does not trigger
+    // it.
     else if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
     {
         u8 vis[UI_TAB_COUNT];
@@ -1092,83 +909,61 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         }
     }
 
-    // The party grid's HP bars and mon icons, and only while that grid is the
-    // thing on screen -- the tab is passed in rather than assumed, so the four
-    // other tabs pay nothing for either animation.
+    // The HP bars and icons of the party grid, only while the grid shows. The
+    // shell gives the visibility, so other tabs pay nothing.
     //
-    // An animation that only moved its own small rects asks for the cheap path;
-    // anything else -- a sliding HP bar, the panel appearing -- still needs the
-    // screen rebuilt. Getting that split wrong shows up as a stale screen, not
-    // a crash, so when in doubt a tick should ask for the full repaint.
+    // A step that moves only its own rects uses the cheap path. Other changes
+    // need a full repaint. If you are not sure, ask for the full repaint.
     if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
     {
         if (!UiPartyAnimOnly())
         {
             sNeedsRepaint = 1;
         }
-        // An overlay has the animated layer to itself, so while one is up the
-        // party's moving parts (the icons and the sliding HP block) are
-        // painted into the tab by DrawCell instead. On the second-core path
-        // every step is therefore a full repaint, which costs the frame nothing
-        // there, and the grid keeps moving under the panel. The cheap path
-        // cannot do it: it does not redraw the party at all while an overlay is
-        // up, so a bar that starts sliding under one stalls at whatever the
-        // last full paint baked, which is what the single-core path below
-        // still does.
+        // While an overlay is up, DrawCell paints the party's moving parts into
+        // the tab. On the second-core path, each step is then a full repaint,
+        // and the grid keeps moving under the panel.
         else if (UiOverlayActive() && Ctr3dsRasteriserOnOwnCore())
         {
             sNeedsRepaint = 1;
         }
-        // The single-core path, where the party is frozen under an overlay to
-        // save the repaints: no cheap redraw while the quick-throw strip is up.
-        // DrawAnimatedLayer has nothing to draw for the party then -- the icons
-        // are frozen into the tab's own paint, which is what UiOverlayActive()
-        // asked it for -- so the cheap path would put back four rects that
-        // already hold what they held and then make the host upload an
-        // unchanged screen. The tick itself still runs, so the phase carries on
-        // underneath and the icons pick up where they were when the strip goes
-        // down. The achievement toast freezes the grid the same way, so it is
-        // excluded for the same reason.
+        // On the single-core path, the party stays still under an overlay. Thus
+        // there is no cheap redraw while the strip or the toast is up: it has
+        // nothing to draw. The tick still runs, so the icons continue from the
+        // same phase when the overlay closes.
         else if (!UiQuickBallActive() && !UiAchToastActive())
         {
             animParty = 1;
         }
     }
 
-    // Per-frame, and deliberately not gated on sInGame or on the strip being
-    // up: its whole job is to clear state once the battle is over, which is a
-    // moment at which the strip is by definition already down. It asks for no
-    // repaint, because everything it clears is invisible by then.
+    // Each frame, not gated on sInGame or on the strip. It clears state after
+    // the battle, when the strip is already down. It asks for no repaint.
     UiQuickBallTick();
 
-    // The shiny panel's sparkles, on the same terms. Both ticks live here
-    // rather than inside Redraw because a tick that only ran when the screen
-    // happened to repaint would stall exactly when it is the thing that ought
-    // to be causing the repaint.
+    // The sparkles of the shiny panel. The ticks run here, not in Redraw,
+    // because a tick must run even when there is no repaint.
     if (sInGame && NoticeTick())
     {
-        // The panel appearing, or a frame of its glint: the panel itself, not
-        // just its sparkles.
+        // The panel opens, or a glint frame: repaint the full panel.
         if (sNoticeFull)
             sNeedsRepaint = 1;
         else
             animNotice = 1;
     }
 
-    // The achievement toast's countdown, and the next one waiting. Only while
-    // the game runs: before that nothing is drawn, and a toast that timed out
-    // on a blank screen would have told nobody anything.
+    // The toast countdown and the next toast. Only after the game starts,
+    // because nothing shows before that.
     if (sInGame)
         UiAchToastTick();
 
-    // The achievements list's NEW tags, taken on the frame the tab comes on
-    // screen and dropped on the frame it goes. Before the hash, so a tab switch
-    // paints the list already knowing which rows are new.
+    // The NEW tags of the achievements list, taken when the tab opens and
+    // dropped when it closes. Before the hash, so the first paint knows which
+    // rows are new.
     UiTrophyTick(sInGame && sTab == UI_TAB_TROPHY);
 
-    // This state can change without any touch at all -- taking damage, an
-    // evolution, a level-up, the player changing the border in Options, or
-    // being handed the Pokedex -- so it is polled rather than pushed.
+    // This state changes without a touch (damage, evolution, a level-up, a new
+    // border, a new Pokedex), so poll it.
     hash = UiStateHash();
     if (hash != sLastStateHash)
     {
@@ -1176,14 +971,14 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         sNeedsRepaint = 1;
     }
 
-    // Full repaint wins over the cheap one: it redraws everything the cheap
-    // path would have, and refreshes the snapshot the cheap path restores from.
+    // A full repaint includes everything that the cheap path draws, and
+    // refreshes the snapshot.
     if (sNeedsRepaint)
         Redraw();
     else if (animParty || animNotice)
     {
-        // No snapshot yet means nothing to restore from -- the first paint of a
-        // session, or straight after the title screen. Build one.
+        // No snapshot yet (the first paint, or just after the title screen):
+        // make one.
         if (UiHasSnapshot())
             RedrawAnimated();
         else

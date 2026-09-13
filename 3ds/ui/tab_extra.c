@@ -1,24 +1,17 @@
 // EXTRA tab: port features that are not part of the original game.
 //
-// Two pages, and the split between them is the point rather than a way to fit
-// more in. PAGE 1 is host-side only: fast-forward, top-screen scale, button
-// binds, and the show-all-tabs testing override. None of it changes how Emerald
-// plays, which is what the rest of 3ds/ui/ is built on.
+// Page 1 is host side only: fast-forward, top-screen scale and button binds. It
+// does not change how the game plays.
 //
-// PAGE 2 is the exception, and is deliberately kept behind a page turn rather
-// than mixed in with page 1. Every option on it is a cheat: EXP All, a level
-// cap, a species randomiser, a bag sort order. The behaviour lives in
-// 3ds/tweaks.c; this file only draws the toggles and reads them back.
+// Page 2 contains cheats: EXP All, a level cap, a species randomizer and a bag
+// sort order. They are on their own page, so the player does not see them
+// first. 3ds/tweaks.c holds the behavior. This file only draws the toggles.
 //
-// Paging costs no vertical space. The pager takes the right-hand end of the top
-// line, y=8..25, on every page; page 2 puts its first row label to the left of
-// it, page 3 its DEBUG caption, and page 1 leaves that end clear and starts its
-// rows underneath.
+// Page 3 is quality of life. Page 4 is the debug menu, if the build has it.
 //
-// Pages 1 and 2 keep the same horizontal span, 22..298, so the block still
-// reads as one control panel across a page turn. They no longer share a
-// VERTICAL rhythm, because they no longer carry the same number of rows -- see
-// the two grids below.
+// The pager uses the right end of the top line (y 8..25) on each page. Pages 1
+// and 2 use the same horizontal span, 22..298, so they look like one panel.
+// Each page has its own row grid.
 
 #include "global.h"
 
@@ -27,7 +20,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 
-// Ctr3dsCurrentLevelCap(), for the live "cap NN" readout on page 2.
+// Ctr3dsCurrentLevelCap(), for the live "cap NN" value on page 2.
 #include "../tweaks.h"
 
 #if CTR_DEBUG_MENU
@@ -35,49 +28,44 @@
 #include "../achievements.h"
 #endif
 
-// Doubling steps rather than 1/2/3/4: past 2x the interesting question is
-// "much faster", and 3x sits too close to 2x to be worth a button.
+// The speeds double at each step. 3x is too close to 2x to need a button.
 static const u8 sSpeeds[] = { 1, 2, 4, 8 };
 #define SPEED_COUNT   ARRAY_COUNT(sSpeeds)
 
-// Indexed by button, never derived from the index: the modes are an enum, not a
-// sequence, so arithmetic on the index would be a lie waiting to break.
+// An index for each button. The modes are an enum, not a sequence, so do not
+// calculate a mode from the index.
 static const u8 sScales[] = {
     CTR_TOP_SCALE_1X, CTR_TOP_SCALE_1_5X, CTR_TOP_SCALE_FILL
 };
 static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
 #define SCALE_COUNT   ARRAY_COUNT(sScales)
 
-// What a button can be bound to, in tap order. MOD sits in the same cycle as
-// the speeds rather than in a separate control, which is what makes the two
-// mutually exclusive: a button holds one value, so binding a speed necessarily
-// stops it being the modifier and there is no way to ask for both.
+// The values that a button can bind to, in tap order. MOD is in the same cycle
+// as the speeds. A button holds one value, so it cannot be a speed and the
+// modifier at the same time.
 //
-// Tapping wraps back to unbound, so every state is reachable with one finger.
+// The cycle wraps back to "not bound", so one finger can reach every state.
 static const u8 sTurboSteps[] = { CTR_BIND_OFF, 2, 4, 8, CTR_BIND_MOD };
 static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
 
-// The first three rows total 276px wide (4*60 + 3*12, and 3*84 + 2*12), centred
-// in 320, which leaves 22 either side and clears the 8px window frame
-// comfortably.
+// The first three rows are 276px wide, centered in 320. That leaves 22px on
+// each side, clear of the 8px window frame.
 #define BTN_H         26
 #define BTN_GAP       12
 
-// A label sits 17px above its buttons, so a labelled row is 15 (glyph) + 2 + 26
-// (button) = 43px tall. The interior is y=8..183, which is 176px.
+// A label is 17px above its buttons, so a row with a label is 43px tall. The
+// interior is y 8..183, which is 176px.
 #define LABEL_TO_BTN    17
 #define LABELLED_ROW_H  (LABEL_TO_BTN + BTN_H)
 
-// The top line, y=8..25. The pager owns its right-hand end on every page; what
-// sits to its left differs -- page 2's first row label, page 3's DEBUG caption,
-// and on page 1 nothing at all.
+// The top line, y 8..25. The pager uses its right end on each page. On its
+// left: the first row label on page 2, the DEBUG caption on page 4, and nothing
+// on page 1.
 #define TOP_LINE_Y    8
 
-// PAGE 2's grid: four rows, and they only fit because the fourth carries its
-// label beside its buttons rather than above them. Four labelled rows would be
-// 172px of row plus gaps, which overruns the 176px interior; that swap buys the
-// ~35px, and the MOD note moves onto the BUTTON HOLD label's line on page 1 for
-// the same reason. There is no slack left here: 8 to 183, gaps of 7 and 6.
+// Page 2's grid: four rows. They fit only because the fourth row has its label
+// next to its buttons, not above them. There is no space left: y 8 to 183, with
+// gaps of 7 and 6.
 #define ROW1_LABEL_Y  TOP_LINE_Y
 #define ROW2_LABEL_Y  58
 #define ROW3_LABEL_Y  108
@@ -86,18 +74,9 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define ROW2_BTN_Y    (ROW2_LABEL_Y + LABEL_TO_BTN)
 #define ROW3_BTN_Y    (ROW3_LABEL_Y + LABEL_TO_BTN)
 
-// PAGE 1's grid, which used to be the same one.
-//
-// It stopped fitting when the tab-unlock override moved to the debug page and
-// left page 1 with three rows on a layout measured for four: the first label
-// jammed against the top frame at y=8, and 32px of dead space below the last
-// button. Sharing was right while the row counts matched and wrong afterwards.
-//
-// So page 1 starts BELOW the pager line rather than beside it, the way the
-// debug page does, and spends the freed height on the gaps between rows -- 12px
-// against page 2's 7. Three rows at a 55px pitch from y=30 put the last button
-// at 157..183, landing on the interior floor at exactly the same place page 2's
-// fourth row does.
+// Page 1's grid: three rows. They start below the pager line, as on the debug
+// page. The rows have a 55px pitch from y 30. Thus the last button is at
+// 157..183, at the same place as page 2's fourth row.
 #define P1_ROW_GAP    12
 #define P1_ROW_Y(i)   (30 + (i) * (LABELLED_ROW_H + P1_ROW_GAP))
 #define P1_BTN_Y(i)   (P1_ROW_Y(i) + LABEL_TO_BTN)
@@ -114,82 +93,69 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define TRB_Y         P1_BTN_Y(2)
 #define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
 
-// The MOD note shares the BUTTON HOLD label's line. That label is 63px wide, so
-// 96 clears it, and the note is 163px, ending well inside the 311px interior.
+// The MOD note shares the line of the BUTTON HOLD label. That label is 63px
+// wide, so x 96 is clear of it. The note is 163px and ends inside the 311px
+// interior.
 #define TRB_NOTE_X    96
 
-// What fast-forward does to the music, sharing the GAME SPEED label line the
-// same way the MOD note shares BUTTON HOLD's. It belongs on that line because
-// GAME SPEED is the only control it modifies, and a row of its own would cost
-// 43px to say one word.
+// What fast-forward does to the music. It shares the line of the GAME SPEED
+// label, because it changes only that control. A row of its own would cost
+// 43px.
 //
-// "GAME SPEED" ends near x=76, so 104 clears it. The width was 88 rather than
-// 100 to stay clear of the pager's PAGE caption at x=198; page 1's rows have
-// since moved off the pager's line, so nothing constrains it now, and it stays
-// at 88 only because the widest label it draws, "MUSIC FAST", is 54px.
-//
-// 17px tall at y=30 ends at y=47, abutting the row-1 buttons at y=47 without
-// overlapping, the way it used to abut them at y=25.
+// "GAME SPEED" ends near x 76, so 104 is clear. The width is 88 because the
+// widest label, "MUSIC FAST", is 54px. The control is 17px tall at y 30. Thus
+// it ends at y 47, next to the row-1 buttons.
 #define FFA_X         104
 #define FFA_W         88
 #define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
 
-// The fourth row, the one that carries its label beside its buttons rather than
-// above them. Page 1 no longer uses it -- the tab-unlock override that lived
-// here moved to the debug page -- so page 2's BAG SORT is its only tenant.
+// The fourth row, with its label next to its buttons. Only page 2's BAG SORT
+// uses it.
 #define ROW4_Y        157
 #define ROW4_LABEL_X  16
 
-// The pager, right-aligned to the interior edge at x=311 and occupying the top
-// line on every page. 17px tall at y=8 ends at y=24, so on page 2 it abuts that
-// page's row-1 buttons at y=25 without overlapping them, which is what makes it
-// free there; pages 1 and 3 start their rows below it instead.
+// The pager, right-aligned to the interior edge at x 311, on the top line of
+// each page. It is 17px tall at y 8 and ends at y 24. On page 2, it touches the
+// row-1 buttons at y 25. Pages 1, 3 and 4 start their rows below it.
 //
-// Fixed to TOP_LINE_Y rather than to any page's first row, or a page that moved
-// its rows would drag the pager with it and the buttons would jump under the
-// finger on a page turn.
+// It uses TOP_LINE_Y, not a page's first row. Thus the pager does not move on a
+// page turn.
 #define PGR_W         26
 #define PGR_H         17
 #define PGR_Y         TOP_LINE_Y
-// Three pages of settings, plus the debug page when it is compiled in. Every
-// other constant below is derived, so this is the only thing the flag moves.
+// Three pages of settings, and the debug page if the build has it. All other
+// constants below come from this value.
 //
-// Page 3 exists because page 2 has no vertical room left: four rows fill y
-// 8..183 with gaps of 7 and 6, and the fourth already carries its label beside
-// its buttons to fit at all. Adding a fifth would have cost two of the existing
-// rows their hint text.
+// Page 3 exists because page 2 has no vertical space left.
 #if CTR_DEBUG_MENU
 #define PAGE_COUNT    4
 #else
 #define PAGE_COUNT    3
 #endif
 
-// Right-aligned to the interior edge, growing leftwards as pages are added, so
-// the last button always lands in the same place however many there are. The
-// leftmost sits at 226 with three pages and 196 with the debug page's four,
-// which page 2's top line clears -- the only thing on it is "EXP ALL" at x=16,
-// 63px wide, and every P2_HINT_X use is on a row below.
+// Right-aligned to the interior edge. The pager grows to the left when there
+// are more pages, so the last button stays in the same place. The first button
+// is at x 226 with three pages and at x 196 with four. Page 2's top line has
+// only "EXP ALL" at x 16, so it is clear.
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
-// Page 2 rows 1 to 3 reuse the SCREEN SIZE row's COLUMNS -- SCL_X and SCL_W,
-// not SCL_Y, which belongs to page 1's own grid now. That is what keeps the two
-// pages aligned horizontally while their rows sit at different heights. Row 4
-// carries its label beside its buttons, and three 75px buttons is what fits
-// between the label and the edge.
+// Page 2 rows 1 to 3 use the columns of the SCREEN SIZE row (SCL_X and SCL_W,
+// not SCL_Y). Thus the two pages align horizontally. Row 4 has its label next
+// to its buttons, and three 75px buttons fit after the label.
 #define P2_HINT_X     96
 #define WIDE_W        SCL_W
 #define WIDE_X(i)     SCL_X(i)
 #define SORT_W        75
 #define SORT_X(i)     (70 + (i) * (SORT_W + 8))
 
-// Which page is showing. UI state only, deliberately not persisted: EXTRA
-// always opens on page 1, so the cheats are never what greets you.
+// The page that shows. This is UI state and does not persist. EXTRA always
+// opens on page 1, so the player does not see the cheats first.
 static u8 sPage;
 
-// The selected button gets a doubled inset outline as well as accent text.
-// Colour alone is easy to miss against the lighter window frames.
+// The selected button gets a double inset outline and accent text. Color alone
+// is not clear on the light window frames.
 static void DrawButtonH(int x, int y, int w, int h, const u8 *label, int active)
 {
     UiRect(x, y, w, h, UI_COL_DIM);
@@ -220,7 +186,7 @@ static void DrawPage1(void)
     {
         char text[4];
 
-        // Every offered speed is a single digit, so no wider label is needed.
+        // Each speed is one digit, so the label needs no more width.
         text[0] = (char)('0' + sSpeeds[i]);
         text[1] = 'x';
         text[2] = '\0';
@@ -230,9 +196,8 @@ static void DrawPage1(void)
                    sSpeeds[i] == Ctr3dsGetSpeed());
     }
 
-    // Highlighted on FAST rather than on 1x: 1x is the default, and the accent
-    // outline reads as "something has been changed here", which is how the
-    // turbo binds below use it too.
+    // Highlight FAST, not 1x. 1x is the default, and the accent outline means
+    // "changed". The turbo binds below use it the same way.
     {
         int fast = (Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST);
 
@@ -253,9 +218,9 @@ static void DrawPage1(void)
     UiText(16, P1_ROW_Y(2), UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    // MOD needs saying: it is not obvious that one of these buttons is what
-    // makes the Pokedex arrows jump. ZL and ZR do not exist on an Old 3DS, so
-    // a binding there would otherwise look broken rather than unsupported.
+    // Explain MOD: one of these buttons makes the Pokedex arrows jump. ZL and
+    // ZR do not exist on an Old 3DS. Without the note, a bind there looks
+    // broken.
     UiText(TRB_NOTE_X, P1_ROW_Y(2),
            UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -312,9 +277,8 @@ static void DrawPage2(void)
     UiText(16, ROW2_LABEL_Y, UiAscii(label, "LEVEL CAP", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    // The cap the player is currently under, so the row says what it is doing
-    // rather than only that it is on. Tracks badge progress, which is why EXTRA
-    // needs a state key in bottom_screen.c.
+    // The cap that applies now, so the row shows what it does. It follows the
+    // badges, so EXTRA needs a state key in bottom_screen.c.
     mode = Ctr3dsGetLevelCap();
     if (mode != CTR_CAP_OFF)
     {
@@ -335,9 +299,9 @@ static void DrawPage2(void)
     UiText(16, ROW3_LABEL_Y, UiAscii(label, "RANDOMISER", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    // Worth saying: nothing already caught or already on screen changes, and
-    // the mapping is keyed on this save's trainer ID, so it is the same every
-    // launch and toggling it off and back on does not reshuffle anything.
+    // Nothing that is already caught or on the screen changes. The mapping uses
+    // this save's trainer ID, so it is the same at each launch. A toggle off
+    // and on does not change it.
     UiText(P2_HINT_X, ROW3_LABEL_Y,
            UiAscii(label, "new encounters only", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -363,11 +327,9 @@ static void DrawPage2(void)
 
 // ---- PAGE 3: quality of life -----------------------------------------------
 //
-// Rows start below the pager rather than beside it, the way page 1 and the
-// debug page do, and reuse page 1's grid and page 2's button columns. That is
-// the same cross-page constant sharing page 2 already does with SCL_X/SCL_W,
-// and it is what keeps three differently-populated pages aligned with each
-// other. All three rows of the grid are now used.
+// The rows start below the pager, as on page 1 and the debug page. They use
+// page 1's grid and page 2's button columns, so the three pages align. All
+// three rows of the grid are used.
 static void DrawPage3(void)
 {
     u8 label[40];
@@ -378,15 +340,13 @@ static void DrawPage3(void)
     UiText(16, P1_ROW_Y(0), UiAscii(label, "PHONE CALLS", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    // The reassurance is the thing worth spending the line on. What this
-    // silences is only the trainer who rings unprompted mid-route; every
-    // scripted call, Norman and Wally and Scott and the Rayquaza call included,
-    // comes through StartMatchCallFromScript and still happens. So does the
-    // PokeNav's own Match Call screen.
+    // This stops only the trainers who call without a reason during a route.
+    // All scripted calls still occur (StartMatchCallFromScript), for example
+    // Norman, Wally, Scott and the Rayquaza call. The PokeNav's Match Call
+    // screen still works.
     //
-    // Not said here, for want of room: a suppressed call also stops offering
-    // the occasional "I'll be waiting on Route N" rematch. Rematches still
-    // arrive on the map-load path, and the PokeNav still marks who is ready.
+    // A stopped call also does not offer a rematch. Rematches still occur on
+    // map load, and the PokeNav still shows who is ready.
     UiText(P2_HINT_X, P1_ROW_Y(0),
            UiAscii(label, "story calls still ring", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -396,24 +356,19 @@ static void DrawPage3(void)
     DrawButton(WIDE_X(1), P1_BTN_Y(0), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                off);
 
-    // The quick-throw strip (3ds/ui/ui_quickball.c). It is the one thing on
-    // this screen that COVERS a tab while the player is using it, so it gets a
-    // switch: the strip takes the bottom 40 rows of the content area during
-    // every wild battle's action select, which is the bottom half of the party
-    // grid's third row, and a player who would rather keep that should be able
-    // to.
+    // The quick-throw strip (3ds/ui/ui_quickball.c). It covers a tab while the
+    // player uses it: the bottom 40 rows of the content area, during action
+    // selection in each wild battle. Thus it gets a switch.
     //
-    // Label width is the constraint on this row, not the button: the label
-    // starts at 16 and P2_HINT_X is 96, so it has to stay under 80px. "QUICK
-    // BALL" is ten glyphs.
+    // The label must be less than 80px: it starts at x 16 and P2_HINT_X is 96.
     qb = Ctr3dsGetQuickBallOff();
 
     UiText(16, P1_ROW_Y(1), UiAscii(label, "QUICK BALL", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    // What it actually does, in the space there is. Not said here for want of
-    // room: it remembers across launches, and it is remembered per CONSOLE
-    // rather than per save file, because it lives in settings.bin.
+    // What the switch does, in the space available. The setting persists across
+    // launches. It is stored for each console, not for each save, because it is
+    // in settings.bin.
     UiText(P2_HINT_X, P1_ROW_Y(1),
            UiAscii(label, "last ball, one tap", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -423,13 +378,11 @@ static void DrawPage3(void)
     DrawButton(WIDE_X(1), P1_BTN_Y(1), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                qb);
 
-    // The third and last row this grid holds. Bottom-screen animation during a
-    // battle -- the sliding HP bars and the cycling mon icons. The values shown
-    // stay correct either way, so the hint says what OFF actually buys, and
-    // that depends on the path. On one core it buys the top screen frames,
-    // because every repaint there costs a VBlank. With the rasteriser on its
-    // own core the animation costs the frame nothing, so all it buys is a
-    // still screen, for a player who would rather have one.
+    // The third and last row of this grid: the bottom-screen animation in
+    // battle (sliding HP bars and cycling icons). The values stay correct
+    // either way. The hint says what OFF gives, which depends on the path. On
+    // one core, OFF gives frames to the top screen, because each repaint costs
+    // a VBlank. With a second core, OFF only gives a still screen.
     anim = Ctr3dsGetBattleAnimOff();
 
     UiText(16, P1_ROW_Y(2), UiAscii(label, "BATTLE ANIM", sizeof(label)),
@@ -447,23 +400,16 @@ static void DrawPage3(void)
                anim);
 }
 
-// PAGE 3: the debug menu.
+// PAGE 4: the debug menu.
 //
-// Everything that exists to test the PORT rather than to play the game, in one
-// place behind one compile-time value. Before this they were scattered: the tab
-// override sat on page 1 among the display settings, the shiny switch on page 2
-// among the cheats, and the audio A/B had a page of its own. Three different
-// answers to "is this for players?", none of them easy to turn off together.
+// This page holds all controls that test the port, not the game, behind one
+// compile-time value: CTR_DEBUG_MENU in 3ds/bridge.h. At 0, this page and its
+// pager button are not in the build. The host also holds the three settings at
+// their neutral values, so nothing can come from settings.bin into a release.
 //
-// CTR_DEBUG_MENU in 3ds/bridge.h is the switch. At 0 this page and its pager
-// button vanish, and the three settings behind it are held at their neutral
-// values host-side as well, so nothing here can leak into a shipping build
-// through settings.bin.
-//
-// One uniform row shape, unlike the pages either side: label, two buttons, and
-// a note saying what the switch actually does. The notes are not decoration --
-// "PSG" and "DIRECT" mean nothing to someone who has not read the mixer, and
-// this page exists to be usable by exactly that person.
+// Each row has the same shape: a label, two buttons, and a note that says what
+// the switch does. The notes are necessary: "PSG" and "DIRECT" mean nothing to
+// a tester who does not know the mixer.
 #if CTR_DEBUG_MENU
 
 enum {
@@ -486,24 +432,21 @@ static const struct { const char *label, *off, *on, *note; } sDebugRows[DBG_ROW_
     [DBG_STEREO] = { "STEREO", "OFF",  "ON",   "off = downmix"       },
 };
 
-// The four audio rows in the order they appear above. Indexed, never derived
-// from the row number by arithmetic: CTR_AUDIO_DBG_* is an enum, and DIRECT is
-// CTR_AUDIO_DBG_DS rather than the third value in sequence.
+// The four audio rows, in the order above. Do not calculate the index from the
+// row number. CTR_AUDIO_DBG_* is an enum, and DIRECT is CTR_AUDIO_DBG_DS, not
+// the third value.
 static const u8 sDebugAudio[] = {
     CTR_AUDIO_DBG_PSG, CTR_AUDIO_DBG_DS,
     CTR_AUDIO_DBG_REVERB, CTR_AUDIO_DBG_STEREO,
 };
 
-// Rows start below the pager rather than beside it: the pager occupies y=8..25
-// across the full width of the row-1 label line on every page, and this page
-// wants that width for seven rows rather than three: the six switches, then the
-// achievements row. 20px buttons at a 22px pitch put row 0 at y=30 and row 6
-// ending at 182, inside the 184px floor. It was 22px at 26 for six rows; the
-// seventh is what took the slack, and a 15px glyph still centres in 20.
+// The rows start below the pager, because the pager uses the top line. This
+// page has seven rows: six switches and the achievements row. The buttons are
+// 20px tall at a 22px pitch. Row 0 starts at y 30 and row 6 ends at y 182.
 //
-// Columns: label at 16 (widest is 36px, "DIRECT"), buttons at 62 and 128 ending
-// at 188, notes from 198 to the 311px interior edge. The widest note is 103px,
-// so the note column has 10px to spare and the buttons never reach it.
+// Columns: the label at x 16, the buttons at 62 and 128, and the notes from 198
+// to the interior edge at 311. The widest label ("DIRECT") is 36px, and the
+// widest note is 103px.
 #define DBG_BTN_H     20
 #define DBG_PITCH     22
 #define DBG_Y(i)      (30 + (int)(i) * DBG_PITCH)
@@ -512,8 +455,8 @@ static const u8 sDebugAudio[] = {
 #define DBG_BTN_X(c)  (62 + (c) * (DBG_BTN_W + 6))
 #define DBG_NOTE_X    198
 
-// Reading a row and writing a row, in one place each, so the draw and the touch
-// handler cannot disagree about which switch a row means.
+// One function reads a row and one writes a row, so the draw and the touch
+// handler always agree on which switch a row is.
 static int DebugRowOn(u32 row)
 {
     switch (row)
@@ -534,22 +477,20 @@ static void DebugRowSet(u32 row, int on)
     }
 }
 
-// The achievements row, under the six switches. Two ACTIONS rather than a
-// switch, so it has no on/off state to read back and lives outside the table:
-// TEST queues a toast without unlocking anything, RESYNC forgets this
-// playthrough's unlocks and derives them again from the save (the backfill a
-// first load takes, and the one way to see its summary toast on demand).
+// The achievements row, below the six switches. It has two actions, not a
+// switch, so it has no state and is not in the table. TEST queues a toast and
+// unlocks nothing. RESYNC forgets this playthrough's unlocks and calculates
+// them again from the save.
 //
-// RESYNC takes a second tap, the idiom every stateful action on this screen
-// uses: the first arms it and relabels the button, the second acts, and any
-// other tap on the page disarms it. It is not free -- the shiny catch is an
-// event, and no save can re-derive it.
+// RESYNC needs a second tap, as each stateful action on this screen does. The
+// first tap arms it and changes the label. The second acts. Any other tap on
+// the page disarms it. The shiny catch is an event that no save can calculate
+// again, so RESYNC can lose it.
 //
-// The note is two checks, the worse one first. A repeated or out-of-range id
-// is the serious one: ids are each achievement's bit in achievements.bin, so a
-// duplicate would make two achievements share one unlock. Then the text width:
-// nothing on this screen clips, so an achievement whose title or description is
-// too wide for the TROPHY list would run into its neighbour.
+// The note shows two checks, the worse one first. A duplicate or out-of-range
+// id is serious: each id is a bit in achievements.bin, so two achievements
+// would share one unlock. Then the text width: nothing clips on this screen, so
+// a text that is too wide runs into its neighbor.
 #define DBG_ACH_ROW   DBG_ROW_COUNT
 
 static bool8 sAchResyncArmed;
@@ -588,7 +529,7 @@ static void DrawAchRow(void)
     }
 }
 
-// TRUE if the touch was the achievements row's. Called on release only.
+// TRUE if the touch was on the achievements row. Call only on release.
 static bool8 TouchAchRow(const CtrTouchState *t)
 {
     int y = DBG_Y(DBG_ACH_ROW);
@@ -619,9 +560,8 @@ static void DrawPageDebug(void)
     u8 label[40];
     u32 i;
 
-    // The page says what it is, in the space left of the pager. Worth the line:
-    // this is the one page whose contents are not meant to reach a player, and
-    // a build that still has it needs to be obvious at a glance.
+    // The page shows its name to the left of the pager. Players must not see
+    // this page, so a build that has it must be clear at a glance.
     UiText(DBG_LABEL_X, TOP_LINE_Y, UiAscii(label, "DEBUG", sizeof(label)),
            UiThemeText(), UiThemeShadow());
     UiText(DBG_LABEL_X + 56, TOP_LINE_Y,
@@ -655,7 +595,7 @@ static void TouchPageDebug(const CtrTouchState *t)
     if (TouchAchRow(t))
         return;
 
-    // Any other tap on the page is a change of mind about RESYNC.
+    // Any other tap on the page disarms RESYNC.
     if (sAchResyncArmed)
     {
         sAchResyncArmed = FALSE;
@@ -717,14 +657,13 @@ void UiExtraDraw(void)
     DrawPager();
 }
 
-// Page 2's "cap NN" readout moves when the player earns a badge, which happens
-// nowhere near this tab. Everything else here changes only through the touch
-// handler below, which marks dirty itself, but the cap alone is enough to need
-// a key: without one the readout would sit stale until the tab was re-entered.
+// Page 2's "cap NN" value changes when the player gets a badge, which occurs
+// away from this tab. Everything else changes only through the touch handler
+// below, which marks the screen dirty. The cap alone needs a key, or the value
+// stays stale.
 //
-// Split in two because the PARTY tab's cheat tags need the same state and none
-// of EXTRA's own page number. The cap VALUE is the part that actually moves on
-// its own; the rest only changes under this tab's own touch handler.
+// There are two functions because the PARTY tab's cheat tags need the same
+// state but not EXTRA's page number.
 u32 UiTweakStateKey(void)
 {
     return (u32)Ctr3dsCurrentLevelCap()
@@ -736,12 +675,11 @@ u32 UiTweakStateKey(void)
 
 u32 UiExtraStateKey(void)
 {
-    // sPage takes bits 0-1 and the tweaks start at bit 4, so bit 2 is free.
-    // Folded in even though the only way to change it is the button above,
-    // which marks the screen dirty itself: a setting that can go stale on
-    // screen is exactly what this hash exists to prevent.
-    // The three audio switches go at bit 24, clear of UiTweakStateKey's own
-    // range (it reaches bit 13, so bit 17 after the shift below).
+    // sPage uses bits 0-1 and the tweaks start at bit 4, so bit 2 is free. Only
+    // the button above changes this value, but fold it in anyway: a setting on
+    // the screen must not go stale. The three audio switches go at bit 24,
+    // clear of UiTweakStateKey's range (which ends at bit 17 after the shift
+    // below).
     u32 audio = 0;
 
     for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
@@ -749,10 +687,9 @@ u32 UiExtraStateKey(void)
 
     return (u32)sPage
          | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 2)
-         // Bit 3, the last one free below the tweaks. Unlike every other
-         // switch on these pages this one can change with no touch at all:
-         // 3ds/tweaks.c clears it the moment the armed encounter is created,
-         // which can happen with this tab on screen.
+         // Bit 3, the last free bit below the tweaks. This switch can change
+         // without a touch: 3ds/tweaks.c clears it when the armed encounter
+         // starts, which can occur while this tab is on the screen.
          | ((u32)(Ctr3dsGetShinyTest() != 0) << 3)
          | (UiTweakStateKey() << 4)
          | (audio << 24);
@@ -792,9 +729,8 @@ static void TouchPage1(const CtrTouchState *t)
     {
         if (UiHit(t, TRB_X((int)i), TRB_Y, TRB_W, BTN_H))
         {
-            // Cycle to the next step, wrapping through 0. Searching for the
-            // current value rather than storing an index keeps the button and
-            // the host in agreement even if one is changed elsewhere.
+            // Go to the next step and wrap through 0. Find the current value,
+            // do not store an index, so the button and the host always agree.
             int cur = Ctr3dsGetTurboBind((int)i);
             u32 step = 0;
 
@@ -857,10 +793,9 @@ static void TouchPage2(const CtrTouchState *t)
         {
             Ctr3dsSetBagSort(sSortModes[i]);
 
-            // Apply it straight away rather than waiting for the next bag
-            // open, so the button that was just tapped has a visible effect.
-            // Ctr3dsSortBagNow refuses unless the player is stood in the
-            // overworld with no script running.
+            // Apply it now, not at the next bag open, so the tap has a visible
+            // effect. Ctr3dsSortBagNow refuses unless the player is in the
+            // overworld with no script.
             Ctr3dsSortBagNow();
 
             UiMarkDirty();
@@ -871,8 +806,8 @@ static void TouchPage2(const CtrTouchState *t)
 
 static void TouchPage3(const CtrTouchState *t)
 {
-    // ON is vanilla, so it clears the stored flag; the flag stores OFF. Same
-    // coordinate expressions the draw uses, so the two cannot disagree.
+    // ON is the original behavior, so it clears the stored flag; the flag
+    // stores OFF. The draw uses the same coordinates.
     if (UiHit(t, WIDE_X(0), P1_BTN_Y(0), WIDE_W, BTN_H))
     {
         Ctr3dsSetPhoneCallsOff(0);
@@ -886,7 +821,7 @@ static void TouchPage3(const CtrTouchState *t)
         return;
     }
 
-    // Same shape on the second row. ON is the default, so it clears the stored
+    // The same shape on the second row. ON is the default, so it clears the
     // flag; the flag stores OFF.
     if (UiHit(t, WIDE_X(0), P1_BTN_Y(1), WIDE_W, BTN_H))
     {
@@ -901,7 +836,7 @@ static void TouchPage3(const CtrTouchState *t)
         return;
     }
 
-    // Third row, same shape again. ON is the default, so it clears the flag.
+    // The third row, the same shape. ON is the default, so it clears the flag.
     if (UiHit(t, WIDE_X(0), P1_BTN_Y(2), WIDE_W, BTN_H))
     {
         Ctr3dsSetBattleAnimOff(0);
@@ -921,16 +856,16 @@ void UiExtraTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
-    // The pager is live on both pages and is tested before either page's own
-    // controls, so nothing can ever sit underneath it.
+    // The pager is live on every page. Test it before the page's own controls,
+    // so nothing can be under it.
     for (u32 i = 0; i < PAGE_COUNT; i++)
     {
         if (UiHit(t, PGR_X((int)i), PGR_Y, PGR_W, PGR_H))
         {
             sPage = (u8)i;
 #if CTR_DEBUG_MENU
-            // A page turn is a change of mind too; RESYNC must not be waiting
-            // armed when the debug page comes back.
+            // A page turn disarms RESYNC too, so it is not armed when the debug
+            // page comes back.
             sAchResyncArmed = FALSE;
 #endif
             UiMarkDirty();

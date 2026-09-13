@@ -1,15 +1,13 @@
-// DEX tab: Emerald's own Pokedex, on the bottom screen.
+// DEX tab: the game's own Pokedex, on the bottom screen.
 //
-// Reachable only once FLAG_SYS_POKEDEX_GET is set, mirroring the start menu
-// (src/start_menu.c BuildNormalStartMenu). Everything shown comes from the
-// game's own accessors and its own art, so it agrees with Emerald's Pokedex by
-// construction. Nothing here writes game state: GetSetPokedexFlag is only ever
-// called with the FLAG_GET_* cases.
+// It shows only after FLAG_SYS_POKEDEX_GET is set, as the start menu does
+// (BuildNormalStartMenu). All data and art come from the game, so it agrees
+// with the game's Pokedex. Nothing here writes game state: GetSetPokedexFlag
+// gets only the FLAG_GET_* cases.
 //
-// The layout follows the real dex: the selected mon on the left, the scrolling
-// list on the right, and an entry screen with the sprite, footprint, category,
-// height, weight and description. Height and weight are the game's imperial
-// format, not the raw decimetres and hectograms in the table.
+// The layout follows the real dex. The selected mon is on the left and the list
+// is on the right. The entry screen shows the sprite, footprint, category,
+// height, weight and description. Height and weight use the imperial format.
 
 #include "global.h"
 #include "pokedex.h"
@@ -28,15 +26,14 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 
-// Defined in the game's data; only ever declared extern (see
-// src/international_string_util.c, which does the same).
+// Defined in the game's data, and only declared extern here (as in
+// src/international_string_util.c).
 extern const struct PokedexEntry gPokedexEntries[];
 
 // ---------------------------------------------------------------- layout ---
 //
-// 14 + 26 tiles fills the 40-tile width. The left pane has to hold a 64px
-// sprite inside its 8px frame, which 14 tiles (96px of interior) does with
-// room to spare.
+// 14 + 26 tiles fill the 40-tile width. The left pane holds a 64px sprite in
+// its 8px frame. 14 tiles give 96px of interior, which is enough.
 #define LEFT_TW        14
 #define RIGHT_TX       LEFT_TW
 #define RIGHT_TW       ((CTR_BOTTOM_WIDTH / 8) - LEFT_TW)
@@ -47,9 +44,9 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define SEEN_Y         112
 #define OWN_Y          136
 
-// The left pane's interior, which is what the sprite above is centred in
-// (PIC_X is 8 + (96 - 64) / 2). The counts are centred in the same span, so
-// the column reads as one centred stack.
+// The interior of the left pane, where the sprite is centered:
+// PIC_X is 8 + (96 - 64) / 2. The counts are centered in the same span, so the
+// column is one centered stack.
 #define LEFT_IN_X      8
 #define LEFT_IN_W      (LEFT_TW * 8 - 16)   // 96
 #define COUNT_GAP      10
@@ -58,9 +55,8 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define LIST_Y         14
 #define ROW_H          24
 #define VISIBLE_ROWS   6
-// A reserved cursor column at the pane's interior edge, then the columns that
-// were already here shifted right by it. Every row leaves the gap whether it is
-// selected or not, so the list does not shuffle sideways as the cursor moves.
+// A cursor column at the interior edge of the pane, then the other columns.
+// Every row keeps the gap, so the list does not move when the cursor moves.
 #define CURSOR_X       (LIST_X + 8)
 #define BALL_X         (LIST_X + 20)
 #define NUM_X          (LIST_X + 32)
@@ -72,15 +68,13 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define PAGE_UP_X      (LIST_X + 30)
 #define PAGE_DN_X      (LIST_X + 120)
 
-// Holding X or Y makes an arrow jump instead of step. Deliberately not a GBA
-// button: the game keeps running on the top screen while the touch screen is in
-// use, so any GBA button held as a modifier is also delivered to it. L would be
-// the worst choice of all, because the L=A option turns it into an A press
-// (src/main.c:363) and jumping the list would talk to whatever is in front of
-// you. X and Y are mapped to nothing, so they reach the game at all.
+// Hold X or Y to make an arrow jump. Do not use a GBA button. The game keeps
+// running on the top screen, so a held GBA button also goes to the game. With
+// the L=A option, L is an A press (src/main.c). X and Y are not mapped, so the
+// game never sees them.
 #define JUMP_ROWS      5
 
-// Entry screen.
+// The entry screen.
 #define E_PIC_X        24
 #define E_PIC_Y        28
 #define E_FOOT_X       48
@@ -99,10 +93,10 @@ extern const struct PokedexEntry gPokedexEntries[];
 #define BACK_H         22
 
 static u16   sScroll;
-static u16   sCursor;          // row index into the current dex order
+static u16   sCursor;          // the row index in the current dex order
 static bool8 sEntryOpen;
-// One counter per arrow, so holding one runs the list instead of stepping it.
-// The dex is the reason UiHoldRepeat exists: 386 rows is 386 taps without it.
+// One counter for each arrow, so a held arrow scrolls the list. The dex has 386
+// rows, which is why UiHoldRepeat exists.
 static UiHold sHoldUp, sHoldDn;
 
 static bool8 NationalMode(void)
@@ -116,9 +110,8 @@ static u16 DexLength(void)
     return NationalMode() ? NATIONAL_DEX_COUNT : HOENN_DEX_COUNT;
 }
 
-// Row n of the list is dex entry n+1, in whichever order the player's Pokedex
-// is currently set to. Returns the NATIONAL number, which is what every
-// accessor below is keyed on.
+// Row n of the list is dex entry n+1, in the order that the player's Pokedex
+// uses. Returns the national number, which all accessors below use.
 static u16 RowToNationalNum(u16 row)
 {
     u16 n = row + 1;
@@ -128,10 +121,8 @@ static u16 RowToNationalNum(u16 row)
 
 // ------------------------------------------------------ height and weight --
 //
-// PrintMonHeight and PrintMonWeight (src/pokedex.c:4154) are static, so this is
-// their arithmetic reproduced rather than called, rounding included. Getting
-// the rounding wrong is the failure that shows: Bulbasaur must read 2'04" and
-// 15.2 lbs.
+// PrintMonHeight and PrintMonWeight (src/pokedex.c) are static, so this copies
+// their arithmetic and rounding. Bulbasaur must show 2'04" and 15.2 lbs.
 static void FormatHeight(u8 *dst, u16 height)
 {
     u32 inches = (height * 10000) / 254;
@@ -163,8 +154,8 @@ static void FormatWeight(u8 *dst, u16 weight)
     if (lbs % 10 >= 5)
         lbs += 10;
 
-    // The game pads with CHAR_SPACER rather than suppressing, so the decimal
-    // point stays in the same column down a list of entries.
+    // The game pads with CHAR_SPACER, so the decimal point stays in the same
+    // column in all entries.
     for (u32 div = 100000; div >= 1000; div /= 10)
     {
         u32 digit = (lbs / div) % 10;
@@ -191,9 +182,9 @@ static void FormatWeight(u8 *dst, u16 weight)
     dst[i] = EOS;
 }
 
-// "No" followed by three zero-padded digits, the way CreateMonDexNum builds it
-// (src/pokedex.c:2429). gText_NumberClear01 is the game's own prefix and
-// carries an extra symbol plus a control code, which UiText now handles.
+// "No" and three zero-padded digits, as in CreateMonDexNum (src/pokedex.c).
+// gText_NumberClear01 is the game's prefix. It has an extra symbol and a
+// control code, which UiText can handle.
 static void FormatDexNum(u8 *dst, u16 num)
 {
     int i = 0;
@@ -212,9 +203,8 @@ static void FormatDexNum(u8 *dst, u16 num)
 
 // ------------------------------------------------------------ list screen --
 
-// Move the cursor, dragging the visible window along only as far as it has to
-// go. Scrolling without moving the cursor would leave the selected mon (and the
-// sprite in the left pane) behind, which is what the arrows used to do.
+// Move the cursor, and move the visible window only as much as necessary. The
+// selected mon and the sprite in the left pane must stay in the list.
 static void MoveCursor(int delta)
 {
     u16 len = DexLength();
@@ -255,8 +245,7 @@ static void DrawSelectedPane(void)
 
     UiWindowFrame(0, 0, LEFT_TW, PANEL_TH);
 
-    // Only a mon the player has actually met gets a picture, which is what the
-    // real dex does.
+    // Only a mon that the player has met gets a picture, as in the real dex.
     if (GetSetPokedexFlag(national, FLAG_GET_SEEN))
         UiMonPic(PIC_X, PIC_Y, NationalPokedexNumToSpecies(national));
 
@@ -271,11 +260,9 @@ static void DrawSelectedPane(void)
         caught = GetHoennPokedexCount(FLAG_GET_CAUGHT);
     }
 
-    // One block for both rows, not two independent lines. The labels differ in
-    // width and the counts differ in digits, so each row measured on its own
-    // would centre to a different x and the two would look ragged. Measuring
-    // the widest of each column keeps the rows aligned with each other AND the
-    // whole block centred under the sprite.
+    // One block for both rows. The labels and the counts have different widths,
+    // so two separately centered rows look ragged. Use the widest of each
+    // column: the rows then align, and the block is centered under the sprite.
     {
         u8 seenLabel[8], ownLabel[8];
         int labelW, numW, total, x;
@@ -323,13 +310,12 @@ static void DrawList(void)
         if (index == sCursor)
             UiChevron(CURSOR_X, y + (UI_GLYPH_H - UI_CHEVRON_H) / 2);
 
-        // A ball only for caught, nothing for merely seen: the same three-state
-        // readout the real list gives.
+        // A ball for caught, nothing for seen, as in the real list.
         if (GetSetPokedexFlag(national, FLAG_GET_CAUGHT))
             UiPokeball(BALL_X, y + 4);
 
-        // Whichever mode we are in, the number shown is the row's own
-        // position: RowToNationalNum already applied the ordering.
+        // The number is the row's position in every mode, because
+        // RowToNationalNum already applied the order.
         FormatDexNum(label, (u16)(index + 1));
         UiText(NUM_X, y, label, UI_COL_DIM, UiThemeShadow());
 
@@ -341,8 +327,8 @@ static void DrawList(void)
                    UI_COL_DIM, UiThemeShadow());
     }
 
-    // Shown against the CURSOR now, not the scroll position: the arrows move the
-    // selection, so they stay live until the selection itself is at an end.
+    // The arrows follow the cursor, not the scroll position. They stay live
+    // until the selection is at an end.
     if (sCursor > 0)
     {
         UiRect(PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H, UI_COL_DIM);
@@ -378,8 +364,8 @@ static void DrawEntry(void)
     UiText(E_TEXT_X, E_NUM_Y, buf, UI_COL_DIM, UiThemeShadow());
     UiText(E_NAME_X, E_NUM_Y, gSpeciesNames[species], UiThemeText(), UiThemeShadow());
 
-    // Category, height and weight are only revealed once the mon is caught,
-    // matching PrintMonInfo (src/pokedex.c:4102).
+    // Category, height and weight show only after the mon is caught, as in
+    // PrintMonInfo (src/pokedex.c).
     if (owned)
     {
         CopyMonCategoryText(national, buf);
@@ -406,9 +392,9 @@ static void DrawEntry(void)
         UiText(E_VALUE_X, E_WT_Y, gText_UnkWeight, UiThemeText(), UiThemeShadow());
     }
 
-    // Centred as a BLOCK, not per line, which is what the game does:
-    // GetStringCenterAlignXOffset measures with GetStringWidth, and that
-    // returns the widest line. UiTextWidth has the same contract.
+    // Center the text as a block, not by line, as the game does.
+    // GetStringCenterAlignXOffset uses the widest line, and so does
+    // UiTextWidth.
     description = entry->description;
     if (description != NULL)
         UiText(8 + (CTR_BOTTOM_WIDTH - 16 - UiTextWidth(description)) / 2,
@@ -422,9 +408,9 @@ static void DrawEntry(void)
 
 // ------------------------------------------------------------------ shell --
 
-// Seen/caught can change without the party changing (seeing a wild mon), so the
-// shell needs this in its repaint hash. Counting walks the whole dex, so it is
-// only worth doing while this tab is the one on screen.
+// The seen and caught counts can change without a party change (a wild mon is
+// seen), so the shell needs this key. The count walks the full dex, so use it
+// only while this tab is on the screen.
 u32 UiDexStateKey(void)
 {
     if (NationalMode())
@@ -437,8 +423,8 @@ u32 UiDexStateKey(void)
 
 void UiDexDraw(void)
 {
-    // The mode can change while this tab is open (the National Dex arriving),
-    // which shortens or lengthens the list under the cursor.
+    // The mode can change while this tab is open (the National Dex arrives).
+    // The list under the cursor then becomes shorter or longer.
     u16 len = DexLength();
 
     if (sCursor >= len)
@@ -446,9 +432,9 @@ void UiDexDraw(void)
     if (sScroll + VISIBLE_ROWS > len)
         sScroll = (len > VISIBLE_ROWS) ? (u16)(len - VISIBLE_ROWS) : 0;
 
-    // Clamping the two independently can leave the cursor outside the window,
-    // and an off-window cursor means the left pane shows a mon that is not in
-    // the list. Re-apply the same follow rule MoveCursor uses.
+    // Two separate clamps can put the cursor outside the window. The left pane
+    // then shows a mon that is not in the list. Apply the same rule as
+    // MoveCursor.
     if (sCursor < sScroll)
         sScroll = sCursor;
     else if (sCursor >= sScroll + VISIBLE_ROWS)
@@ -478,11 +464,10 @@ void UiDexTouch(const CtrTouchState *t)
         return;
     }
 
-    // Both arrows are tested ahead of the justReleased guard below, because a
-    // held one has to act on frames where nothing has been released. A plain
-    // tap still fires exactly once, on its release, so tapping is unchanged.
-    // Holding the jump modifier while an arrow repeats moves JUMP_ROWS a step,
-    // which is how the far end of the national dex is reachable at all.
+    // Test both arrows before the justReleased guard below, because a held
+    // arrow acts on frames with no release. A plain tap still acts once, on
+    // release. With the jump modifier held, each repeat moves JUMP_ROWS, which
+    // makes the end of the national dex reachable.
     if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
     {
         MoveCursor(-CursorStep());
@@ -500,9 +485,9 @@ void UiDexTouch(const CtrTouchState *t)
 
     len = DexLength();
 
-    // First tap moves the cursor and previews the mon, a second tap on the same
-    // row opens the entry. That is the real dex's cursor-then-A, and the same
-    // idiom the BAG tab uses.
+    // The first tap moves the cursor and shows the mon. A second tap on the
+    // same row opens the entry, like the cursor and A in the real dex, and like
+    // the BAG tab.
     if (t->x >= LIST_X && t->y >= LIST_Y && t->y < LIST_Y + VISIBLE_ROWS * ROW_H)
     {
         u16 index = sScroll + (u16)((t->y - LIST_Y) / ROW_H);
@@ -512,7 +497,7 @@ void UiDexTouch(const CtrTouchState *t)
 
         if (index == sCursor)
         {
-            // Nothing to show for an entry the player has never seen.
+            // Nothing to show for an entry that the player has not seen.
             if (!GetSetPokedexFlag(RowToNationalNum(index), FLAG_GET_SEEN))
                 return;
 
