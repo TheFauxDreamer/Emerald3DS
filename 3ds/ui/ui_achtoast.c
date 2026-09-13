@@ -110,16 +110,33 @@ void UiAchToastDraw(void)
 {
     u8 text[64];
     int end = ViewShown() ? AT_TEXT_END_VIEW : AT_TEXT_END;
+    struct AchView v;
+    const struct UiRamp *ramp;
+
+    // One achievement wears its category's colours. A batch stays gold, the
+    // colour every achievement had before categories: it can hold several
+    // kinds at once, and no one of them should speak for the rest.
+    if (sBatch > 1)
+    {
+        ramp = UiAchCategoryRamp(ACH_CAT_STORY);
+    }
+    else
+    {
+        AchActive()->get(sIndex, &v);
+        ramp = UiAchCategoryRamp(v.category);
+    }
 
     UiWindowFrame(UI_AT_TX, UI_AT_TY, UI_AT_TW, UI_AT_TH);
 
-    // The notice's own ground and 2px rule, so a fixed gold reads the same on
-    // every frame the player can choose.
+    // The notice's own ground and 2px rule, so a fixed colour reads the same on
+    // every frame the player can choose. The ground is what makes the pale step
+    // of any ramp safe to print text in here.
     UiFillRect(AT_IN_X, AT_IN_Y, AT_IN_W, AT_IN_H, UI_COL_SHADOW);
-    UiRect(AT_IN_X, AT_IN_Y, AT_IN_W, AT_IN_H, UI_COL_SHINY);
-    UiRect(AT_IN_X + 1, AT_IN_Y + 1, AT_IN_W - 2, AT_IN_H - 2, UI_COL_SHINY_EDGE);
+    UiRect(AT_IN_X, AT_IN_Y, AT_IN_W, AT_IN_H, ramp->body);
+    UiRect(AT_IN_X + 1, AT_IN_Y + 1, AT_IN_W - 2, AT_IN_H - 2, ramp->edge);
 
-    UiSparkle(AT_STAR_CX, AT_STAR_CY, UI_SPARKLE_SIZES - 1);
+    UiSparkleRamp(AT_STAR_CX, AT_STAR_CY, UI_SPARKLE_SIZES - 1,
+                  ramp->pale, ramp->body, ramp->edge);
 
     if (sBatch > 1)
     {
@@ -127,37 +144,35 @@ void UiAchToastDraw(void)
         // that finished more than one. The list says which, one tap away.
         int x = AT_TEXT_X;
 
-        x += UiNum(x, AT_TEXT_Y, sBatch, UI_COL_SHINY, UI_COL_SHADOW);
+        x += UiNum(x, AT_TEXT_Y, sBatch, ramp->body, UI_COL_SHADOW);
         UiText(x, AT_TEXT_Y, UiAscii(text, " achievements unlocked", sizeof(text)),
-               UI_COL_SHINY_PALE, UI_COL_SHADOW);
+               ramp->pale, UI_COL_SHADOW);
     }
     else
     {
-        struct AchView v;
         u8 title[64];
         int titleW, x = AT_TEXT_X;
 
-        AchActive()->get(sIndex, &v);
         UiAscii(title, v.title, sizeof(title));
         titleW = UiTextWidth(title);
 
-        // "Unlocked" in the cream step of the ramp, then the title in gold --
-        // the notice's hierarchy turned sideways. The label goes first when it
-        // fits, and gives way to the title when it does not.
+        // "Unlocked" in the pale step of the ramp, then the title in its body
+        // colour -- the notice's hierarchy turned sideways. The label goes first
+        // when it fits, and gives way to the title when it does not.
         UiAscii(text, "Unlocked ", sizeof(text));
         if (x + UiTextWidth(text) + titleW <= end)
-            x += UiText(x, AT_TEXT_Y, text, UI_COL_SHINY_PALE, UI_COL_SHADOW);
+            x += UiText(x, AT_TEXT_Y, text, ramp->pale, UI_COL_SHADOW);
 
-        UiText(x, AT_TEXT_Y, title, UI_COL_SHINY, UI_COL_SHADOW);
+        UiText(x, AT_TEXT_Y, title, ramp->body, UI_COL_SHADOW);
     }
 
     if (ViewShown())
     {
-        UiRect(AT_BTN_X, AT_BTN_Y, AT_BTN_W, AT_BTN_H, UI_COL_SHINY);
+        UiRect(AT_BTN_X, AT_BTN_Y, AT_BTN_W, AT_BTN_H, ramp->body);
         UiAscii(text, "VIEW", sizeof(text));
         UiText(AT_BTN_X + (AT_BTN_W - UiTextWidth(text)) / 2,
                AT_BTN_Y + (AT_BTN_H - UI_GLYPH_H) / 2,
-               text, UI_COL_SHINY_PALE, UI_COL_SHADOW);
+               text, ramp->pale, UI_COL_SHADOW);
     }
 }
 

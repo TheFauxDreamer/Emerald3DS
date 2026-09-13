@@ -30,6 +30,21 @@ enum
     ACH_SECTION_COUNT
 };
 
+// What kind of achievement it is, which the UI shows as a colour (Story gold,
+// Legendary green, Pokemon red, Battle purple, Extras blue, Contests pink; see
+// UiAchCategoryRamp in 3ds/ui/ui_shell.h). A provider with no categories uses
+// ACH_CAT_STORY, which is the gold every achievement had before there were any.
+enum
+{
+    ACH_CAT_STORY,
+    ACH_CAT_LEGEND,
+    ACH_CAT_POKEMON,
+    ACH_CAT_BATTLE,
+    ACH_CAT_EXTRA,
+    ACH_CAT_CONTEST,
+    ACH_CAT_COUNT
+};
+
 // One achievement as the UI shows it.
 //
 // The strings are ASCII for UiAscii(), with one exception it understands: the
@@ -45,6 +60,9 @@ struct AchView
     // Not to be shown yet. The provider has already swapped in placeholder text
     // and dropped the counter; the flag is for drawing the row differently.
     bool8 hidden;
+    // ACH_CAT_*. Set for hidden rows too; it is the UI's job not to draw it,
+    // since a colour would give away what kind of thing is hidden.
+    u8    category;
 };
 
 struct AchProvider
@@ -88,8 +106,9 @@ void Ctr3dsAchOnCaught(struct Pokemon *mon);
 
 // Debug page (3ds/ui/tab_extra.c, CTR_DEBUG_MENU only).
 //
-// Queue a notification for the first definition without unlocking anything, so
-// the toast can be looked at without earning something.
+// Queue a notification without unlocking anything, so the toast can be looked
+// at without earning something. Each press takes the first achievement of the
+// next group, so a few presses show every category's colours.
 void AchDebugTestToast(void);
 // Forget this playthrough's unlocks and derive them again from the save, which
 // is the backfill path a first load takes. The shiny, being an event, is lost.

@@ -117,7 +117,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 |---|---|---|
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 947 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 164 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 778 / 172 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art, `UiHit`, `UiHoldRepeat` |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 979 / 213 | Framebuffer, blitters, window frames, icons, HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 369 / 54 | Emerald font rendering at 1x and 2x, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/tab_party.c](ui/tab_party.c) | 944 | 2x3 party grid, cheat tag strip, per-mon detail view with the move panel and the IV/EV spread, HP and mon-icon animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 676 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
@@ -127,8 +127,8 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 128 / 35 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. The only thing here that is drawn or touchable before the game starts |
-| [ui/tab_trophy.c](ui/tab_trophy.c) | 520 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list, hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
-| [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 178 / 56 | The achievement toast: the third overlay, y 0..40, with a VIEW button into the TROPHY tab |
+| [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
+| [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 193 / 56 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
 
 Game side outside `ui/`: [achievements.c](achievements.c) /
 [.h](achievements.h) hold what each achievement is, when it unlocks, and the
@@ -742,6 +742,14 @@ frames, as a 3x3 nine-slice. Because those run from near-white to near-dark,
 **text drawn on a frame must use `UiThemeText()` / `UiThemeShadow()`**, never a
 fixed colour. `UI_COL_*` is for the port's own chrome (the tab bar), which is
 not on a frame.
+
+The one deliberate exception is a colour that carries its own dark outline. An
+unlocked achievement's title on the TROPHY tab is printed in its category's body
+colour with that category's dark edge as the shadow (`UiAchCategoryRamp`,
+`ui_shell.h`): the edge outlines it on the near-white frames and the mid-tone
+body carries it on the near-dark ones, the same pairing the shiny notice's gold
+headline uses. A new fixed colour on a frame needs a ramp of that shape, and
+checking on the lightest and the darkest frame in Options.
 
 Coordinates are in whole 8px tiles, so panel layouts have to divide cleanly:
 `320 = 40 tiles`, `UI_CONTENT_H = 192 = 24 tiles`.

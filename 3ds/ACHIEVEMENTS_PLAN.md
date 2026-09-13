@@ -73,6 +73,26 @@ MAIN and POST-GAME:
   pause inside the Battle Factory, whose Open Level rentals sit in the player's
   party at level 100 under the player's own OT ID.
 
+**A seventh commit** colour-coded them:
+
+- **Six categories, each a colour:** Story gold, Legendary green, Pokémon red,
+  Battle purple, Extras blue, Contests pink (`ACH_CAT_*`, and `category` in
+  `AchView`). Each is a three-step ramp (pale, body, dark edge) in the shape of
+  the shiny gold, which stays Story's.
+- **Groups replaced the two tables.** Each group is one page and one colour,
+  and a row's page and colour are nothing but which group it is in. The
+  provider flattens them once into an index table, so every per-frame question
+  about an achievement is still an array read. Each page now reads as colour
+  blocks, and the Story block is in true story order with the badges
+  interleaved. No id moved, so no saved unlock did.
+- **What carries the colour:** an unlocked row's sparkle (`UiSparkleRamp`, the
+  one piece of sparkle art in any ramp) and its title (body over the dark edge,
+  the exception the cheatsheet now records for fixed colours on a frame), a
+  locked row's empty marker, and a single unlock's toast. Hidden rows stay
+  plain so the colour cannot give them away, and a batch toast stays gold.
+- **TEST cycles the categories:** each press queues the first achievement of
+  the next MAIN group, so six presses show every colour.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (sections 5, 7, 10, 13 and 14 above all) and
 [SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md), whose Tier 3 already lists

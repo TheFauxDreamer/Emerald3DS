@@ -146,6 +146,11 @@ void UiChevron(int x, int y);
 
 void UiSparkle(int cx, int cy, u8 size);
 
+// The same art in any other three-step ramp, in the gold one's roles: the pale
+// core, the body, and the dark edge. The achievement categories are drawn this
+// way (UiAchCategoryRamp in ui_shell.h); UiSparkle is this in gold.
+void UiSparkleRamp(int cx, int cy, u8 size, u16 pale, u16 body, u16 edge);
+
 // A two-tone HP bar, 8px tall, coloured by the game's own GetHPBarLevel so it
 // changes colour at exactly the same points the battle bar does. `hp` is passed
 // in rather than read from the mon: the party tab animates it, the BAG tab's
