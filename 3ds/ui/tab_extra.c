@@ -30,6 +30,11 @@
 // Ctr3dsCurrentLevelCap(), for the live "cap NN" readout on page 2.
 #include "../tweaks.h"
 
+#if CTR_DEBUG_MENU
+// The debug page's achievement row: a test toast and a resync.
+#include "../achievements.h"
+#endif
+
 // Doubling steps rather than 1/2/3/4: past 2x the interesting question is
 // "much faster", and 3x sits too close to 2x to be worth a button.
 static const u8 sSpeeds[] = { 1, 2, 4, 8 };
@@ -491,14 +496,16 @@ static const u8 sDebugAudio[] = {
 
 // Rows start below the pager rather than beside it: the pager occupies y=8..25
 // across the full width of the row-1 label line on every page, and this page
-// wants that width for six rows rather than three. 22px buttons at a 26px pitch
-// put row 0 at y=30 and row 5 ending at 182, inside the 184px floor.
+// wants that width for seven rows rather than three: the six switches, then the
+// achievements row. 20px buttons at a 22px pitch put row 0 at y=30 and row 6
+// ending at 182, inside the 184px floor. It was 22px at 26 for six rows; the
+// seventh is what took the slack, and a 15px glyph still centres in 20.
 //
 // Columns: label at 16 (widest is 36px, "DIRECT"), buttons at 62 and 128 ending
 // at 188, notes from 198 to the 311px interior edge. The widest note is 103px,
 // so the note column has 10px to spare and the buttons never reach it.
-#define DBG_BTN_H     22
-#define DBG_PITCH     26
+#define DBG_BTN_H     20
+#define DBG_PITCH     22
 #define DBG_Y(i)      (30 + (int)(i) * DBG_PITCH)
 #define DBG_LABEL_X   16
 #define DBG_BTN_W     60
@@ -525,6 +532,84 @@ static void DebugRowSet(u32 row, int on)
     case DBG_TABS:  Ctr3dsSetShowAllTabs(on); break;
     default:        Ctr3dsSetAudioDbg(sDebugAudio[row - DBG_PSG], on); break;
     }
+}
+
+// The achievements row, under the six switches. Two ACTIONS rather than a
+// switch, so it has no on/off state to read back and lives outside the table:
+// TEST queues a toast without unlocking anything, RESYNC forgets this
+// playthrough's unlocks and derives them again from the save (the backfill a
+// first load takes, and the one way to see its summary toast on demand).
+//
+// RESYNC takes a second tap, the idiom every stateful action on this screen
+// uses: the first arms it and relabels the button, the second acts, and any
+// other tap on the page disarms it. It is not free -- the shiny catch is an
+// event, and no save can re-derive it.
+//
+// The note is the text-width check. Nothing on this screen clips, so an
+// achievement whose title or description is too wide for the TROPHY list
+// would run into its neighbour; this counts them instead of leaving it to
+// someone paging through the list.
+#define DBG_ACH_ROW   DBG_ROW_COUNT
+
+static bool8 sAchResyncArmed;
+
+static void DrawAchRow(void)
+{
+    int y = DBG_Y(DBG_ACH_ROW);
+    u16 tooWide = UiTrophyTooWide();
+    u8 label[40];
+
+    UiText(DBG_LABEL_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "ACH", sizeof(label)), UiThemeText(), UiThemeShadow());
+
+    DrawButtonH(DBG_BTN_X(0), y, DBG_BTN_W, DBG_BTN_H,
+                UiAscii(label, "TEST", sizeof(label)), FALSE);
+    DrawButtonH(DBG_BTN_X(1), y, DBG_BTN_W, DBG_BTN_H,
+                UiAscii(label, sAchResyncArmed ? "SURE?" : "RESYNC", sizeof(label)),
+                sAchResyncArmed);
+
+    if (tooWide == 0)
+    {
+        UiText(DBG_NOTE_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+               UiAscii(label, "all text fits", sizeof(label)),
+               UI_COL_DIM, UiThemeShadow());
+    }
+    else
+    {
+        int x = DBG_NOTE_X;
+
+        x += UiNum(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2, tooWide,
+                   UI_COL_ACCENT, UiThemeShadow());
+        UiText(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+               UiAscii(label, " too wide", sizeof(label)),
+               UI_COL_ACCENT, UiThemeShadow());
+    }
+}
+
+// TRUE if the touch was the achievements row's. Called on release only.
+static bool8 TouchAchRow(const CtrTouchState *t)
+{
+    int y = DBG_Y(DBG_ACH_ROW);
+
+    if (UiHit(t, DBG_BTN_X(0), y, DBG_BTN_W, DBG_BTN_H))
+    {
+        sAchResyncArmed = FALSE;
+        AchDebugTestToast();
+        UiMarkDirty();
+        return TRUE;
+    }
+
+    if (UiHit(t, DBG_BTN_X(1), y, DBG_BTN_W, DBG_BTN_H))
+    {
+        if (sAchResyncArmed)
+            AchDebugResync();
+
+        sAchResyncArmed = !sAchResyncArmed;
+        UiMarkDirty();
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 static void DrawPageDebug(void)
@@ -559,10 +644,22 @@ static void DrawPageDebug(void)
                UiAscii(label, sDebugRows[i].note, sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
     }
+
+    DrawAchRow();
 }
 
 static void TouchPageDebug(const CtrTouchState *t)
 {
+    if (TouchAchRow(t))
+        return;
+
+    // Any other tap on the page is a change of mind about RESYNC.
+    if (sAchResyncArmed)
+    {
+        sAchResyncArmed = FALSE;
+        UiMarkDirty();
+    }
+
     for (u32 i = 0; i < DBG_ROW_COUNT; i++)
     {
         for (u32 c = 0; c < 2; c++)
@@ -829,6 +926,11 @@ void UiExtraTouch(const CtrTouchState *t)
         if (UiHit(t, PGR_X((int)i), PGR_Y, PGR_W, PGR_H))
         {
             sPage = (u8)i;
+#if CTR_DEBUG_MENU
+            // A page turn is a change of mind too; RESYNC must not be waiting
+            // armed when the debug page comes back.
+            sAchResyncArmed = FALSE;
+#endif
             UiMarkDirty();
             return;
         }
