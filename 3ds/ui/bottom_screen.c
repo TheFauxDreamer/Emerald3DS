@@ -7,8 +7,8 @@
 //
 // This file owns only the frame: which tabs exist, which view is active, and
 // when the screen needs repainting. Each tab draws its own content area
-// (tab_party.c, tab_bag.c, tab_map.c, tab_dex.c) through the primitives in
-// ui_draw.h and ui_text.h.
+// (tab_party.c, tab_bag.c, tab_map.c, tab_dex.c, tab_trophy.c, tab_extra.c)
+// through the primitives in ui_draw.h and ui_text.h.
 //
 // Redraw policy matters. A repaint is 76,800 pixels of software fill, so the
 // screen is only rebuilt when something it depends on actually changed.
@@ -23,6 +23,7 @@
 #include "constants/species.h"
 
 #include "../bridge.h"
+#include "../achievements.h"
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
@@ -62,6 +63,9 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
     [UI_TAB_BAG]   = { "BAG",   0                    },
     [UI_TAB_MAP]   = { "MAP",   FLAG_SYS_POKENAV_GET },
     [UI_TAB_DEX]   = { "DEX",   FLAG_SYS_POKEDEX_GET },
+    // Always available. A locked list is a list of goals, and there is no
+    // start-menu entry for it to mirror.
+    [UI_TAB_TROPHY] = { "TROPHY", 0                  },
     // Not a game feature, so nothing to unlock: always available.
     [UI_TAB_EXTRA] = { "EXTRA", 0                    },
 };
@@ -653,7 +657,7 @@ static u32 UiStateHash(void)
 {
     u32 hash = 2166136261u;   // FNV-1a
 
-    u32 top[8];
+    u32 top[9];
     top[0] = UiFrameId();
     top[1] = sInGame;
     // The override is host-side and always safe to read; the three flags are
@@ -694,6 +698,9 @@ static u32 UiStateHash(void)
         // anything else in this hash. Neither touches another slot.
         else if (sTab == UI_TAB_PARTY)
             top[4] = UiPartyStateKey();
+        // The list's counters, which a catch or a battle moves with no touch.
+        else if (sTab == UI_TAB_TROPHY)
+            top[4] = UiTrophyStateKey();
     }
 
     // The shiny notice, which nothing else here covers: it appears when a
@@ -716,6 +723,12 @@ static u32 UiStateHash(void)
     // before there is a save block, because it reads only gMain, the tasks and
     // the sprites.
     top[7] = sInGame ? 0 : UiTitleStateKey();
+
+    // Achievements: how many are unlocked and whether any is unseen. On every
+    // tab, not just TROPHY, because the tab bar's dot depends on it and an
+    // unlock can land on any of them. Reads only the provider's own bits, so it
+    // is safe before there is a save block.
+    top[8] = AchActive()->stateKey();
 
     for (u32 i = 0; i < ARRAY_COUNT(top); i++)
     {
@@ -828,6 +841,7 @@ static void Redraw(void)
     case UI_TAB_BAG:   UiBagDraw();   break;
     case UI_TAB_MAP:   UiMapDraw();   break;
     case UI_TAB_DEX:   UiDexDraw();   break;
+    case UI_TAB_TROPHY: UiTrophyDraw(); break;
     case UI_TAB_EXTRA: UiExtraDraw(); break;
     }
 
@@ -931,6 +945,12 @@ void CtrBottomUpdate(const CtrTouchState *touch)
 
     UpdateInGameLatch();
 
+    // Achievements first, so everything below -- the list, the toast, the
+    // hash -- sees this frame's unlocks. Per displayed frame and never gated on
+    // sInGame: it gates itself on there being a save to read, and adopts a
+    // playthrough only on a CB2_Overworld frame (see Adopt in achievements.c).
+    AchTick();
+
     // The step clock, advanced before any tick reads it. See
     // UI_ANIM_STEP_FRAMES: on the single-core path this is what stops two
     // animations costing twice the frame rate of one.
@@ -1001,6 +1021,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         case UI_TAB_BAG:   UiBagTouch(touch);   break;
         case UI_TAB_MAP:   UiMapTouch(touch);   break;
         case UI_TAB_DEX:   UiDexTouch(touch);   break;
+        case UI_TAB_TROPHY: UiTrophyTouch(touch); break;
         case UI_TAB_EXTRA: UiExtraTouch(touch); break;
         }
     }
@@ -1066,6 +1087,11 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         else
             animNotice = 1;
     }
+
+    // The achievements list's NEW tags, taken on the frame the tab comes on
+    // screen and dropped on the frame it goes. Before the hash, so a tab switch
+    // paints the list already knowing which rows are new.
+    UiTrophyTick(sInGame && sTab == UI_TAB_TROPHY);
 
     // This state can change without any touch at all -- taking damage, an
     // evolution, a level-up, the player changing the border in Options, or
