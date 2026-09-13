@@ -1,12 +1,11 @@
 # Give the bottom screen its animations back
 
-**Status: implemented, all four stages; not yet measured on the console.**
-Written 2026-09-12 against `ea832a8`, and re-checked against `893409a`, after
-TOUCH TO START. Every line reference below was read against that tree, before
-the change; the function names are the stable anchors. This file is now the
-design record. The console logs under [Verification](#verification) are still
-to be taken, and its stop condition still applies: if the stage 1 numbers are
-bad, stages 2 and 3 are the ones to back out.
+**Status: implemented, all four stages, and measured on a New 3DS XL with no
+dropped frames** (build `59a0ba6`, see [Measured](#measured)). Written
+2026-09-12 against `ea832a8`, and re-checked against `893409a`, after TOUCH TO
+START. Every line reference below was read against that tree, before the
+change; the function names are the stable anchors. This file is now the design
+record.
 
 **How it landed, where that differs from the text below:**
 
@@ -29,6 +28,7 @@ bad, stages 2 and 3 are the ones to back out.
   [What was cut](#what-was-cut): only the second-core path repaints for a slide
   under an overlay, as stage 2 specifies. One full repaint when a slide under
   an overlay finishes would fix it there for the cost of one repaint.
+
 Companion documents: [SECOND_SCREEN_CHEATSHEET.md](SECOND_SCREEN_CHEATSHEET.md)
 (the code as it actually is; read section 7 first),
 [UI_SKIN_PLAN.md](UI_SKIN_PLAN.md) (a reskin that shares the repaint path, see
@@ -369,6 +369,48 @@ the one part that can be removed outright (see [Later](#later-not-in-scope)).
 - with `CTR_PPU_THREAD=0`, the bottom screen behaves exactly as today: 12-frame
   clock, the burst, sliced upload, frozen icons under overlays.
 
+### Measured
+
+Build `59a0ba6`, all four stages, on the New 3DS XL: fifteen 10-second windows,
+about two and a half minutes from the title screen into wild battles with the
+shiny panel up. The same build in Azahar at 300% is beside it, for reading
+later Azahar logs.
+
+| Stage | New 3DS XL | Azahar, 300% |
+|---|---|---|
+| `frame` worst | 16,766 µs, no "missed VBlank" line | 16,741 µs |
+| `ppu` mean / worst | 4,100 to 4,900 / 8,627 µs | ~3,000 / 6,220 µs |
+| `ppu.wait` mean | 2,630 µs in the busiest window, up to 4,500 | 2,200 to 2,700 µs |
+| `framebegin` mean (spare time) | 10,200 to 10,900 µs | ~13,000 µs |
+| `paint`, full, shiny panel up | ~4,100 µs, 4,724 worst | ~2,500 µs |
+| `paint`, full, otherwise | 2,250 to 3,350 µs | 1,450 to 1,850 µs |
+| `paint.anim`, party grid step | ~910 µs | ~333 µs |
+| `paint.anim`, sparkle step | ~72 µs | ~8 µs |
+| `upload.bot`, copy + flush + xfer | 1.45 to 1.75 ms in battle, ~0.7 ms otherwise | ~0.28 ms |
+
+Every check above passes. No frame was late. `ppu.wait` stayed well above zero
+even in the busiest window, which uploaded about 33 times a second, 10 of them
+full repaints: the shiny panel up over the party grid, where stage 2 repaints
+fully for each icon step and stage 3 steps the sparkles. `upload.bot` samples
+once per repaint (in one window, 325 uploads against 102 paints and 223
+animation steps).
+
+Two numbers came in above the estimates in
+[What it will cost](#what-it-will-cost):
+
+- **A full paint under the shiny panel** is about 4.1 ms, not 2.4 to 3.9. With
+  the upload, core 0 needs about 5.8 ms on those frames against a render of
+  about 4.7 ms, so they finish about 1 ms past the join. That is inside the
+  estimated spill, and the frame still has about 10 ms spare.
+- **The upload's copy varies.** It is about 0.4 ms in windows of full paints
+  alone and about 1 ms (2.1 ms worst) in battle windows made mostly of
+  animation steps. A likely reason is that a small step leaves most of the UI
+  framebuffer out of the cache, but that is a guess. Either way it is the part
+  to remove first if core 0 ever needs time back (below).
+
+Azahar at 300% shows the upload at about a sixth of its console cost, so read
+the upload on the console.
+
 ## Later, not in scope
 
 Three further savings exist if the upload ever needs to be cheaper. None is
@@ -379,6 +421,6 @@ needed for the numbers above.
   about 1.0 ms per party step and 0.4 ms per sparkle step.
 - **Start the transfer asynchronously.** `GX_DisplayTransfer` waited on before
   `C3D_FrameBegin` gives core 0 the transfer time back.
-- **Paint straight into the 512-wide linear stage.** That removes the 0.8 ms
-  copy, which exists only because the UI's framebuffer is a 320-wide array in
-  ordinary memory.
+- **Paint straight into the 512-wide linear stage.** That removes the copy,
+  measured at 0.4 to 1.1 ms mean and 2.1 ms worst, which exists only because
+  the UI's framebuffer is a 320-wide array in ordinary memory.
