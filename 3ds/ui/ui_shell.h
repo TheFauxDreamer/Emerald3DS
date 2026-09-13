@@ -70,6 +70,39 @@ enum UiTab
 #define UI_COL_SHINY_PALE  0xFEF3   // RGB(255,222,156) highlight,  pal index 5
 #define UI_COL_SHINY_EDGE  0xFB02   // RGB(255, 98, 16) orange edge, pal index 9
 
+// The achievement categories (ACH_CAT_* in 3ds/achievements.h), one ramp each
+// in the gold one's shape: a pale core, a mid-tone body and a dark edge. That
+// shape is what makes them safe on a window frame. The sparkle art takes any of
+// them (UiSparkleRamp), and a title in the body colour with the edge as its
+// shadow reads on the lightest frame (the edge outlines it) and the darkest (the
+// body carries it), the way the shiny notice's gold headline does on its own
+// dark ground. Story is that gold itself, so it has no constants of its own.
+#define UI_COL_ACH_GREEN_PALE   0xBFF7   // RGB(190,255,190)  Legendary
+#define UI_COL_ACH_GREEN        0x468C   // RGB( 64,208, 96)
+#define UI_COL_ACH_GREEN_EDGE   0x1386   // RGB( 16,112, 48)
+#define UI_COL_ACH_RED_PALE     0xFDF6   // RGB(255,190,180)  Pokemon
+#define UI_COL_ACH_RED          0xEA07   // RGB(232, 64, 56)
+#define UI_COL_ACH_RED_EDGE     0x90C3   // RGB(144, 24, 24)
+#define UI_COL_ACH_PURPLE_PALE  0xEE5F   // RGB(232,200,255)  Battle
+#define UI_COL_ACH_PURPLE       0xAB1D   // RGB(168, 96,232)
+#define UI_COL_ACH_PURPLE_EDGE  0x5953   // RGB( 88, 40,152)
+#define UI_COL_ACH_BLUE_PALE    0xBF1F   // RGB(184,224,255)  Extras
+#define UI_COL_ACH_BLUE         0x3C9F   // RGB( 56,144,248)
+#define UI_COL_ACH_BLUE_EDGE    0x1255   // RGB( 16, 72,168)
+#define UI_COL_ACH_PINK_PALE    0xFE9D   // RGB(255,208,236)  Contests
+#define UI_COL_ACH_PINK         0xF397   // RGB(240,112,184)
+#define UI_COL_ACH_PINK_EDGE    0x994D   // RGB(152, 40,104)
+
+struct UiRamp
+{
+    u16 pale, body, edge;
+};
+
+// The ramp for an ACH_CAT_* value, and gold for anything it does not know, which
+// is what every achievement looked like before categories. Defined in
+// tab_trophy.c; the achievement toast shares it.
+const struct UiRamp *UiAchCategoryRamp(u8 category);
+
 // Poke Ball marker. Fixed rather than themed: the ball is recognisable by its
 // colours, and it carries its own dark outline on every window frame.
 #define UI_COL_BALL_TOP    0xE104   // red

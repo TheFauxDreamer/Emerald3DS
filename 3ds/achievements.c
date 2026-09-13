@@ -105,12 +105,15 @@ static const u16 sHmFlags[] =
     FLAG_RECEIVED_HM_WATERFALL, FLAG_RECEIVED_HM_DIVE,
 };
 
-// Two tables, one per page of the TROPHY tab. Which table a row is in IS its
-// section, so no row can be filed on the wrong page.
+// The groups. Each is one page of the TROPHY tab and one colour, and a row's
+// page and colour are nothing but which group it is in, so neither can be
+// filed wrong. sGroups below lists them MAIN first, and within a page they
+// read as colour blocks in that order.
 //
 // IDS ARE PERMANENT. The next new achievement takes the next unused id (67 at
-// the time of writing); a retired one leaves its id unused forever. The debug
-// page counts duplicates, since C cannot check that at compile time.
+// the time of writing); a retired one leaves its id unused forever. Rows move
+// between groups freely, because only the id is stored. The debug page counts
+// duplicate or out-of-range ids, since C cannot check that at compile time.
 //
 // Titles must fit the TROPHY tab's title line and descriptions its second line
 // (TROPHY_TITLE_MAX_W, TROPHY_DESC_MAX_W in 3ds/ui/tab_trophy.c). There is no
@@ -121,111 +124,131 @@ static const u16 sHmFlags[] =
 // need trade evolutions, and trading waits on the Cable Club
 // (local-wireless branch).
 
-// MAIN: everything that can be done before the Hall of Fame, in story order.
-static const struct AchDef sMainDefs[] =
+// MAIN, Story (gold): the journey in the order Emerald hands it out, with each
+// badge where it falls in it.
+static const struct AchDef sMainStory[] =
 {
-    // The journey, in the order Emerald hands it out.
     FLAG(48, "A Journey Begins",   "Choose your first " POKEMON,      FLAG_SYS_POKEMON_GET),
     FLAG(49, "Friendly Rivalry",   "Beat your rival on Route 103",    FLAG_DEFEATED_RIVAL_ROUTE103),
     FLAG(50, "Field Research",     "Get a " POKEDEX " from Prof. Birch", FLAG_SYS_POKEDEX_GET),
     FLAG(51, "Hit the Ground Running", "Get the Running Shoes",       FLAG_SYS_B_DASH),
+    FLAG(0,  "Stone Badge",        "Beat Roxanne in Rustboro City",   FLAG_BADGE01_GET),
     FLAG(53, "Connected",          "Get a " POKENAV " in Rustboro",   FLAG_SYS_POKENAV_GET),
     FLAG(59, "A Cut Above",        "Get HM01 Cut in Rustboro",        FLAG_RECEIVED_HM_CUT),
     FLAG(52, "Special Delivery",   "Deliver Mr. Stone's letter to Steven", FLAG_DELIVERED_STEVEN_LETTER),
+    FLAG(1,  "Knuckle Badge",      "Beat Brawly in Dewford Town",     FLAG_BADGE02_GET),
     FLAG(54, "Package Deal",       "Deliver the Devon Goods to Capt. Stern", FLAG_DELIVERED_DEVON_GOODS),
     FLAG(55, "Pedal Power",        "Get a Bike from Rydel in Mauville", FLAG_RECEIVED_BIKE),
-    STAT(66, "In Good Hands",      "Leave a " POKEMON " at the Day Care", GAME_STAT_USED_DAYCARE, 1),
-    PARTY_COUNT(56, "Full House",  "Have six " POKEMON " in your party", 6),
-    STAT(57, "It's Evolving!",     "Evolve a " POKEMON " for the first time", GAME_STAT_EVOLVED_POKEMON, 1),
+    FLAG(2,  "Dynamo Badge",       "Beat Wattson in Mauville City",   FLAG_BADGE03_GET),
     FLAG(58, "Hot Pursuit",        "Stop Team Magma on Mt. Chimney",  FLAG_DEFEATED_EVIL_TEAM_MT_CHIMNEY),
-    // A flag rather than the Pokedex, so it still counts when the randomiser
-    // has turned the revived Lileep or Anorith into something else.
-    FLAG(65, "Ancient History",    "Revive a fossil at Devon Corp.",  FLAG_RECEIVED_REVIVED_FOSSIL_MON),
+    FLAG(3,  "Heat Badge",         "Beat Flannery in Lavaridge Town", FLAG_BADGE04_GET),
+    FLAG(4,  "Balance Badge",      "Beat your father in Petalburg",   FLAG_BADGE05_GET),
     FLAG(60, "Surf's Up",          "Get HM03 Surf from Wally's father", FLAG_RECEIVED_HM_SURF),
     FLAG(61, "Take Flight",        "Get HM02 Fly on Route 119",       FLAG_RECEIVED_HM_FLY),
+    FLAG(5,  "Feather Badge",      "Beat Winona in Fortree City",     FLAG_BADGE06_GET),
     // Emerald's one Master Ball is the item ball in Aqua Hideout B1F.
     FLAG(63, "The Best Ball",      "Find the Master Ball in the Aqua Hideout", FLAG_ITEM_AQUA_HIDEOUT_B1F_MASTER_BALL),
+    FLAG(6,  "Mind Badge",         "Beat Tate and Liza in Mossdeep",  FLAG_BADGE07_GET),
+    FLAG(7,  "Rain Badge",         "Beat Juan in Sootopolis City",    FLAG_BADGE08_GET),
     FLAG_LIST(62, "HM Collector",  "Get all eight HMs",               sHmFlags, 8),
+    FLAG(8,  "Rival No More",      "Beat Wally at Victory Road",      FLAG_DEFEATED_WALLY_VICTORY_ROAD),
+    FLAG(9,  "Champion",           "Enter the Hall of Fame",          FLAG_SYS_GAME_CLEAR),
+};
 
-    // Gym badges.
-    FLAG(0, "Stone Badge",         "Beat Roxanne in Rustboro City",   FLAG_BADGE01_GET),
-    FLAG(1, "Knuckle Badge",       "Beat Brawly in Dewford Town",     FLAG_BADGE02_GET),
-    FLAG(2, "Dynamo Badge",        "Beat Wattson in Mauville City",   FLAG_BADGE03_GET),
-    FLAG(3, "Heat Badge",          "Beat Flannery in Lavaridge Town", FLAG_BADGE04_GET),
-    FLAG(4, "Balance Badge",       "Beat your father in Petalburg",   FLAG_BADGE05_GET),
-    FLAG(5, "Feather Badge",       "Beat Winona in Fortree City",     FLAG_BADGE06_GET),
-    FLAG(6, "Mind Badge",          "Beat Tate and Liza in Mossdeep",  FLAG_BADGE07_GET),
-    FLAG(7, "Rain Badge",          "Beat Juan in Sootopolis City",    FLAG_BADGE08_GET),
-
-    // The end of the story.
-    FLAG(8, "Rival No More",       "Beat Wally at Victory Road",      FLAG_DEFEATED_WALLY_VICTORY_ROAD),
-    FLAG(9, "Champion",            "Enter the Hall of Fame",          FLAG_SYS_GAME_CLEAR),
-
-    // Legends that can be faced before the Hall of Fame. The FLAG_DEFEATED_*
-    // flags are set whether the encounter ends in a catch or a knockout (the
-    // scripts set them on both branches), so these are about facing the legend,
-    // and they still work with the randomiser on. Rayquaza is catchable once
-    // the Sootopolis crisis is over (VAR_SKY_PILLAR_STATE reaches 2), and the
-    // Regis once the Sealed Chamber is open, which needs only Dive.
+// MAIN, Legendary (green): the legends that can be faced before the Hall of
+// Fame. The FLAG_DEFEATED_* flags are set whether the encounter ends in a
+// catch or a knockout (the scripts set them on both branches), so these are
+// about facing the legend, and they still work with the randomiser on.
+// Rayquaza is catchable once the Sootopolis crisis is over
+// (VAR_SKY_PILLAR_STATE reaches 2), and the Regis once the Sealed Chamber is
+// open, which needs only Dive.
+static const struct AchDef sMainLegends[] =
+{
     FLAG(11, "Sky High",           "Face Rayquaza atop Sky Pillar",   FLAG_DEFEATED_RAYQUAZA),
     FLAG(14, "Rock Solid",         "Face Regirock in the Desert Ruins", FLAG_DEFEATED_REGIROCK),
     FLAG(15, "Cold Snap",          "Face Regice in the Island Cave",  FLAG_DEFEATED_REGICE),
     FLAG(16, "Iron Will",          "Face Registeel in the Ancient Tomb", FLAG_DEFEATED_REGISTEEL),
+};
 
-    // The Pokedex.
+// MAIN, Pokemon (red): catching, raising and the Pokedex, roughly easiest first.
+static const struct AchDef sMainPokemon[] =
+{
+    STAT(23, "Gotcha!",            "Catch your first wild " POKEMON,  GAME_STAT_POKEMON_CAPTURES, 1),
+    STAT(57, "It's Evolving!",     "Evolve a " POKEMON " for the first time", GAME_STAT_EVOLVED_POKEMON, 1),
+    STAT(66, "In Good Hands",      "Leave a " POKEMON " at the Day Care", GAME_STAT_USED_DAYCARE, 1),
+    PARTY_COUNT(56, "Full House",  "Have six " POKEMON " in your party", 6),
+    STAT(26, "Hatchling",          "Hatch an Egg",                    GAME_STAT_HATCHED_EGGS, 1),
+    // A flag rather than the Pokedex, so it still counts when the randomiser
+    // has turned the revived Lileep or Anorith into something else.
+    FLAG(65, "Ancient History",    "Revive a fossil at Devon Corp.",  FLAG_RECEIVED_REVIVED_FOSSIL_MON),
     DEX_HOENN(19, "Researcher",     "Own 25 kinds in the Hoenn " POKEDEX,  25),
     DEX_HOENN(20, "Field Worker",   "Own 50 kinds in the Hoenn " POKEDEX,  50),
+    STAT(25, "First Bite",         "Hook something while fishing",    GAME_STAT_FISHING_ENCOUNTERS, 1),
+    STAT(28, "Growing Up",         "See 50 evolutions",               GAME_STAT_EVOLVED_POKEMON, 50),
+    STAT(27, "Breeder",            "Hatch 30 Eggs",                   GAME_STAT_HATCHED_EGGS, 30),
+    STAT(24, "Collector",          "Catch 100 wild " POKEMON,         GAME_STAT_POKEMON_CAPTURES, 100),
     DEX_HOENN(21, "Dex Enthusiast", "Own 100 kinds in the Hoenn " POKEDEX, 100),
     DEX_HOENN(22, "Dex Expert",     "Own 150 kinds in the Hoenn " POKEDEX, 150),
-
-    // Catching and raising.
-    STAT(23, "Gotcha!",            "Catch your first wild " POKEMON,  GAME_STAT_POKEMON_CAPTURES, 1),
-    STAT(24, "Collector",          "Catch 100 wild " POKEMON,         GAME_STAT_POKEMON_CAPTURES, 100),
-    STAT(25, "First Bite",         "Hook something while fishing",    GAME_STAT_FISHING_ENCOUNTERS, 1),
-    STAT(26, "Hatchling",          "Hatch an Egg",                    GAME_STAT_HATCHED_EGGS, 1),
-    STAT(27, "Breeder",            "Hatch 30 Eggs",                   GAME_STAT_HATCHED_EGGS, 30),
-    STAT(28, "Growing Up",         "See 50 evolutions",               GAME_STAT_EVOLVED_POKEMON, 50),
     PARTY_LEVEL(64, "Maxed Out",   "Raise a " POKEMON " to level 100", 100),
     EVENT(29, "Shining Star",      "Catch a shiny " POKEMON,          ACH_EVENT_SHINY),
+};
 
-    // Battling.
-    STAT(30, "Seasoned",           "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
+// MAIN, Battle (purple).
+static const struct AchDef sMainBattle[] =
+{
     STAT(31, "Nothing Happened",   "Use Splash in battle",            GAME_STAT_USED_SPLASH, 1),
+    STAT(30, "Seasoned",           "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
+};
 
-    // Around Hoenn.
-    STAT(32, "Marathon",           "Walk 100,000 steps",              GAME_STAT_STEPS, 100000),
+// MAIN, Extras (blue): the things to do around Hoenn besides the story,
+// roughly in the order the game opens them up.
+static const struct AchDef sMainExtras[] =
+{
     STAT(33, "Cable Car",          "Ride the cable car up Mt. Chimney", GAME_STAT_RODE_CABLE_CAR, 1),
     STAT(34, "Hot Springs",        "Soak in the Lavaridge hot springs", GAME_STAT_ENTERED_HOT_SPRINGS, 1),
-    STAT(35, "On Safari",          "Enter the Safari Zone",           GAME_STAT_ENTERED_SAFARI_ZONE, 1),
-    STAT(36, "Green Thumb",        "Plant 25 berries",                GAME_STAT_PLANTED_BERRIES, 25),
-    STAT(37, "Blender",            "Make 25 " POKEBLOCKS,             GAME_STAT_POKEBLOCKS, 25),
     SECRET_BASE(38, "Home Base",   "Set up a Secret Base"),
-    STAT(39, "Lucky Number",       "Win the Lilycove lottery",        GAME_STAT_WON_POKEMON_LOTTERY, 1),
+    STAT(36, "Green Thumb",        "Plant 25 berries",                GAME_STAT_PLANTED_BERRIES, 25),
     STAT(40, "Jackpot!",           "Hit a jackpot at the Game Corner", GAME_STAT_SLOT_JACKPOTS, 1),
+    STAT(35, "On Safari",          "Enter the Safari Zone",           GAME_STAT_ENTERED_SAFARI_ZONE, 1),
+    STAT(37, "Blender",            "Make 25 " POKEBLOCKS,             GAME_STAT_POKEBLOCKS, 25),
+    STAT(39, "Lucky Number",       "Win the Lilycove lottery",        GAME_STAT_WON_POKEMON_LOTTERY, 1),
+    STAT(32, "Marathon",           "Walk 100,000 steps",              GAME_STAT_STEPS, 100000),
+};
 
-    // Contests.
+// MAIN, Contests (pink).
+static const struct AchDef sMainContests[] =
+{
     STAT(41, "Star Performer",     "Win a " POKEMON " Contest",       GAME_STAT_WON_CONTEST, 1),
     STAT(42, "Ribbon Collector",   "Earn 10 ribbons",                 GAME_STAT_RECEIVED_RIBBONS, 10),
 };
 
-// POST-GAME: everything that only opens up after the Hall of Fame. Hidden until
-// then (see sRevealed). The National Pokedex is Birch's reward for it; the
-// abnormal weather that opens Terra Cave and Marine Cave only starts once
+// POST-GAME: everything that only opens up after the Hall of Fame, hidden
+// until then (see sRevealed). The National Pokedex is Birch's reward for it;
+// the abnormal weather that opens Terra Cave and Marine Cave only starts once
 // FLAG_SYS_GAME_CLEAR is set (Route119_WeatherInstitute_2F/scripts.inc); the
 // roaming Lati is released by it; and the S.S. Tidal to the Battle Frontier
 // only sails after it.
-static const struct AchDef sPostDefs[] =
+static const struct AchDef sPostStory[] =
 {
     FLAG(10, "A Bigger Journey Begins", "Get the National " POKEDEX, FLAG_SYS_NATIONAL_DEX),
+};
+
+// Sudowoodo is a special encounter rather than a legendary, but it is faced
+// the same way and belongs with them more than anywhere else.
+static const struct AchDef sPostLegends[] =
+{
     FLAG(12, "Terra Firma",        "Face Groudon in the Terra Cave",  FLAG_DEFEATED_GROUDON),
     FLAG(13, "Deep Blue",          "Face Kyogre in the Marine Cave",  FLAG_DEFEATED_KYOGRE),
     // The roaming one sets no flag when caught (only the Southern Island event
     // does, and that needs the Eon Ticket), so this asks the Pokedex instead.
     CAUGHT(17, "Eon Chaser",       "Catch the roaming Latias or Latios", SPECIES_LATIAS, SPECIES_LATIOS),
     FLAG(18, "Odd Tree",           "Deal with the tree by the Frontier", FLAG_DEFEATED_SUDOWOODO),
+};
 
-    // The Battle Frontier. The seven Silver flags run from FLAG_SYS_TOWER_SILVER
-    // two apart, each facility's Gold straight after its Silver.
+// The Battle Frontier. The seven Silver flags run from FLAG_SYS_TOWER_SILVER
+// two apart, each facility's Gold straight after its Silver.
+static const struct AchDef sPostBattle[] =
+{
     STAT(43, "Tower Climber",      "Win 7 in a row at the Battle Tower", GAME_STAT_BATTLE_TOWER_SINGLES_STREAK, 7),
     FLAGS(44, "Silver Symbol",     "Earn a Frontier Silver Symbol",   FLAG_SYS_TOWER_SILVER, 7, 2, 1),
     FLAGS(45, "Silver Set",        "Earn all 7 Silver Symbols",       FLAG_SYS_TOWER_SILVER, 7, 2, 7),
@@ -233,29 +256,100 @@ static const struct AchDef sPostDefs[] =
     FLAGS(47, "Frontier Legend",   "Earn all 7 Gold Symbols",         FLAG_SYS_TOWER_GOLD, 7, 2, 7),
 };
 
-#define MAIN_COUNT ((u16)ARRAY_COUNT(sMainDefs))
-#define POST_COUNT ((u16)ARRAY_COUNT(sPostDefs))
-#define ACH_COUNT  ((u16)(MAIN_COUNT + POST_COUNT))
+struct AchGroup
+{
+    u8  section;       // ACH_SECTION_*
+    u8  category;      // ACH_CAT_*
+    u16 count;
+    const struct AchDef *rows;
+};
 
-// The largest id the store has a bit for.
+#define GROUP(s, c, r) { .section = s, .category = c, .count = ARRAY_COUNT(r), .rows = r }
+
+// MAIN before POST-GAME, which is what lets "the first unseen achievement"
+// prefer the main page.
+static const struct AchGroup sGroups[] =
+{
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_STORY,   sMainStory),
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_LEGEND,  sMainLegends),
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_POKEMON, sMainPokemon),
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_BATTLE,  sMainBattle),
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_EXTRA,   sMainExtras),
+    GROUP(ACH_SECTION_MAIN,     ACH_CAT_CONTEST, sMainContests),
+    GROUP(ACH_SECTION_POSTGAME, ACH_CAT_STORY,   sPostStory),
+    GROUP(ACH_SECTION_POSTGAME, ACH_CAT_LEGEND,  sPostLegends),
+    GROUP(ACH_SECTION_POSTGAME, ACH_CAT_BATTLE,  sPostBattle),
+};
+
+// The largest id the store has a bit for. Unique ids below it also bound the
+// number of rows, so the id check is the capacity check.
 #define ACH_ID_LIMIT (CTR_ACH_BYTES * 8)
-
-STATIC_ASSERT(ARRAY_COUNT(sMainDefs) + ARRAY_COUNT(sPostDefs) <= ACH_ID_LIMIT,
-              AchTablesFitTheStore);
 
 // What a post-game row says until it is revealed.
 #define HIDDEN_TITLE "Hidden Achievement"
 #define HIDDEN_DESC  "Progress to discover"
 
-// Provider index i: the main table first, then the post-game one.
+// The groups flattened into provider order once, on first use, so that every
+// per-frame question about achievement i is an array index rather than a walk.
+// The provider index runs through the groups in sGroups order.
+static const struct AchDef *sFlat[ACH_ID_LIMIT];
+static u8  sFlatSection[ACH_ID_LIMIT];
+static u8  sFlatCategory[ACH_ID_LIMIT];
+static u16 sFlatCount;
+static u16 sFlatDropped;   // rows past ACH_ID_LIMIT, reported as bad ids
+static bool8 sFlatBuilt;
+
+static void BuildFlat(void)
+{
+    if (sFlatBuilt)
+        return;
+
+    for (u32 g = 0; g < ARRAY_COUNT(sGroups); g++)
+    {
+        for (u16 r = 0; r < sGroups[g].count; r++)
+        {
+            if (sFlatCount == ACH_ID_LIMIT)
+            {
+                sFlatDropped++;
+                continue;
+            }
+
+            sFlat[sFlatCount] = &sGroups[g].rows[r];
+            sFlatSection[sFlatCount] = sGroups[g].section;
+            sFlatCategory[sFlatCount] = sGroups[g].category;
+            sFlatCount++;
+        }
+    }
+
+    sFlatBuilt = TRUE;
+}
+
+static u16 Count(void)
+{
+    BuildFlat();
+    return sFlatCount;
+}
+
+#define ACH_COUNT Count()
+
+// Callers only ever pass i < ACH_COUNT; anything else gets the first row
+// rather than a wild read.
 static const struct AchDef *DefAt(u16 i)
 {
-    return i < MAIN_COUNT ? &sMainDefs[i] : &sPostDefs[i - MAIN_COUNT];
+    BuildFlat();
+    return sFlat[i < sFlatCount ? i : 0];
 }
 
 static u8 SectionAt(u16 i)
 {
-    return i < MAIN_COUNT ? ACH_SECTION_MAIN : ACH_SECTION_POSTGAME;
+    BuildFlat();
+    return i < sFlatCount ? sFlatSection[i] : ACH_SECTION_MAIN;
+}
+
+static u8 CategoryAt(u16 i)
+{
+    BuildFlat();
+    return i < sFlatCount ? sFlatCategory[i] : ACH_CAT_STORY;
 }
 
 // ---- state ----------------------------------------------------------------
@@ -590,6 +684,7 @@ static void LocalGet(u16 i, struct AchView *out)
     out->goal = d->goal;
     out->unlocked = LocalUnlocked(i);
     out->unseen = LocalUnseen(i);
+    out->category = CategoryAt(i);
 
     // A post-game row keeps its secret until the Hall of Fame, unless it has
     // already been earned: an unlocked row is always shown for what it is.
@@ -686,9 +781,30 @@ const struct AchProvider *AchActive(void)
 
 // ---- debug ----------------------------------------------------------------
 
+// The first row of each MAIN group in turn. MAIN only, because it has all six
+// categories and nothing hidden: a post-game row would announce itself as
+// "Hidden Achievement" before the Hall of Fame.
 void AchDebugTestToast(void)
 {
-    QueueToast(0, 1);
+    static u8 sNext;
+    u32 mainGroups = 0;
+    u16 index = 0;
+
+    // sGroups lists every MAIN group first, so they are its leading run.
+    while (mainGroups < ARRAY_COUNT(sGroups)
+           && sGroups[mainGroups].section == ACH_SECTION_MAIN)
+        mainGroups++;
+
+    if (mainGroups == 0)
+        return;
+    if (sNext >= mainGroups)
+        sNext = 0;
+
+    for (u32 g = 0; g < sNext; g++)
+        index += sGroups[g].count;
+
+    QueueToast(index, 1);
+    sNext = (u8)((sNext + 1) % mainGroups);
 }
 
 void AchDebugResync(void)
@@ -718,7 +834,8 @@ void AchDebugRealText(u16 index, const char **title, const char **desc)
 u16 AchDebugBadIds(void)
 {
     u8  seen[CTR_ACH_BYTES] = {0};
-    u16 bad = 0;
+    // Rows that did not fit the flattened table at all are bad by definition.
+    u16 bad = (BuildFlat(), sFlatDropped);
 
     for (u16 i = 0; i < ACH_COUNT; i++)
     {

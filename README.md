@@ -88,7 +88,9 @@ caption when they apply:
 **TROPHY.** 67 achievements, earned by playing, from choosing your starter and
 getting the Bike through the eight badges, the HMs, the Master Ball and the
 Champion, plus the legends, Pokédex milestones, contests and a few odder ones
-(use Splash, hit a jackpot, catch a shiny). Two buttons split them into MAIN and
+(use Splash, hit a jackpot, catch a shiny). Each kind has its own colour, on
+the list and on the toast: story gold, legendary green, Pokémon red, battle
+purple, extras blue and contests pink. Two buttons split them into MAIN and
 POST-GAME. The post-game ones stay "Hidden Achievement" until you enter the Hall
 of Fame, then show what they are. Every one is read from the game's own data,
 and counters show how far along the shorter goals are. Progress is kept per
