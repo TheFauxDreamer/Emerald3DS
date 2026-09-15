@@ -1,41 +1,38 @@
 #!/usr/bin/env python3
-"""Find pointers freed while a sprite or task callback can still read them.
+"""Find pointers that are freed while a sprite or task callback can read them.
 
-Why this only matters off-GBA
------------------------------
-A file-scope pointer is freed and set to NULL (FREE_AND_SET_NULL) while code
-that dereferences it is still scheduled -- a sprite callback run by
-AnimateSprites(), or a task run by RunTasks().
+Why this matters only on hardware that is not a GBA
+---------------------------------------------------
+Code frees a file-scope pointer and sets it to NULL (FREE_AND_SET_NULL), while
+code that reads through it is still scheduled. That code is a sprite callback
+that AnimateSprites() runs, or a task that RunTasks() runs.
 
-On a GBA that is free: no MMU, address 0 is the BIOS, and the junk read back
-feeds graphics that are about to be wiped. On the ARM11 address 0 is unmapped,
-so the same read is a fatal data abort, FAR = the field's offset.
+On a GBA, this has no effect. There is no MMU, and address 0 is the BIOS. The
+junk from the read goes to graphics that are cleared soon. On the ARM11,
+address 0 is not mapped, so the same read is a fatal data abort. The FAR is
+then the offset of the field.
 
-Note the asymmetry, which is the opposite of the usual intuition: `gHeap` is a
-static array (src/malloc.c) inside the static gGbaMem, so freed memory stays
-mapped forever. A *dangling* pointer therefore cannot fault -- it draws garbage.
-Only NULL faults. So FREE_AND_SET_NULL is the dangerous call and a bare Free()
-is the safe one, and that is what this script keys on.
-
-Three real bugs were found this way: battle_main.c (battle teardown),
-naming_screen.c (MainState_Exit) and credits.c (Task_UpdatePage case 10).
+Note this difference. The `gHeap` array (src/malloc.c) is static, in the static
+gGbaMem, so freed memory stays mapped. Thus a dangling pointer cannot fault. It
+only draws junk. Only NULL faults. Thus FREE_AND_SET_NULL is the dangerous
+call, and a plain Free() is safe. This script looks for the dangerous call.
 
 What this script cannot decide
 ------------------------------
-The question that actually settles a site is:
+The question that decides a site is:
 
-    after the free, does an AnimateSprites() run before something calls
+    After the free, does AnimateSprites() run before some code calls
     ResetSpriteData()?
 
-Vanilla's universal idiom is "free, then hand off to a *setup* CB2 that resets
-sprites first", which is safe. Only a handoff to an ALREADY-RUNNING main loop is
-dangerous -- naming_screen.c returned straight into BattleMainCB2, which is why
-it alone crashed. Deciding that needs a human to read the callback chain, so
-every raw hit below is a candidate, not a bug. The last sweep found ~12
-candidates and all but three were false positives.
+The usual vanilla pattern is "free, then go to a setup CB2 that resets the
+sprites first", which is safe. Only a return to a main loop that already runs
+is dangerous. For example, naming_screen.c returned directly into
+BattleMainCB2. A person must read the callback chain to decide, so each raw hit
+below is a candidate, not a bug.
 
-So this is a REGRESSION GATE, not a bug list: reviewed sites live in REVIEWED
-below, and the script fails only on a site nobody has looked at yet.
+Thus this is a regression gate, not a bug list. The REVIEWED table below holds
+the sites that a person checked. The script fails only on a site that nobody
+checked yet.
 
     python3 tools/audit_dangling.py [--all] [src/foo.c ...]
 """
@@ -46,8 +43,9 @@ import sys
 
 FUNC_HDR = re.compile(r'^(?:static\s+)?[A-Za-z_][\w \t\*]*?\b([A-Za-z_]\w*)\s*\([^;]*\)\s*$')
 
-# Sites already read and cleared, keyed (file, pointer, freeing function).
-# Seeded from the sweep of 2026-09; each entry says why it is not a bug.
+# Sites that a person read and cleared, with the key (file, pointer, freeing
+# function). The first entries come from the sweep of 2026-09. Each entry tells
+# why it is not a bug.
 REVIEWED = {
     ('src/battle_dome.c', 'sInfoCard', 'Task_HandleInfoCardInput'):
         'STATE_CLOSE_CARD destroys every sInfoCard->spriteIds[] first',
@@ -121,8 +119,8 @@ def parse_functions(path):
 
 
 def table_members(text, funcs):
-    """Names listed in an array initializer. Load-bearing: the naming-screen
-    crash was reached through sPageSwapSpriteFuncs[], which a grep and a
+    """Names listed in an array initializer. This is necessary: the
+    naming-screen crash came through sPageSwapSpriteFuncs[], which a grep and a
     call-only graph both miss."""
     out = set()
     for m in re.finditer(r'=\s*\{([^;]*?)\}\s*;', text, re.S):
@@ -149,8 +147,8 @@ def reaches(funcs, ptr, tbl):
 
 
 def signatures(text):
-    """A sprite callback takes `struct Sprite *`, a task takes `u8 taskId`.
-    Without this, mail.c's ordinary struct field named `callback` reads as a
+    """A sprite callback takes `struct Sprite *`, and a task takes `u8 taskId`.
+    Without this test, the usual struct field `callback` in mail.c looks like a
     sprite callback."""
     sig = {}
     for m in re.finditer(r'\b(\w+)\s*(\([^;{)]*\))\s*[;{]', text):
@@ -193,7 +191,8 @@ def audit(paths):
                 left_tk = [] if 'ResetTasks(' in pre else [e for e in tk if e != f]
                 if not left_sp and not left_tk:
                     continue
-                # The discriminator a human needs: where does control go next?
+                # The discriminator that a person needs: where does control go
+                # next?
                 handoff = re.findall(r'SetMainCallback2\(\s*([\w>.\-]+)\s*\)', body)
                 out.append(dict(path=path, ptr=ptr, freer=f, line=line,
                                 sprites=left_sp, tasks=left_tk,

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Turn a 3DS crash screen into names.
 
-Luma3DS catches aborts in this port and shows a register dump (libctru gives a
-process no exception handler of its own, so there is no runtime code to add --
-this is a tool, not a feature). The dump gives raw numbers. This resolves them:
+Luma3DS catches aborts in this port, and shows a register dump. The libctru
+library gives a process no exception handler of its own, so no code can run at
+that time. Thus this is a tool, not a feature. The dump gives raw numbers, and
+this tool resolves them:
 
-    PC / LR  ->  function + offset,   against the link map
-    FAR      ->  which struct FIELD,  because FAR *is* the field's offset
+    PC / LR  ->  function + offset,   from the link map
+    FAR      ->  which struct field,  because FAR is the offset of the field
 
-That second half is the one that matters. Every crash of this class so far has
-been a NULL pointer plus a field offset, so the FAR names the field -- and
-therefore the pointer -- outright. It is how both the naming-screen bug
-(currentPage, 0x1E22) and the battle-teardown bug (battlerData, 0) were found.
+The second half is the important one. So far, each crash of this type was a
+NULL pointer plus a field offset. Thus the FAR names the field, and with it the
+pointer. Examples are the naming-screen bug (currentPage, 0x1E22) and the
+battle-teardown bug (battlerData, 0).
 
-CI publishes what the map half needs: the `emerald3ds-elf` artifact carries
-3ds/emerald3ds.elf and 3ds/build/emerald3ds.map (3ds/Makefile:88).
+CI publishes what the map half needs: the `emerald3ds-elf` artifact holds
+3ds/emerald3ds.elf and 3ds/build/emerald3ds.map (see LDFLAGS in 3ds/Makefile).
 
 Usage
 -----
@@ -22,9 +23,10 @@ Usage
     tools/ctr_sym.py --far 0x1E22 --struct NamingScreenData
     tools/ctr_sym.py --selftest
 
-Needs only clang (macOS ships it). It compiles a types-only translation unit for
-a 32-bit ARM target so pointer size and alignment match the console -- compiling
-for the host would give 8-byte pointers and every offset would be wrong.
+It needs only clang (macOS has it). It compiles a types-only translation unit
+for a 32-bit ARM target, so that the pointer size and alignment are the same as
+on the console. A compile for the host would give 8-byte pointers, and each
+offset would be wrong.
 """
 
 import argparse
@@ -38,14 +40,15 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Headers that between them define the game's base types (u8/u16/MainCallback/
-# struct Sprite/...). A types-only TU includes these, then the struct under test.
+# The headers that together define the base types of the game (u8, u16,
+# MainCallback, struct Sprite and more). A types-only TU includes these, then
+# the struct under test.
 PRELUDE = ['global.h', 'main.h', 'sprite.h', 'task.h', 'pokemon.h',
            'battle.h', 'window.h', 'bg.h', 'text.h']
 
-# The game's include/ shadows libc, and an -ffreestanding ARM target has no
-# sysroot, so these three stubs are the whole libc it needs. Generated at run
-# time rather than committed, so they cannot go stale.
+# The game's include/ hides libc, and an -ffreestanding ARM target has no
+# sysroot. Thus these three stubs are all of the libc that it needs. The script
+# makes them at run time, and does not commit them, so they cannot become old.
 STUBS = {
     'stdint.h': """#ifndef _S_STDINT
 #define _S_STDINT
@@ -96,7 +99,7 @@ def load_map(path):
 
 
 def resolve(syms, addr):
-    """Nearest preceding symbol, the way addr2line would."""
+    """Nearest preceding symbol, as addr2line finds it."""
     i = bisect.bisect_right(syms, (addr, '￿')) - 1
     if i < 0:
         return None
@@ -107,8 +110,8 @@ def resolve(syms, addr):
 # --------------------------------------------------------------- struct -----
 
 def find_struct_file(name):
-    """Where `struct <name> { ... }` is defined. Structs local to a .c are the
-    interesting case -- NamingScreenData lives in src/naming_screen.c."""
+    """Where `struct <name> { ... }` is defined. Structs local to a .c file are
+    the important case: NamingScreenData is in src/naming_screen.c."""
     pat = re.compile(r'\bstruct\s+' + re.escape(name) + r'\s*\{', re.S)
     for pattern in ('include/**/*.h', 'src/**/*.c'):
         for path in sorted(glob.glob(os.path.join(REPO, pattern), recursive=True)):
@@ -133,11 +136,11 @@ def struct_fields(text, name):
 
 
 def probe(name, path, fields, far, op):
-    """Compile a types-only TU asserting each field is `op` far.
+    """Compile a types-only TU that asserts that each field is `op` far.
 
-    Fields that violate the assertion are named in the compiler's own error
-    text, so one compile identifies them -- far cheaper than bisecting each
-    field's offset separately.
+    The error text of the compiler names the fields that fail the assertion.
+    Thus one compile finds them, which costs much less than a bisect of the
+    offset of each field.
     """
     src = open(path, encoding='utf-8', errors='replace').read() if path else ''
     blocks = TYPE_BLOCK.findall(src) if path and path.endswith('.c') else []
@@ -160,7 +163,7 @@ def probe(name, path, fields, far, op):
              '-DMODERN=1', '-DRP2350=1', '-DPLATFORM_3DS=1',
              '-fsyntax-only', cfile],
             capture_output=True, text=True, cwd=REPO).stderr
-    # Preserve declaration order; clang repeats each failure a few times.
+    # Keep the declaration order. Clang repeats each failure a few times.
     hit = {m.group(1) for m in re.finditer(r'FIELD=(\w+)', out)}
     unrelated = [l for l in out.split('\n')
                  if ' error: ' in l and 'static assertion' not in l]
@@ -199,7 +202,7 @@ def explain_far(far, name, path=None):
 # ----------------------------------------------------------------- main -----
 
 def selftest():
-    """Both crashes solved this session, with the answers already established."""
+    """The two crashes that this tool solved, with their known answers."""
     cases = [(0x1E22, 'NamingScreenData', 'currentPage'),
              (0x0,    'BattleSpriteData', 'battlerData')]
     ok = True

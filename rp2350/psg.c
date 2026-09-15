@@ -1,55 +1,57 @@
-// Software rendering of the GBA's four PSG (CGB) sound channels. See psg.h.
+// Software rendering of the four PSG (CGB) sound channels of the GBA. See
+// psg.h.
 //
-// Why a full register-level implementation rather than reading the m4a channel
-// structs directly: CgbSound() does NOT drive volume per frame. It programs the
-// hardware envelope and sweep units -- writing a step time and direction into
-// NRx2 and re-triggering through NRx4 -- and then lets them ramp on their own
-// between its 60 Hz updates. A synthesiser that ignored those units would get
-// every non-trivial attack and decay wrong, so they are implemented here.
+// This is a full implementation at register level. It does not read the m4a
+// channel structs, because CgbSound() does not set the volume on each frame. It
+// programs the hardware envelope and sweep units: it writes a step time and
+// direction into NRx2, and triggers again through NRx4. Then the units ramp by
+// themselves between its 60 Hz updates. A synthesizer that ignored those units
+// would get each attack and decay wrong. Thus this file implements them.
 //
-// Structure follows the hardware: a 512 Hz frame sequencer drives the length,
-// envelope and sweep units, while each channel's waveform is generated from a
-// Q16 phase accumulator stepped once per output sample. That is not
-// cycle-accurate, but the audible behaviour is set by the sequencer, and the
-// accumulator is exact to within one output sample at 13 kHz.
+// The structure follows the hardware. A 512 Hz frame sequencer drives the
+// length, envelope and sweep units. A Q16 phase accumulator, stepped once for
+// each output sample, makes the waveform of each channel. This is not
+// cycle-accurate, but the sequencer sets the audible behavior, and the
+// accumulator is correct to one output sample at 13 kHz.
 //
-// Written from the Pan Docs / GBATEK register descriptions rather than ported
-// from an emulator, so it carries no licence obligations into rp2350/.
+// This comes from the register descriptions in Pan Docs and GBATEK, not from an
+// emulator. Thus it brings no license obligations into rp2350/.
 
 #include "global.h"
 #include "psg.h"
 
 // ---------------------------------------------------------------- constants --
 
-// Duty patterns, one bit per step of the 8-step cycle, bit N = step N.
+// Duty patterns, one bit for each step of the 8-step cycle: bit N is step N.
 //   12.5% 00000001   25% 10000001   50% 10000111   75% 01111110
 static const u8 kDutyTable[4] = { 0x80, 0x81, 0xE1, 0x7E };
 
-// Noise divisor by NR43 code. Code 0 is the "0.5" case, which is 8 here
-// because the whole table is pre-multiplied by 16.
+// Noise divisor for each NR43 code. Code 0 is the "0.5" case, which is 8 here,
+// because all of the table is multiplied by 16.
 static const u8 kNoiseDivisor[8] = { 8, 16, 32, 48, 64, 80, 96, 112 };
 
-// Wave channel output shift by NR32 bits 5-6: mute, 100%, 50%, 25%.
-// Index 0 is handled as silence rather than a shift.
+// Wave channel output shift for NR32 bits 5-6: mute, 100%, 50%, 25%. Index 0 is
+// silence, not a shift.
 static const u8 kWaveShift[4] = { 4, 0, 1, 2 };
 
-// PSG:DirectSound balance by SOUNDCNT_H bits 0-1: 25%, 50%, 100%, reserved.
-// Expressed as a numerator over 4.
+// PSG to DirectSound balance for SOUNDCNT_H bits 0-1: 25%, 50%, 100%, reserved.
+// Each value is a numerator over 4.
 static const u8 kPsgRatio[4] = { 1, 2, 4, 4 };
 
-// How loud one PSG step is in the output domain. A channel swings +/-7.5 after
-// centring, so four channels at full tilt reach +/-30; at this gain that is
-// +/-23040, comfortably inside a full-scale DirectSound note at +/-32512.
+// The loudness of one PSG step in the output range. A channel swings by 7.5 in
+// each direction after centering, so four channels at full level reach 30. At
+// this gain, that is 23040, well inside a full-scale DirectSound note at 32512.
 //
-// This is the balance knob. If PSG drowns out the sampled instruments, or
-// disappears under them, this is the number to move. 512 is chosen so that even
-// the theoretical maximum (four channels at volume 15, both sides, master
-// volume 7) lands at 30720 rather than clipping.
+// This is the balance control. If the PSG is too loud for the sampled
+// instruments, or too quiet, change this number. The value 512 keeps even the
+// theoretical maximum (four channels at volume 15, both sides, master volume 7)
+// at 30720, with no clipping.
 #define PSG_GAIN 512
 
-// The output DC blocker's time constant, as a right shift on a Q8 accumulator.
-// 9 puts the corner near 26 Hz at 13.4 kHz, comparable to the console's own
-// output capacitor. See the per-side blocker in PsgRender.
+// The time constant of the output DC blocker, as a right shift on a Q8
+// accumulator. A value of 9 puts the corner near 26 Hz at 13.4 kHz, similar to
+// the output capacitor of the console. See the blocker for each side in
+// PsgRender.
 #define DC_SHIFT 9
 
 // ------------------------------------------------------------------- state --
@@ -98,8 +100,8 @@ static struct PsgNoise sNoise;
 static u32 sSeqPhase;     // Q16 accumulator of 512 Hz sequencer steps
 static u8  sSeqStep;      // 0..7
 
-// One DC-blocker accumulator per side. Sharing one would let a channel panned
-// hard left pull the right output's baseline around with it.
+// One DC-blocker accumulator for each side. With one shared accumulator, a
+// channel panned hard left would move the baseline of the right output.
 static s32 sDcAccL, sDcAccR;   // Q8 running means
 
 void PsgReset(void)
@@ -116,10 +118,10 @@ void PsgReset(void)
 
 // ------------------------------------------------------------- frequencies --
 //
-// A pulse channel's output frequency is 131072 / (2048 - x) Hz and its duty
-// pattern has 8 steps, so the step rate is 1048576 / (2048 - x). The wave
-// channel walks 32 samples at 2097152 / (2048 - x). Both are computed in 64-bit
-// because the numerator shifted up by 16 does not fit in 32.
+// The output frequency of a pulse channel is 131072 / (2048 - x) Hz, and its
+// duty pattern has 8 steps. Thus the step rate is 1048576 / (2048 - x). The
+// wave channel walks 32 samples at 2097152 / (2048 - x). Both use 64-bit math,
+// because the numerator shifted up by 16 does not fit in 32 bits.
 
 static u32 pulse_step(u16 freq, s32 rate)
 {
@@ -140,7 +142,7 @@ static u32 noise_step(u8 nr43, s32 rate)
     u32 divisor = kNoiseDivisor[nr43 & 7];
     u32 shift = nr43 >> 4;
 
-    // Shift 14 and 15 are documented as not producing output.
+    // The documents say that shifts 14 and 15 make no output.
     if (shift >= 14)
         return 0;
 
@@ -191,8 +193,8 @@ static void noise_clock_env(struct PsgNoise *nz)
     }
 }
 
-// Returns the new frequency, and clears `on` if it overflowed, which is how the
-// hardware stops a rising sweep that runs off the top of the range.
+// Returns the new frequency, and clears `on` if it overflowed. That is how the
+// hardware stops a rising sweep that goes past the top of the range.
 static u16 sweep_next(struct PsgPulse *p)
 {
     u32 delta = p->sweepShadow >> p->sweepShift;
@@ -212,10 +214,9 @@ static u16 sweep_next(struct PsgPulse *p)
     return (u16)next;
 }
 
-// Returns TRUE when the shadow frequency actually moved, so the caller only
-// recomputes the phase step then. Recomputing it unconditionally would overwrite
-// the pitch of every non-sweeping note from a shadow register that was never
-// loaded.
+// Returns TRUE when the shadow frequency changed, so the caller calculates the
+// phase step again only then. An unconditional update would overwrite the pitch
+// of each note without a sweep from a shadow register that was never loaded.
 static bool8 pulse_clock_sweep(struct PsgPulse *p)
 {
     if (!p->sweepOn || p->sweepPeriod == 0 || p->sweepShift == 0)
@@ -229,12 +230,12 @@ static bool8 pulse_clock_sweep(struct PsgPulse *p)
     return TRUE;
 }
 
-// ------------------------------------------------------------- register read --
+// ------------------------------------------------------------ register read --
 //
-// Trigger detection by polling rather than by intercepting writes: nothing here
-// sees the store CgbSound makes, so a set bit 7 in NRx4 is taken as "this note
-// was just started" and then cleared, which is what the hardware does to that
-// bit anyway. Without the clear, every frame would restart every note.
+// Trigger detection by polling, not by interception of writes. Nothing here
+// sees the store that CgbSound makes. Thus a set bit 7 in NRx4 means "this note
+// just started", and this code then clears it, as the hardware does with that
+// bit. Without the clear, each frame would restart each note.
 
 static void pulse_sync(struct PsgPulse *p, vu8 *nrx1, vu8 *nrx2, vu8 *nrx3,
                        vu8 *nrx4, s32 rate)
@@ -250,11 +251,11 @@ static void pulse_sync(struct PsgPulse *p, vu8 *nrx1, vu8 *nrx2, vu8 *nrx3,
 
     if (r4 & 0x80)
     {
-        // CgbSound re-triggers EVERY frame it changes volume, not just when a
-        // note starts: it writes the freshly computed envelope volume into
-        // NRx2's top nibble and then sets bit 7 to make the hardware latch it.
-        // So a trigger here means "take this volume", and only a trigger on a
-        // channel that was off means "a note began".
+        // CgbSound triggers again on each frame where it changes the volume,
+        // not only when a note starts. It writes the new envelope volume into
+        // the top nibble of NRx2, and then sets bit 7 so that the hardware
+        // latches it. Thus a trigger here means "use this volume". Only a
+        // trigger on a channel that was off means "a note started".
         bool8 wasOff = !p->on;
 
         *nrx4 = (u8)(r4 & 0x7F);
@@ -263,27 +264,27 @@ static void pulse_sync(struct PsgPulse *p, vu8 *nrx1, vu8 *nrx2, vu8 *nrx3,
         p->volume = r2 >> 4;
         p->envTimer = 0;
 
-        // Deliberately NO phase reset. Hardware does not reset the duty step on
-        // trigger, and doing it here would restart the waveform 60 times a
-        // second, which is heard as a buzz rather than a note.
+        // No phase reset, on purpose. The hardware does not reset the duty step
+        // on a trigger. A reset here would restart the waveform 60 times a
+        // second, which sounds like a buzz, not a note.
 
-        // Length comes from NRx1 the way the hardware reads it, whatever the
-        // engine chose to put there. Reloaded on a real note start, or when the
-        // counter has run out.
+        // The length comes from NRx1, as the hardware reads it, for all values
+        // that the engine puts there. It reloads on a real note start, or when
+        // the counter is at zero.
         if (wasOff || p->length == 0)
             p->length = (u16)(64 - (r1 & 0x3F));
 
         if (wasOff)
         {
-            // Sweep arms from the frequency the note actually started on.
+            // The sweep starts from the frequency of the note start.
             p->sweepShadow = freq;
             p->sweepTimer = 0;
             p->sweepOn = (p->sweepPeriod != 0 || p->sweepShift != 0);
         }
     }
 
-    // Volume 0 with a downward envelope leaves the DAC off, which silences the
-    // channel outright rather than merely making it quiet.
+    // Volume 0 with a downward envelope turns the DAC off. That makes the
+    // channel silent, not only quiet.
     if ((r2 & 0xF8) == 0)
         p->on = 0;
 }
@@ -299,9 +300,9 @@ static void wave_sync(struct PsgWave *w, s32 rate)
 
     if (r4 & 0x80)
     {
-        // Unlike the pulse channels, CgbSound triggers channel 3 once per note
-        // (it clears its own bit 7 afterwards), so this really is a note start
-        // and the wave position may be reset, which hardware does.
+        // Different from the pulse channels, CgbSound triggers channel 3 once
+        // for each note (it clears its own bit 7 after). Thus this is a real
+        // note start, and the wave position can reset, as on hardware.
         bool8 wasOff = !w->on;
 
         REG_NR34 = (u8)(r4 & 0x7F);
@@ -328,9 +329,9 @@ static void noise_sync(struct PsgNoise *nz, s32 rate)
 
     if (r4 & 0x80)
     {
-        // Same per-frame re-trigger as the pulse channels, so the LFSR is only
-        // reloaded on a genuine note start. Reseeding it every frame would make
-        // the noise periodic at 60 Hz, which sounds like a rasp rather than a
+        // The same trigger on each frame as the pulse channels, so the LFSR
+        // reloads only on a real note start. A new seed on each frame would
+        // make the noise periodic at 60 Hz, which sounds like a rasp, not a
         // drum.
         bool8 wasOff = !nz->on;
 
@@ -370,7 +371,8 @@ static u8 wave_output(struct PsgWave *w)
     if (!w->on || w->shift >= 4)
         return 0;
 
-    // 32 nibble samples across the 16 bytes CgbSound loaded, high nibble first.
+    // The 32 nibble samples in the 16 bytes that CgbSound loaded, high nibble
+    // first.
     idx = (w->phase >> 16) & 31;
     sample = ram[idx >> 1];
     sample = (idx & 1) ? (sample & 0xF) : (sample >> 4);
@@ -383,7 +385,7 @@ static u8 noise_output(struct PsgNoise *nz)
     if (!nz->on)
         return 0;
 
-    // Bit 0 low means output high, matching the hardware's inversion.
+    // Bit 0 low means output high, as the hardware inverts it.
     return (nz->lfsr & 1) ? 0 : nz->volume;
 }
 
@@ -399,7 +401,7 @@ static void noise_advance(struct PsgNoise *nz, u32 clocks)
     }
 }
 
-// -------------------------------------------------------------------- render --
+// ------------------------------------------------------------------- render --
 
 void PsgRender(s16 *out, s32 n, s32 sampleRate)
 {
@@ -411,8 +413,8 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
     if (out == NULL || n <= 0 || sampleRate <= 0)
         return;
 
-    // Lazy init, so no caller has to remember to reset us. PsgReset() stays
-    // public for an explicit reset (a soft reset, a mode change).
+    // Lazy init, so no caller has to remember a reset. PsgReset() stays public
+    // for an explicit reset (a soft reset, a mode change).
     {
         static bool8 sInitialised = FALSE;
 
@@ -423,7 +425,7 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
         }
     }
 
-    // Master switch. With the APU off the hardware outputs nothing at all.
+    // Master switch. With the APU off, the hardware has no output.
     if (!(REG_SOUNDCNT_X & 0x80))
     {
         for (i = 0; i < n * 2; i++)
@@ -431,10 +433,11 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
         return;
     }
 
-    // Registers are rewritten by CgbSound once per frame, so reading them once
-    // per render call is exactly in step with the engine.
-    // NR10 first: pulse_sync arms the sweep unit on a trigger and needs the
-    // period and shift already loaded when it does.
+    // CgbSound writes the registers again once each frame. Thus one read for
+    // each render call stays in step with the engine.
+    //
+    // NR10 first: pulse_sync starts the sweep unit on a trigger, and needs the
+    // period and shift loaded before then.
     {
         u8 r0 = REG_NR10;
 
@@ -455,10 +458,10 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
     leftVol = (nr50 >> 4) & 7;
     ratio = kPsgRatio[REG_SOUNDCNT_H & 3];
 
-    // Master volume, PSG:DirectSound ratio and output gain folded into one
-    // multiplier per side, computed once. The 28 is 7 (NR50 full scale) times 4
-    // (the ratio's denominator). ARMv6 has no divide instruction, so keeping
-    // this out of the per-sample loop matters.
+    // Master volume, PSG to DirectSound ratio and output gain, as one
+    // multiplier for each side, calculated once. The 28 is 7 (NR50 full scale)
+    // times 4 (the denominator of the ratio). ARMv6 has no divide instruction,
+    // so this must stay out of the loop for each sample.
     leftVol = (leftVol * PSG_GAIN * ratio) / 28;
     rightVol = (rightVol * PSG_GAIN * ratio) / 28;
 
@@ -506,10 +509,10 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
         s3 = wave_output(&sWave);
         s4 = noise_output(&sNoise);
 
-        // Masked to the waveform length rather than left to wrap at 2^32:
-        // (phase mod 8) is what the duty lookup wants anyway, and an unbounded
-        // accumulator would eventually make the noise delta below read as tens
-        // of thousands of LFSR clocks in a single sample.
+        // Masked to the waveform length, not left to wrap at 2^32. The duty
+        // lookup needs (phase mod 8) anyway. An unbounded accumulator would at
+        // some time make the noise delta below read as tens of thousands of
+        // LFSR clocks in one sample.
         sPulse[0].phase = (sPulse[0].phase + sPulse[0].step) & ((8u << 16) - 1);
         sPulse[1].phase = (sPulse[1].phase + sPulse[1].step) & ((8u << 16) - 1);
         sWave.phase = (sWave.phase + sWave.step) & ((32u << 16) - 1);
@@ -535,11 +538,12 @@ void PsgRender(s16 *out, s32 n, s32 sampleRate)
         left *= leftVol;
         right *= rightVol;
 
-        // ---- DC blocker, per side ----
-        // The GB's DAC idles at mid-scale, so a channel switching off would
-        // step the output; tracking the mean and subtracting it removes both
-        // the offset and the click, which is what the console's output
-        // capacitor does.
+        // ---- DC blocker, for each side ----
+        //
+        // The DAC of the GB idles at mid-scale, so a channel that turns off
+        // would make a step in the output. This tracks the mean and subtracts
+        // it. That removes both the offset and the click, as the output
+        // capacitor of the console does.
         sDcAccL += ((left << 8) - sDcAccL) >> DC_SHIFT;
         sDcAccR += ((right << 8) - sDcAccR) >> DC_SHIFT;
         left -= sDcAccL >> 8;
