@@ -89,12 +89,10 @@ void EnableVCountIntrAtLine150(void);
 
 #define B_START_SELECT (B_BUTTON | START_BUTTON | SELECT_BUTTON)
 
-// Bring-up tracing for the 3DS port, which has no console: every trace goes to
-// svcOutputDebugString, which an emulator logs. Compiled out unless
-// CTR_BOOT_DIAG=1, and absent entirely from every other platform's build.
-// These bisected the boot crash (KEYINPUT powering on as all-held, which fired
-// the soft-reset combo into uninitialised RFU code); kept because the next
-// bring-up problem will want them.
+// Boot tracing for the 3DS port, which has no console. Each trace goes to
+// svcOutputDebugString, which an emulator logs. The traces compile only with
+// CTR_BOOT_DIAG=1, and never on other platforms. They stay for the next boot
+// problem.
 #if PLATFORM_3DS && CTR_BOOT_DIAG
 extern void CtrTraceMsg(const char *msg);
 #define BOOT_TRACE(s) CtrTraceMsg("emerald3ds: AgbMain > " s "\n")
@@ -134,10 +132,10 @@ void AgbMain(void)
     m4aSoundInit();
     BOOT_TRACE("m4aSoundInit");
 #if PLATFORM_3DS
-    // Unlike the bare RP2350, the 3DS has a working clock behind the SiiRtc
-    // driver (src/siirtc.c under PLATFORM_3DS), so probe it properly. Skipping
-    // this leaves sErrorStatus at zero by accident rather than by check, and
-    // leaves sRtc unpopulated until something else happens to call RtcGetInfo.
+    // Different from the bare RP2350, the 3DS has a clock behind the SiiRtc
+    // driver (src/siirtc.c under PLATFORM_3DS). Thus probe it correctly.
+    // Without this call, sErrorStatus is zero only by chance, not after a
+    // check. Also, sRtc stays empty until some other code calls RtcGetInfo.
     RtcInit();
     BOOT_TRACE("RtcInit");
 #endif
@@ -235,9 +233,10 @@ void WasmRunFrame(void)
     FRAME_TRACE("callbacks");
     PlayTimeCounter_Update();
 #if PLATFORM_3DS
-    // Paced by real time, not game time, so that fast-forward does not run the
-    // map's fade-in/fade-out state machine at the multiplier and desynchronise
-    // it from the music engine gated the same way below.
+    // Real time sets the pace, not game time. Thus fast-forward does not run
+    // the fade-in and fade-out state machine of the map at the multiplier. That
+    // machine then stays in step with the music engine, which has the same gate
+    // below.
     { extern int Ctr3dsIsAudioFrame(void);
       if (Ctr3dsIsAudioFrame()) MapMusicMain(); }
 #else
@@ -298,18 +297,18 @@ void StartTimer1(void)
 void SeedRngAndSetTrainerId(void)
 {
 #if PLATFORM_3DS
-    // Timer 1 is the GBA's entropy source here, and this port has no timers.
-    // I/O is a plain buffer zeroed at boot (gGbaMem, 3ds/gba_mem.c) that
-    // nothing ever writes REG_TM1CNT_L in, so the vanilla read below is always
-    // 0. That gave every save the same trainer ID, and with it the same
-    // randomiser mapping, since RandomizerSeed() (3ds/tweaks.c) is derived
-    // from the ID -- a randomiser that rolls the same world on every file.
+    // Timer 1 is the source of entropy on a GBA, and this port has no timers.
+    // The I/O area is a plain buffer that is zero at boot (gGbaMem,
+    // 3ds/gba_mem.c). Nothing writes REG_TM1CNT_L in it, so the vanilla read
+    // below always gives 0. Then each save would have the same trainer ID.
+    // RandomizerSeed() (3ds/tweaks.c) comes from the ID, so each file would
+    // also get the same randomizer world.
     //
-    // The host clock is the same KIND of source rather than a substitute for
-    // one: this runs when the player confirms their name (MainState_Exit,
-    // src/naming_screen.c), so like the timer it measures how long they took.
-    // Declared extern here rather than through bridge.h, the way CtrTraceMsg
-    // is above: this file has never included it.
+    // The host clock is the same kind of source, not a substitute. This runs
+    // when the player confirms their name (MainState_Exit,
+    // src/naming_screen.c). Thus, as the timer does, it measures how long the
+    // player took. It is declared extern here, not through bridge.h, as
+    // CtrTraceMsg is above, because this file does not include bridge.h.
     extern unsigned int CtrTimeNowMs(void);
 
     u16 val = (u16)CtrTimeNowMs();
@@ -468,25 +467,25 @@ static void VBlankIntr(void)
     gPcmDmaCounter = gSoundInfo.pcmDmaCounter;
 
 #if PLATFORM_3DS
-    // One tick per DISPLAYED frame, not per game frame. Under fast-forward the
-    // superloop runs 2x to 8x logical frames per displayed frame, and this call
-    // is what advances the song, so running it every time played the music at
-    // the fast-forward speed. See Ctr3dsIsAudioFrame() in 3ds/host/main.c.
+    // One tick for each displayed frame, not for each game frame. Under
+    // fast-forward, the main loop runs 2 to 8 logical frames for each displayed
+    // frame. This call advances the song, so a call on each logical frame plays
+    // the music at the fast-forward speed. See Ctr3dsIsAudioFrame() in
+    // 3ds/host/main.c.
     { extern int Ctr3dsIsAudioFrame(void);
       if (Ctr3dsIsAudioFrame())
       {
-          // m4aSoundVSync FIRST, then m4aSoundMain, matching the order the two
-          // reach the engine on hardware: VCount fires at line 150 and VBlank
-          // at 160, so the counter is always decremented before the mixer reads
-          // it.
+          // First m4aSoundVSync, then m4aSoundMain, in the same order as on
+          // hardware. VCount fires at line 150 and VBlank at 160, so the
+          // counter always decrements before the mixer reads it.
           //
-          // It has to be called from here at all because on a GBA it is reached
-          // through VCountIntr in gIntrTableTemplate, dispatched by IntrMain
-          // from the real interrupt vector. There is no GBA interrupt
-          // controller here and nothing dispatches that table, so without this
-          // line m4aSoundVSync never ran: pcmDmaCounter stayed 0, the render
-          // window pinned to 0, and the reverb had no delay line to tap. See
-          // Rp2350MixWindowOffset in rp2350/m4a_mix.c.
+          // The call must be here because a GBA calls it through VCountIntr in
+          // gIntrTableTemplate. IntrMain dispatches that table from the real
+          // interrupt vector. This port has no GBA interrupt controller, and
+          // nothing dispatches that table. Without this line, m4aSoundVSync
+          // does not run: pcmDmaCounter stays 0, the render window stays at 0,
+          // and the reverb has no delay line. See Rp2350MixWindowOffset in
+          // rp2350/m4a_mix.c.
           m4aSoundVSync();
           m4aSoundMain();
       }

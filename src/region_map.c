@@ -1360,12 +1360,12 @@ static bool8 RegionMap_IsMapSecIdInNextRow(u16 y)
 #if PLATFORM_3DS
 // ---- second-screen region map ----------------------------------------------
 //
-// The 3DS port's bottom screen draws this map itself, into its own RGB565
-// framebuffer, so it needs the art and the player's position but none of the BG
-// layers, sprites or tasks that everything else in this file exists to drive.
+// The bottom screen of the 3DS port draws this map itself, into its own RGB565
+// framebuffer. Thus it needs the art and the player's position. It needs none
+// of the BG layers, sprites or tasks that the rest of this file operates.
 //
-// Four of the five accessors below are pure reads. The exception is
-// Ctr3dsSetFlyWarpDestination, which sets a pending warp and says so.
+// Four of the five accessors below only read. The exception is
+// Ctr3dsSetFlyWarpDestination, which sets a pending warp, as its name tells.
 
 void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 **pal)
 {
@@ -1374,8 +1374,8 @@ void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 *
     *pal = sRegionMapBg_Pal;
 }
 
-// Uncompressed 4bpp, 4 tiles, and its own 16-colour palette. Gender-picked the
-// same way CreateRegionMapPlayerIcon does it.
+// Uncompressed 4bpp, 4 tiles, and its own 16-color palette. The player's gender
+// selects it, as in CreateRegionMapPlayerIcon.
 void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal)
 {
     if (gSaveBlock2Ptr->playerGender == FEMALE)
@@ -1390,32 +1390,36 @@ void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal)
     }
 }
 
-// Where the player is, in the same absolute map-tile coordinates the cursor
-// uses: x in [MAPCURSOR_X_MIN, MAPCURSOR_X_MAX], y likewise.
+// The player's position, in the same absolute map-tile coordinates as the
+// cursor: x in [MAPCURSOR_X_MIN, MAPCURSOR_X_MAX], and y the same.
 //
-// This runs the game's OWN InitMapBasedOnPlayerLocation against a scratch struct
-// rather than reimplementing it on the second screen, and that is deliberate.
-// That function is 150 lines of map-type dispatch -- towns, routes, underwater,
-// caves via the escape warp, secret bases via the dynamic warp, indoor maps whose
-// mapsec is MAPSEC_DYNAMIC -- followed by the multi-tile band arithmetic and
-// hardcoded fixups for Routes 114, 121 and 126, the Marine Cave and the SS Tidal.
-// A copy of that would be subtly wrong on the day it was written and would then
-// drift. It is also pure computation: it reads gSaveBlock1Ptr and gMapHeader and
-// writes only mapSecId, playerIsInCave and cursorPosX/Y, so unlike the rest of
-// this file it is safe to call from outside a region map screen.
+// This runs the game's own InitMapBasedOnPlayerLocation on a scratch struct, on
+// purpose. A copy would have small errors, and would then become different from
+// the original. That function has 150 lines of dispatch on the map type:
+// - towns and routes
+// - underwater maps
+// - caves, through the escape warp
+// - secret bases, through the dynamic warp
+// - indoor maps with the mapsec MAPSEC_DYNAMIC
 //
-// The three steps below are exactly LoadRegionMapGfx's case 5, in its order:
-// position first, then the special-place correction, then the position within the
-// mapsec that the landmark tables are keyed on.
+// Then it does the multi-tile band arithmetic, and the fixes for Routes 114,
+// 121 and 126, the Marine Cave and the SS Tidal. It only calculates: it reads
+// gSaveBlock1Ptr and gMapHeader, and writes only mapSecId, playerIsInCave and
+// cursorPosX/Y. Thus, different from the rest of this file, it is safe to call
+// from outside a region map screen.
 //
-// sRegionMap is saved and restored because the top screen may legitimately have a
-// real map open; the engine resumes with whatever it finds there.
+// The three steps below are the same as case 5 of LoadRegionMapGfx, in the same
+// order. They find the position, then correct special places, then find the
+// position in the mapsec that the landmark tables use.
+//
+// This saves and restores sRegionMap, because a real map can be open on the top
+// screen. The engine continues with the value that it finds there.
 void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
                                  u8 *posWithinMapSec, bool8 *inCave)
 {
-    // Zero-initialised, and that is load-bearing rather than incidental:
-    // GetPositionOfCursorWithinMapSec below reads ->zoomed to decide which pair
-    // of cursor fields to walk back from, and the second screen never zooms.
+    // Zero-initialized, on purpose. GetPositionOfCursorWithinMapSec below reads
+    // ->zoomed to select the pair of cursor fields, and the second screen never
+    // zooms.
     static struct RegionMap sScratch;
     struct RegionMap *saved = sRegionMap;
 
@@ -1434,36 +1438,36 @@ void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
     sRegionMap = saved;
 }
 
-// Whether a place can be flown to, which is where "have they been there?"
-// actually lives: GetMapsecType folds every FLAG_VISITED_* into CITY_CANFLY
-// against CITY_CANTFLY, and adds FLAG_LANDMARK_BATTLE_FRONTIER on top. Asking
-// it is what keeps the second screen from carrying its own list of towns and
-// flags that would drift from this one the first time either changed.
+// Whether the player can fly to a place. This is where "was the player there?"
+// is: GetMapsecType turns each FLAG_VISITED_* into CITY_CANFLY or CITY_CANTFLY,
+// and adds FLAG_LANDMARK_BATTLE_FRONTIER. Because the second screen asks it,
+// the second screen keeps no list of towns and flags that could become
+// different from this one.
 u8 Ctr3dsGetMapSecType(mapsec_u16_t mapSecId)
 {
     return GetMapsecType(mapSecId);
 }
 
-// The warp half of CB_ExitFlyMap, for a destination picked by touch rather than
-// by the fly map's cursor. The switch below is that function's, case for case.
+// The warp part of CB_ExitFlyMap, for a destination that the player touched,
+// not one that the cursor of the fly map selected. The switch below is the same
+// as in that function, case for case.
 //
-// This is the only thing in this block that WRITES game state, and all it
-// writes is the pending warp destination. It does not start the warp: the
-// caller does that with ReturnToFieldFromFlyMapSelect(), which is the very next
-// thing CB_ExitFlyMap does too.
+// This is the only function in this block that writes game state, and it writes
+// only the pending warp destination. It does not start the warp. The caller
+// does that with ReturnToFieldFromFlyMapSelect(), as CB_ExitFlyMap does next.
 //
-// posWithinMapSec is recomputed here from the tapped tile rather than taken as
-// an argument. Only Ever Grande cares -- position 0 is the Pokemon League and
-// anything else is the city -- and sourcing it here means the caller does not
-// also need the tile walk in GetPositionOfCursorWithinMapSec exported to it.
+// This calculates posWithinMapSec from the touched tile, and does not take it
+// as an argument. Only Ever Grande uses it: position 0 is the Pokemon League,
+// and all other positions are the city. Thus the caller does not also need the
+// tile walk in GetPositionOfCursorWithinMapSec.
 //
-// Returns FALSE if it set nothing, which the caller must treat as "do not
-// start the warp": the destination left over from the last one is still in
-// place, and flying to it would be worse than refusing.
+// Returns FALSE if it set nothing. Then the caller must not start the warp. The
+// destination of the last warp is still there, and a fly to it is worse than a
+// refusal.
 bool8 Ctr3dsSetFlyWarpDestination(mapsec_u16_t mapSecId, u16 x, u16 y)
 {
-    // Borrowed the same way Ctr3dsGetRegionMapPlayerPos borrows it, and for the
-    // same reason: a real map may legitimately be open on the top screen.
+    // Borrowed as Ctr3dsGetRegionMapPlayerPos borrows it, for the same reason:
+    // a real map can be open on the top screen.
     static struct RegionMap sScratch;
     struct RegionMap *saved = sRegionMap;
     u8 posWithinMapSec;
@@ -1492,16 +1496,15 @@ bool8 Ctr3dsSetFlyWarpDestination(mapsec_u16_t mapSecId, u16 x, u16 y)
         SetWarpDestinationToHealLocation(FlagGet(FLAG_LANDMARK_POKEMON_LEAGUE) && posWithinMapSec == 0 ? HEAL_LOCATION_EVER_GRANDE_CITY_POKEMON_LEAGUE : HEAL_LOCATION_EVER_GRANDE_CITY);
         break;
     default:
-        // sMapHealLocations stops at MAPSEC_ROUTE_134, well short of the whole
-        // mapsec list: MAPSEC_BATTLE_FRONTIER and MAPSEC_SOUTHERN_ISLAND sit
-        // past its end, which is why the fly map gives them cases of their own
-        // above rather than letting them fall through here.
+        // The sMapHealLocations table stops at MAPSEC_ROUTE_134, before the end
+        // of the mapsec list. MAPSEC_BATTLE_FRONTIER and MAPSEC_SOUTHERN_ISLAND
+        // are after its end. Thus the fly map gives them their own cases above.
         //
-        // Only the sixteen CANFLY towns can actually reach this branch, and the
-        // caller checks that. Bounded anyway because this is a public entry
-        // point and the check that protects it lives in another file: an
-        // out-of-range mapsec here would not read a wrong warp, it would read
-        // past the array and warp somewhere arbitrary.
+        // Only the sixteen CANFLY towns can get to this branch, and the caller
+        // checks that. The bound is here also, because this is a public entry
+        // point and its check is in a different file. A mapsec out of range
+        // would not read a wrong warp. It would read past the array and warp to
+        // a random place.
         if (mapSecId >= ARRAY_COUNT(sMapHealLocations))
             return FALSE;
 

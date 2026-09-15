@@ -48,7 +48,8 @@
 #include "constants/trainers.h"
 
 #if PLATFORM_3DS
-// The badge-based level cap, toggled from the bottom screen's EXTRA tab.
+// The level cap from the badges, which the EXTRA tab of the bottom screen turns
+// on and off.
 #include "../3ds/tweaks.h"
 #endif
 #include "constants/union_room.h"

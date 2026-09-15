@@ -3807,16 +3807,16 @@ static void CreateMoveTypeIcons(void)
 #if PLATFORM_3DS
 // ---- second-screen type icons ----------------------------------------------
 //
-// The bottom screen draws move type icons itself, into its own RGB565 buffer,
-// so it needs the art and the per-type palette bank but none of the sprite
-// machinery around them. This is the whole seam, and it reads only.
+// The bottom screen draws the move type icons itself, into its own RGB565
+// buffer. Thus it needs the art and the palette bank of each type, but none of
+// the sprite code around them. This is the full interface, and it only reads.
 //
-// The sheet is one 32x16 icon per type, 8 tiles of 4bpp at 0x100 bytes each, in
-// type order -- StartSpriteAnim(sprite, typeId) above is what makes the anim
-// index and the type id the same number. gMoveTypes_Pal holds three 16-colour
-// palettes and sMoveTypeToOamPaletteNum picks between them; it is returned as a
-// BANK (0-2) rather than the OAM palette number (13-15) because the caller has
-// no OAM to be relative to.
+// The sheet has one 32x16 icon for each type, in type order: 8 tiles of 4bpp at
+// 0x100 bytes for each icon. StartSpriteAnim(sprite, typeId) above makes the
+// anim index and the type id the same number. The gMoveTypes_Pal data holds
+// three 16-color palettes, and sMoveTypeToOamPaletteNum selects one of them.
+// This returns a bank (0-2), not the OAM palette number (13-15), because the
+// caller has no OAM.
 void Ctr3dsGetTypeIconGfx(const u32 **gfxLZ, const u32 **palLZ)
 {
     *gfxLZ = gMoveTypes_Gfx;

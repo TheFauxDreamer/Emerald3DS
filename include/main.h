@@ -64,26 +64,29 @@ void SetHBlankCallback(IntrCallback callback);
 void SetVCountCallback(IntrCallback callback);
 void SetSerialCallback(IntrCallback callback);
 
-// A scene's VBlank callback outlives the scene's own state by at least one call.
-// The exit path of every heap-backed scene does the same three things together
-// -- SetMainCallback2(returnCallback), DestroyTask(), FREE_AND_SET_NULL(state)
-// -- and the callback stays installed until the NEXT scene's first setup state
-// runs. VBlankIntr() therefore calls it again, this frame, with the pointer it
-// reads already NULL.
+// The VBlank callback of a scene can run after the state of the scene is freed.
+// When a scene with heap state exits, it does three things together:
+// - SetMainCallback2(returnCallback)
+// - DestroyTask()
+// - FREE_AND_SET_NULL(state)
 //
-// On a GBA that is invisible: address 0 is BIOS space, a read there returns a
-// stale opcode rather than faulting, so the callback writes a junk scroll
-// offset for one frame that nothing ever sees. In wasm address 0 is inside the
-// linear memory, so likewise. On the 3DS's ARM11 nothing is mapped below the
-// code segment and the identical read is an instant data abort -- which is how
-// VBlankCB_NamingScreen faulted reading 0x1E18, exactly
-// NULL + offsetof(struct NamingScreenData, bg1vOffset), on confirming a name.
+// The callback stays installed until the first setup state of the next scene
+// runs. Thus VBlankIntr() calls it again on this frame, and the pointer that it
+// reads is already NULL.
 //
-// The guard goes in the callback rather than at the free sites because the
-// callback is the only code that knows which pointer it needs, and because a
-// stale callback is reached from more than just the frame that freed it.
-// Skipping the frame is what the GBA effectively does anyway: the scene is
-// gone, so there are no scroll offsets or window bounds left to write.
+// On a GBA, nobody sees this. Address 0 is BIOS space, and a read there gives
+// an old opcode, not a fault. Thus the callback writes a junk scroll offset for
+// one frame. In wasm, address 0 is inside the linear memory, so the result is
+// the same. On the ARM11 of the 3DS, nothing is mapped below the code segment,
+// and the same read is a data abort. For example, VBlankCB_NamingScreen read
+// 0x1E18 (NULL + offsetof(struct NamingScreenData, bg1vOffset)) after a name
+// confirm.
+//
+// The guard is in the callback, not at the places that free the state. Only the
+// callback knows which pointer it needs. Also, code can get to an old callback
+// on more frames than the frame that freed it. The skip does what the GBA does
+// in effect: the scene is gone, so there are no scroll offsets or window bounds
+// to write.
 #if WASM || RP2350
 #define VBLANK_REQUIRE(ptr) do { if ((ptr) == NULL) return; } while (0)
 #else

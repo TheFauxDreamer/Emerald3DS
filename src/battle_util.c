@@ -37,9 +37,9 @@
 #include "constants/weather.h"
 
 #if PLATFORM_3DS
-// The bottom screen's quick-throw strip offers back whichever ball the player
-// last threw, and this file is where it learns which one that was. See the note
-// on the call in HandleAction_UseItem below for why here and nowhere else.
+// The quick-throw strip on the bottom screen offers the ball that the player
+// threw last. This file tells it which ball that was. See the note on the call
+// in HandleAction_UseItem below for why the call is only here.
 #include "../3ds/bridge.h"
 #endif
 
@@ -327,20 +327,19 @@ void HandleAction_UseItem(void)
     if (gLastUsedItem <= LAST_BALL) // is ball
     {
 #if PLATFORM_3DS
-        // Remember it for the bottom screen's quick-throw strip.
+        // Keep it for the quick-throw strip on the bottom screen.
         //
-        // This line is here rather than in Cmd_handleballthrow because this is
-        // the one point EVERY route the player can choose a ball by passes
-        // through: the d-pad bag, the touch BAG tab and the strip itself all
-        // arrive as B_ACTION_USE_ITEM and are read back out of gBattleBufferB
-        // on the line above. Wally's tutorial ball does not -- that is
-        // B_ACTION_WALLY_THROW and lands in HandleAction_WallyBallThrow -- and
-        // neither does the Safari Zone, so neither can overwrite a preference
-        // the player never expressed.
+        // This line is here, not in Cmd_handleballthrow, because each way that
+        // the player can choose a ball goes through this point. The d-pad bag,
+        // the touch BAG tab and the strip all come as B_ACTION_USE_ITEM, and
+        // the line above reads them from gBattleBufferB. The tutorial ball of
+        // Wally does not: it is B_ACTION_WALLY_THROW, in
+        // HandleAction_WallyBallThrow. The Safari Zone also does not. Thus
+        // neither can change a choice that the player did not make.
         //
-        // The side test is not redundant: this whole function runs for the AI's
-        // item use too. No trainer throws a ball today, but the branch it would
-        // land in if one ever did is this one.
+        // The side test is necessary, because this function also runs when the
+        // AI uses an item. No trainer throws a ball now, but if one does, it
+        // comes to this branch.
         if (gLastUsedItem != ITEM_NONE
             && GetBattlerSide(gBattlerAttacker) == B_SIDE_PLAYER)
             Ctr3dsSetLastBall(gLastUsedItem);

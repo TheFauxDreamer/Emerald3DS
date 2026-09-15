@@ -8,10 +8,10 @@ extern u8 gLastViewedMonIndex;
 extern const u8 *const gMoveDescriptionPointers[];
 
 #if PLATFORM_3DS
-// The move type icon sheet, for the second screen. One 32x16 4bpp icon per type
-// at 0x100 bytes, in type order; the palette is three 16-colour banks and
-// Ctr3dsGetTypeIconPalBank says which one a type uses. See the PLATFORM_3DS
-// block in src/pokemon_summary_screen.c.
+// The move type icon sheet, for the second screen. It has one 32x16 4bpp icon
+// for each type, at 0x100 bytes, in type order. The palette has three 16-color
+// banks, and Ctr3dsGetTypeIconPalBank tells which bank a type uses. See the
+// PLATFORM_3DS block in src/pokemon_summary_screen.c.
 #define CTR_TYPE_ICON_W     32
 #define CTR_TYPE_ICON_H     16
 #define CTR_TYPE_ICON_BYTES 0x100

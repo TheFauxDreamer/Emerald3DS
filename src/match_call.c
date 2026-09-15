@@ -34,7 +34,8 @@
 #include "constants/trainers.h"
 
 #if PLATFORM_3DS
-// The phone-call switch, toggled from the bottom screen's EXTRA tab.
+// The phone-call switch, which the EXTRA tab of the bottom screen turns on and
+// off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -1162,12 +1163,12 @@ bool32 TryStartMatchCall(void)
 {
     if (
 #if PLATFORM_3DS
-        // FIRST, and that is not cosmetic. Three of the six tests below have
-        // side effects -- the two counters advance and SelectMatchCallTrainer
-        // stores its pick -- so short-circuiting ahead of them leaves the whole
-        // system exactly where it was rather than ticking on unseen. Switching
-        // the option back off then resumes from there instead of releasing a
-        // backlog of calls the player never heard.
+        // First, on purpose. Three of the six tests below have side effects:
+        // the two counters advance, and SelectMatchCallTrainer stores its
+        // choice. An early return before them keeps the system in the same
+        // state. When the player turns calls on again, the system continues
+        // from there. It does not release a queue of calls that the player did
+        // not hear.
         !Ctr3dsMatchCallSuppressed() &&
 #endif
         FlagGet(FLAG_HAS_MATCH_CALL)

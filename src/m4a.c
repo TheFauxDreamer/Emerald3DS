@@ -7,9 +7,9 @@ extern const u8 gCgb3Vol[];
 #define BSS_CODE __attribute__((section(".bss.code")))
 
 #if PLATFORM_3DS
-// The 3DS runs the original src/m4a_1.s, and 3ds/asm/m4a_arm11.s defines this
-// as an alias for SoundMainRAM itself, because a CXI has nowhere writable AND
-// executable to relocate the mixer into. See the comment there.
+// The 3DS runs the original src/m4a_1.s. The file 3ds/asm/m4a_arm11.s defines
+// this symbol as an alias for SoundMainRAM. A CXI has no memory that is both
+// writable and executable for a copy of the mixer. See the comment there.
 extern char SoundMainRAM_Buffer[];
 #else
 BSS_CODE ALIGNED(4) char SoundMainRAM_Buffer[0x800] = {0};
@@ -143,11 +143,11 @@ void m4aSoundInit(void)
     s32 i;
 
 #if !RP2350
-    // The GBA copies the mixer into fast IWRAM. Neither native port does, and
-    // both define RP2350, which is what this tests: on the RP2350 the mixer is
-    // plain C (rp2350/m4a_engine.c) called directly, and on the 3DS
-    // SoundMainRAM_Buffer already IS SoundMainRAM (3ds/asm/m4a_arm11.s), so
-    // there is nothing to copy and nowhere executable to copy it to.
+    // The GBA copies the mixer into fast IWRAM. The two native ports do not,
+    // and both define RP2350, which this tests. On the RP2350, the mixer is
+    // plain C (rp2350/m4a_engine.c) that the port calls directly. On the 3DS,
+    // SoundMainRAM_Buffer is SoundMainRAM (3ds/asm/m4a_arm11.s). Thus there is
+    // nothing to copy, and no executable memory for a copy.
     CpuCopy32((void *)((s32)SoundMainRAM & ~1), SoundMainRAM_Buffer, sizeof(SoundMainRAM_Buffer));
 #endif
 
@@ -159,12 +159,12 @@ void m4aSoundInit(void)
                | (5 << SOUND_MODE_MAXCHN_SHIFT));
 
 #if PLATFORM_3DS
-    // Every pointer the mixer is about to call through, printed once.
+    // Each pointer that the mixer calls through, printed once.
     //
-    // src/m4a_1.s's SoundMain calls MPlayMainHead and CgbSound indirectly and
-    // only null-checks the first, then tail-jumps to SoundMainRAM_Buffer. A
-    // null in any of them is a NoExecuteFault at pc=0 with nothing in the
-    // register dump to say which one it was. This names it.
+    // SoundMain in src/m4a_1.s calls MPlayMainHead and CgbSound through
+    // pointers, and checks only the first for NULL. Then it jumps to
+    // SoundMainRAM_Buffer. A NULL in any of them is a NoExecuteFault at pc=0,
+    // and the register dump does not tell which one. This log names it.
     {
         extern void CtrTraceHex(const char *label, unsigned int value);
         struct SoundInfo *si = SOUND_INFO_PTR;
@@ -175,15 +175,15 @@ void m4aSoundInit(void)
         CtrTraceHex("m4a  .CgbSound       ", (unsigned int)(si ? (void *)si->CgbSound : 0));
         CtrTraceHex("m4a  .MPlayJumpTable ", (unsigned int)(si ? (void *)si->MPlayJumpTable : 0));
 
-        // Entry 35 is Clear64byte and entry 34 is ClearChain: the two the
-        // C side calls through by index. They come from MPlayJumpTableCopy
-        // (src/m4a_1.s), whose chk_adr_r2 guard used to zero every one of them
-        // on this target, so a null here means that regression is back.
+        // Entry 35 is Clear64byte and entry 34 is ClearChain: the two that the
+        // C side calls by index. MPlayJumpTableCopy (src/m4a_1.s) fills them.
+        // With the GBA guard in chk_adr_r2, all entries are zero on this
+        // target. Thus a NULL here means that the guard is back.
         CtrTraceHex("m4a  jumpTable[34]   ", (unsigned int)(void *)gMPlayJumpTable[34]);
         CtrTraceHex("m4a  jumpTable[35]   ", (unsigned int)(void *)gMPlayJumpTable[35]);
 
-        // Both live in src/m4a_1.s, which this port assembles;
-        // SoundMainRAM_Buffer is the alias declared at the top of this file.
+        // Both are in src/m4a_1.s, which this port assembles.
+        // SoundMainRAM_Buffer is the alias that the top of this file declares.
         CtrTraceHex("m4a SoundMainRAM_Buf ", (unsigned int)SoundMainRAM_Buffer);
         CtrTraceHex("m4a SoundMainRAM     ", (unsigned int)(void *)SoundMainRAM);
     }

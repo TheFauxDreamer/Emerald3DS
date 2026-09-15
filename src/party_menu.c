@@ -74,7 +74,8 @@
 #include "constants/songs.h"
 
 #if PLATFORM_3DS
-// The badge-based level cap, toggled from the bottom screen's EXTRA tab.
+// The level cap from the badges, which the EXTRA tab of the bottom screen turns
+// on and off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -6087,11 +6088,11 @@ u8 GetPartyIdFromBattlePartyId(u8 battlePartyId)
 }
 
 #if PLATFORM_3DS
-// Whether gPlayerParty is in battle order right now. The in-battle party menu,
-// and the summary screen opened from it, physically reorder the array for as
-// long as they are up, and the bottom screen reads the party on every frame:
-// without this it would take the shuffle for a different party. Set and
-// cleared by the two functions below, which always run in pairs.
+// Whether gPlayerParty is in battle order now. The in-battle party menu, and
+// the summary screen that opens from it, change the order of the array while
+// they show. The bottom screen reads the party on each frame. Without this
+// flag, it would see the new order as a different party. The two functions
+// below set and clear it, and they always run in pairs.
 static bool8 sCtr3dsPartyInBattleOrder;
 
 bool8 Ctr3dsPartyInBattleOrder(void)

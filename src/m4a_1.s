@@ -802,28 +802,27 @@ ldrb_r3_r2:
 	.thumb_func
 chk_adr_r2:
 #if PLATFORM_3DS
-@ On the 3DS the guard has to go, because its premise is a GBA memory map.
+@ On the 3DS, the guard must go, because it expects the GBA memory map.
 @
-@ It rejects (returns r3 = 0 for) any address below 0x02000000 that is not both
-@ >= gMPlayJumpTableTemplate and inside the first 16 KB -- because on a GBA the
-@ only thing down there is the BIOS ROM, and everything the engine legitimately
-@ reads lives in EWRAM/IWRAM/cart at 0x02000000 and up.
+@ It rejects (returns r3 = 0 for) each address below 0x02000000, except the
+@ addresses at or above gMPlayJumpTableTemplate in the first 16 KB. On a GBA,
+@ only the BIOS ROM is at those addresses. All data that the engine reads is in
+@ EWRAM, IWRAM or the cartridge, at 0x02000000 and above.
 @
-@ A CXI is loaded at 0x00100000 and never relocated (see 3ds/emerald3ds.rsf), so
-@ the ENTIRE game is below that line: gMPlayJumpTableTemplate, every song, every
-@ voicegroup. Every read through here therefore came back 0.
+@ A CXI loads at 0x00100000 with no relocation (see 3ds/emerald3ds.rsf). Thus
+@ all of the game is below that line: gMPlayJumpTableTemplate, each song and
+@ each voicegroup. With the guard, each read through here gives 0.
 @
-@ That is the pc=0 NoExecuteFault. MPlayJumpTableCopy runs this on all 36
-@ template entries, so gMPlayJumpTable was filled with nulls, and the first
-@ Clear64byte() out of MPlayOpen (src/m4a.c) called through entry 35 into
-@ address 0 -- during m4aSoundInit, before a note is ever played. ld_r3_tp_adr_i
-@ tail-branches here as well, so even with the table intact MPlayMain would have
-@ read every song command byte as 0.
+@ Then MPlayJumpTableCopy, which runs this on all 36 template entries, fills
+@ gMPlayJumpTable with NULL pointers. The first Clear64byte() from MPlayOpen
+@ (src/m4a.c) calls through entry 35 to address 0, during m4aSoundInit. Also,
+@ ld_r3_tp_adr_i branches here, so MPlayMain would read each song command byte
+@ as 0.
 @
-@ There is no BIOS ROM on this target for the guard to protect, so accepting
-@ unconditionally is not a relaxation of it -- it is the same behaviour the GBA
-@ gets for every address the engine actually uses. rp2350/m4a_engine.c drops it
-@ for the same reason; see the comment on MPlayJumpTableCopy there.
+@ This target has no BIOS ROM for the guard to protect. Thus, to accept all
+@ addresses gives the same result that the GBA gets for each address that the
+@ engine uses. For the same reason, rp2350/m4a_engine.c does not have the
+@ guard. See the comment on MPlayJumpTableCopy there.
 	bx lr
 #else
 	push {r0}

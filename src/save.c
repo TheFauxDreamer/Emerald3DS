@@ -779,11 +779,11 @@ u8 TrySavingData(u8 saveType)
 
     HandleSavingData(saveType);
 #if PLATFORM_3DS
-    // Push the image to the SD card now that the sectors are written. The host
-    // otherwise defers the file write until the writes go quiet, and the player
-    // closing the emulator window kills the process outright rather than
-    // running its exit path, so a save could be lost after the game had already
-    // said it succeeded. Committing here is what makes it durable.
+    // The sectors are written, so send the image to the SD card now. If not,
+    // the host waits until the writes stop. If the player closes the emulator
+    // window, the process stops without its exit path. Then a save could be
+    // lost after the game said that it succeeded. This commit makes the save
+    // durable.
     CtrSaveCommit();
 #endif
     if (!gDamagedSaveSectors)
@@ -1050,7 +1050,7 @@ void Task_LinkFullSave(u8 taskId)
             LinkFullSave_SetLastSectorSignature();
 #if PLATFORM_3DS
             // The signature is the last write of a link save, and this path
-            // never passes through TrySavingData.
+            // never goes through TrySavingData.
             CtrSaveCommit();
 #endif
             tState = 9;

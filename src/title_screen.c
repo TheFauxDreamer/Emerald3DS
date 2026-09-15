@@ -450,14 +450,14 @@ static void CreateCopyrightBanner(s16 x, s16 y)
 }
 
 #if PLATFORM_3DS
-// The PRESS START banner's own frame count, which the bottom screen's TOUCH TO
-// START blinks by, or -1 when the banner is not up. Read from the banner's
-// sprites rather than counted on the bottom screen, so the two blinks keep a
-// fixed phase against each other.
+// The frame count of the PRESS START banner, which sets the blink of TOUCH TO
+// START on the bottom screen. It is -1 when the banner is not shown. It comes
+// from the sprites of the banner, not from a count on the bottom screen. Thus
+// the two blinks keep a fixed phase.
 //
-// The callback test matters as much as the task test. Once START is taken, or
-// the music runs out and the title heads back to the intro, the task is still
-// allocated but MainCB2 no longer runs it, and the prompt has to go at once.
+// The callback test is as important as the task test. When the player presses
+// START, or the music ends and the title goes back to the intro, the task still
+// exists. But MainCB2 no longer runs it, and the prompt must go immediately.
 s32 Ctr3dsTitlePromptClock(void)
 {
     u32 i;
@@ -465,9 +465,9 @@ s32 Ctr3dsTitlePromptClock(void)
     if (gMain.callback2 != MainCB2 || !FuncIsActiveTask(Task_TitleScreenPhase3))
         return -1;
 
-    // The five PRESS START pieces were created on the same frame and blink in
-    // step, so the first one found speaks for all of them. sAnimate is what
-    // tells them apart from the copyright line, which shares the callback.
+    // The five PRESS START parts start on the same frame and blink together, so
+    // the first one is correct for all of them. The sAnimate field makes them
+    // different from the copyright line, which uses the same callback.
     for (i = 0; i < MAX_SPRITES; i++)
     {
         struct Sprite *sprite = &gSprites[i];
@@ -481,8 +481,8 @@ s32 Ctr3dsTitlePromptClock(void)
     return -1;
 }
 
-// Set by the bottom screen at the end of a frame, and taken by
-// Task_TitleScreenPhase3 at the start of the next.
+// The bottom screen sets this at the end of a frame, and Task_TitleScreenPhase3
+// takes it at the start of the next frame.
 static bool8 sTouchedStart;
 
 void Ctr3dsTitleTouchStart(void)
@@ -822,10 +822,10 @@ static void Task_TitleScreenPhase2(u8 taskId)
 static void Task_TitleScreenPhase3(u8 taskId)
 {
 #if PLATFORM_3DS
-    // A tap on the bottom screen's TOUCH TO START is a press of START. The flag
-    // is taken on every run, not only when it is acted on, so a tap that lands
-    // on the same frame as a button press cannot stay pending until the next
-    // time the title comes up (B on the main menu comes back here).
+    // A tap on TOUCH TO START on the bottom screen is a press of START. This
+    // takes the flag on each run, not only when it acts on it. Thus a tap on
+    // the same frame as a button press does not stay pending until the next
+    // title screen. B on the main menu comes back here.
     bool8 touchedStart = sTouchedStart;
 
     sTouchedStart = FALSE;
