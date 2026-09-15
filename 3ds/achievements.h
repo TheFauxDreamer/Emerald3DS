@@ -3,26 +3,26 @@
 
 // Achievements: the game-side half.
 //
-// What each achievement is and when it unlocks lives in 3ds/achievements.c,
-// read through the game's own accessors (FlagGet, GetGameStat, the Pokedex
-// counts). Which ones a playthrough has is persisted host-side
-// (3ds/host/achievements.c) through the CtrAchStore* calls in bridge.h.
+// 3ds/achievements.c defines each achievement and its unlock test, with the
+// game's own accessors (FlagGet, GetGameStat, the Pokedex counts). The host
+// side stores which ones each playthrough has (3ds/host/achievements.c),
+// through the CtrAchStore* calls in bridge.h.
 //
-// The bottom screen never reaches into that file. It reads everything through
-// the provider below, so a second provider -- RetroAchievements, say, which
-// would be a game-side adapter over a host-side rc_client -- could replace the
-// built-in one without the TROPHY tab or the toast changing at all. See
-// 3ds/ACHIEVEMENTS_PLAN.md for why that is not the first step.
+// The bottom screen never reads that file directly. It reads everything through
+// the provider below. Thus a second provider could replace the built-in one
+// with no change to the TROPHY tab or the toast. An example is
+// RetroAchievements, as a game-side adapter over a host-side rc_client. See
+// 3ds/ACHIEVEMENTS_PLAN.md.
 //
-// The one caller in src/ includes this inside an #if PLATFORM_3DS fence, like
-// 3ds/tweaks.h, so no other target ever sees it.
+// The one caller in src/ includes this inside #if PLATFORM_3DS, like
+// 3ds/tweaks.h, so no other target sees it.
 
 #include "global.h"
 
 struct Pokemon;
 
-// The TROPHY tab's two pages. A provider with no such distinction puts
-// everything in MAIN.
+// The two pages of the TROPHY tab. A provider with no pages puts everything in
+// MAIN.
 enum
 {
     ACH_SECTION_MAIN,
@@ -30,10 +30,11 @@ enum
     ACH_SECTION_COUNT
 };
 
-// What kind of achievement it is, which the UI shows as a colour (Story gold,
-// Legendary green, Pokemon red, Battle purple, Extras blue, Contests pink; see
-// UiAchCategoryRamp in 3ds/ui/ui_shell.h). A provider with no categories uses
-// ACH_CAT_STORY, which is the gold every achievement had before there were any.
+// The kind of achievement, which the UI shows as a color. The colors are Story
+// gold, Legendary green, Pokemon red, Battle purple, Extras blue and Contests
+// pink (see UiAchCategoryRamp in 3ds/ui/ui_shell.h). A provider with no
+// categories uses ACH_CAT_STORY, the gold that all achievements had before
+// categories.
 enum
 {
     ACH_CAT_STORY,
@@ -45,26 +46,26 @@ enum
     ACH_CAT_COUNT
 };
 
-// One achievement as the UI shows it.
+// One achievement, as the UI shows it.
 //
-// The strings are ASCII for UiAscii(), with one exception it understands: the
-// UTF-8 e-acute, so a description can spell Pokemon the way the game does.
+// The strings are ASCII for UiAscii(), with one exception that it knows: the
+// UTF-8 e-acute, so a description can spell Pokemon as the game does.
 struct AchView
 {
     const char *title;
-    // Usually a string literal, but it may point at a buffer the next get()
-    // rewrites (Seasoned Traveller's "Still to visit: ..."), so use it before
-    // asking for another row.
+    // Usually a string literal, but it can point to a buffer that the next
+    // get() writes again (Seasoned Traveller's "Still to visit: ..."). Use it
+    // before you ask for another row.
     const char *desc;
-    u32   progress;   // how far along, clamped to goal
-    u32   goal;       // above 1: a counter the UI may draw while locked
+    u32   progress;   // the progress, clamped to goal
+    u32   goal;       // above 1: a counter that the UI can draw while locked
     bool8 unlocked;
-    bool8 unseen;     // unlocked and not yet shown on the TROPHY tab
-    // Not to be shown yet. The provider has already swapped in placeholder text
-    // and dropped the counter; the flag is for drawing the row differently.
+    bool8 unseen;     // unlocked, and not yet seen on the TROPHY tab
+    // Not to be shown yet. The provider already put in placeholder text and
+    // removed the counter. The flag tells the UI to draw the row differently.
     bool8 hidden;
-    // ACH_CAT_*. Set for hidden rows too; it is the UI's job not to draw it,
-    // since a colour would give away what kind of thing is hidden.
+    // ACH_CAT_*. Set for hidden rows too. The UI must not draw it, because a
+    // color tells what kind of achievement is hidden.
     u8    category;
 };
 
@@ -73,8 +74,8 @@ struct AchProvider
     u16   (*count)(void);
 
     // Cheap questions about one achievement, answered from the provider's own
-    // bits without reading a single condition. The TROPHY tab counts and
-    // filters with these on every paint; get() below is for the rows it draws.
+    // bits, with no condition read. The TROPHY tab counts and filters with
+    // these on every paint. get() below is for the rows that it draws.
     u8    (*section)(u16 index);   // ACH_SECTION_*
     bool8 (*unlocked)(u16 index);
     bool8 (*unseen)(u16 index);
@@ -82,47 +83,45 @@ struct AchProvider
     void  (*get)(u16 index, struct AchView *out);
     u16   (*unlockedCount)(void);
     bool8 (*anyUnseen)(void);
-    // Everything unlocked so far counts as seen. The TROPHY tab calls this on
-    // the frame it comes on screen, after copying what was unseen for its own
-    // NEW tags.
+    // Mark everything that is unlocked as seen. The TROPHY tab calls this on
+    // the frame when it comes on the screen, after it copies the unseen rows
+    // for its own NEW tags.
     void  (*markAllSeen)(void);
     // The next notification, or FALSE when there is none. `batch` is 1 for a
-    // single unlock, `index`; above 1 it is a count of unlocks announced
+    // single unlock, `index`. Above 1, it is the count of unlocks shown
     // together ("N achievements unlocked"), and `index` is the first of them.
     bool8 (*popToast)(u16 *index, u16 *batch);
-    // Cheap identity of what the shell needs to repaint for: the unlocked count,
-    // whether anything is unseen (the tab bar's dot), and whether hidden
-    // achievements have been revealed.
+    // A key for what the shell must repaint for. It holds the unlocked count,
+    // whether anything is unseen (the tab bar dot), and whether the hidden
+    // achievements are revealed.
     u32   (*stateKey)(void);
 };
 
 const struct AchProvider *AchActive(void);
 
-// Once per displayed frame, from CtrBottomUpdate, before anything draws. Adopts
-// the playthrough on screen and evaluates one definition, round-robin.
+// Call once for each displayed frame, from CtrBottomUpdate, before any draw. It
+// adopts the playthrough on the screen and checks one definition, in turn.
 void AchTick(void);
 
-// The caught-mon hook, called from Cmd_givecaughtmon (src/battle_script_commands.c)
-// before the mon is handed over. Only the one achievement that is an EVENT
-// rather than a state -- catching a shiny -- needs it.
+// The caught-mon hook. Cmd_givecaughtmon (src/battle_script_commands.c) calls
+// it before it gives the mon to the player. Only one achievement is an event,
+// not a state: the shiny catch. It needs this hook.
 void Ctr3dsAchOnCaught(struct Pokemon *mon);
 
 // Debug page (3ds/ui/tab_extra.c, CTR_DEBUG_MENU only).
 //
-// Queue a notification without unlocking anything, so the toast can be looked
-// at without earning something. Each press takes the first achievement of the
-// next group, so a few presses show every category's colours.
+// Queue a notification and unlock nothing, so a tester can see the toast. Each
+// press takes the first achievement of the next group, so a few presses show
+// the colors of every category.
 void AchDebugTestToast(void);
-// Forget this playthrough's unlocks and derive them again from the save, which
-// is the backfill path a first load takes. The events (the shiny, the low tide
-// and the flute) are lost.
+// Forget this playthrough's unlocks and find them again from the save, as on a
+// first load. The events (the shiny, the low tide and the flute) are lost.
 void AchDebugResync(void);
-// How many definitions have an id that is repeated or will not fit the store.
+// The number of definitions with an id that repeats or does not fit the store.
 // C cannot check that at compile time, so the debug page reports it.
 u16  AchDebugBadIds(void);
-// An achievement's real title and description even while it is hidden, for
-// the debug page's width check, which has to measure what will be shown after
-// the reveal as well as what is shown now.
+// An achievement's real title and description, also while it is hidden. The
+// debug page's width check must measure the text after the reveal too.
 void AchDebugRealText(u16 index, const char **title, const char **desc);
 
 #endif // CTR_ACHIEVEMENTS_H

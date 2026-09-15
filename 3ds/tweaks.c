@@ -1,20 +1,17 @@
-// Gameplay tweaks: EXP All, a badge-based level cap, a species randomiser, and
-// a persistent bag sort order.
+// Gameplay tweaks: EXP All, a level cap from the badges, a species randomizer,
+// and a persistent bag sort order.
 //
-// These are the port's first genuine cheats, and the line is worth drawing
-// clearly. Everything else the EXTRA tab offers (fast-forward, top-screen
-// scale, button binds, the show-all-tabs override) leaves the game playing
-// exactly as it shipped. Every option here deliberately does not. They are
-// opt-in, default off, and each one is a single toggle the player has to reach
-// for.
+// These are cheats. The other EXTRA options (fast-forward, top-screen scale,
+// button binds, the tab override) leave the game as it shipped. Every option
+// here changes it. Each one is off by default, and the player must turn it on.
 //
-// All the logic lives in this file so that the hooks inside src/ stay to one or
-// two lines each, fenced with #if PLATFORM_3DS. That matters for a decomp: the
-// less original source a port rewrites, the easier it stays to rebase.
+// All the logic is in this file, so the hooks in src/ stay one or two lines,
+// inside #if PLATFORM_3DS. A port that changes less original source is easier
+// to rebase.
 //
-// This is a GAME-SIDE translation unit under the two-worlds rule in bridge.h:
-// game headers plus bridge.h, never <3ds.h>. src/siirtc.c is the precedent for
-// reading a host setting from game code.
+// This is a game-side file under the two-worlds rule in bridge.h. It includes
+// game headers and bridge.h, never <3ds.h>. The file src/siirtc.c also reads a
+// host setting from game code.
 
 #include "global.h"
 #include "battle_pike.h"
@@ -51,13 +48,12 @@ bool8 Ctr3dsMatchCallSuppressed(void)
 
 // ---- Level cap -------------------------------------------------------------
 
-// Emerald's real gym leader ace levels, then the Elite Four. The cap is the
-// level of the fight you are walking into, so it is keyed on the badge you have
-// NOT yet earned: before any badge the cap is Roxanne's Nosepass at 15.
+// The ace levels of the game's gym leaders, then the Elite Four. The cap is the
+// level of the next fight, so it uses the first badge that the player does not
+// have. Before any badge, the cap is 15 (Roxanne's Nosepass).
 //
-// Taken from rh-hideout/pokeemerald-expansion's src/caps.c, which is the
-// widely-used implementation of this idea. This tree is vanilla pokeemerald and
-// has no include/config/caps.h to inherit.
+// The values come from src/caps.c in rh-hideout/pokeemerald-expansion. This
+// tree is vanilla pokeemerald and has no include/config/caps.h.
 static const struct { u16 flag; u8 cap; } sLevelCaps[] =
 {
     { FLAG_BADGE01_GET, 15 },
@@ -78,14 +74,12 @@ u8 Ctr3dsCurrentLevelCap(void)
     if (Ctr3dsGetLevelCap() == CTR_CAP_OFF)
         return MAX_LEVEL;
 
-    // FlagGet resolves to &gSaveBlock1Ptr->flags[...], and that pointer is NULL
-    // until a file is loaded (src/load_save.c). The bottom screen polls this
-    // through its repaint hash from the very first frame, long before then, so
-    // without this the badge sweep below is a null dereference. On a real 3DS
-    // that is an instant data abort; Azahar let it pass.
+    // FlagGet reads &gSaveBlock1Ptr->flags[...], and that pointer is NULL until
+    // a file loads (src/load_save.c). The bottom screen polls this through its
+    // repaint hash from the first frame. Without this check, the badge loop
+    // below reads through NULL, which is a data abort on a real 3DS.
     //
-    // No save means no badges, and the honest answer to "what is the cap" is
-    // that there is not one yet.
+    // No save means no badges, so there is no cap yet.
     if (gSaveBlock1Ptr == NULL)
         return MAX_LEVEL;
 
@@ -108,9 +102,9 @@ bool8 Ctr3dsHardCapBlocks(u8 level)
 
 u32 Ctr3dsSoftCapExp(u8 level, u32 exp)
 {
-    // Each level past the cap costs another halving-and-then-some. Five steps is
-    // enough that overlevelling stops being worth doing without ever reaching a
-    // flat zero, which is what separates SOFT from HARD.
+    // Each level above the cap halves the exp again, and a little more. Five
+    // steps make overleveling useless but never reach zero. That is the
+    // difference between SOFT and HARD.
     static const u8 sDivisors[] = { 4, 8, 16, 32, 64 };
     u32 over;
 
@@ -126,8 +120,8 @@ u32 Ctr3dsSoftCapExp(u8 level, u32 exp)
 
     exp /= sDivisors[over];
 
-    // Never zero: "gained 0 EXP" reads as a bug rather than a rule. Mirrors the
-    // game's own `if (*exp == 0) *exp = 1;` in Cmd_getexp.
+    // Never zero: "gained 0 EXP" looks like a bug. The game does the same in
+    // Cmd_getexp: `if (*exp == 0) *exp = 1;`.
     return exp != 0 ? exp : 1;
 }
 
@@ -139,21 +133,21 @@ u32 Ctr3dsClampCappedExp(u16 species, u32 exp)
     if (cap >= MAX_LEVEL || species == SPECIES_NONE || species > SPECIES_CHIMECHO)
         return exp;
 
-    // gExperienceTables is [growthRate][MAX_LEVEL + 1], so indexing by the cap
-    // is always in bounds. Clamping the TOTAL rather than the gain is what
-    // TryIncrementMonLevel already does when it pins exp to the MAX_LEVEL entry.
+    // gExperienceTables is [growthRate][MAX_LEVEL + 1], so an index by the cap
+    // is always in bounds. Clamp the total, not the gain, as
+    // TryIncrementMonLevel does at MAX_LEVEL.
     ceiling = gExperienceTables[gSpeciesInfo[species].growthRate][cap];
 
     return exp > ceiling ? ceiling : exp;
 }
 
-// ---- Randomiser ------------------------------------------------------------
+// ---- Randomizer ------------------------------------------------------------
 
-// Valid species are 1..SPECIES_CELEBI and SPECIES_TREECKO..SPECIES_CHIMECHO.
-// The 25 slots between them are SPECIES_OLD_UNOWN_B..Z, placeholders that have
-// gSpeciesInfo entries but are named "?" and are not real Pokemon. Everything
-// at or above SPECIES_EGG is not a species at all: the SPECIES_UNOWN_B+ ids are
-// graphics pseudo-ids, and indexing gSpeciesInfo with any of them overreads.
+// The valid species are 1..SPECIES_CELEBI and
+// SPECIES_TREECKO..SPECIES_CHIMECHO. The 25 slots between them are
+// SPECIES_OLD_UNOWN_B..Z: placeholders named "?", not real Pokemon. Nothing at
+// or above SPECIES_EGG is a species. The SPECIES_UNOWN_B+ ids are graphics ids,
+// and gSpeciesInfo overreads with them.
 #define VALID_SPECIES_COUNT (SPECIES_CELEBI + (SPECIES_CHIMECHO - SPECIES_TREECKO + 1))
 
 static u16 SpeciesFromIndex(u32 index)
@@ -164,10 +158,9 @@ static u16 SpeciesFromIndex(u32 index)
     return (u16)(index - SPECIES_CELEBI + SPECIES_TREECKO);
 }
 
-// The field HMs that gate main-line progression. Fly is deliberately absent:
-// it is a convenience, never a requirement, and leaving it out keeps the
-// mapping freer. The index CanSpeciesLearnTMHM wants is the item's offset from
-// ITEM_TM01, the same arithmetic party_menu.c uses.
+// The field HMs that the main story needs. Fly is not here: it is never
+// necessary, and without it the mapping has more choice. CanSpeciesLearnTMHM
+// takes the item's offset from ITEM_TM01, as in party_menu.c.
 static u32 FieldHmMask(u16 species)
 {
     static const u8 sFieldHms[] =
@@ -192,17 +185,16 @@ static u32 FieldHmMask(u16 species)
     return mask;
 }
 
-// The save's own trainer ID. Using it rather than a stored seed means the
-// mapping is stable for one playthrough, differs between playthroughs, and is
-// unaffected by toggling the randomiser off and back on. Nothing has to be
-// persisted for any of that to hold.
+// The save's own trainer ID, not a stored seed. Thus the mapping is stable for
+// one playthrough and different between playthroughs. A toggle off and on does
+// not change it, and nothing must persist.
 static u32 RandomizerSeed(void)
 {
     const u8 *id;
 
-    // Same hazard as the level cap above: this pointer is NULL until a file
-    // exists. Nothing should be creating Pokemon that early, but the cost of
-    // being sure is one compare against a crash that only shows on hardware.
+    // The same risk as the level cap above: this pointer is NULL until a file
+    // exists. Nothing creates Pokemon that early, but one compare prevents a
+    // crash that shows only on hardware.
     if (gSaveBlock2Ptr == NULL)
         return 0;
 
@@ -213,8 +205,8 @@ static u32 RandomizerSeed(void)
 
 u16 Ctr3dsMapSpecies(u16 species)
 {
-    // Enough tries that the HM constraint below effectively always finds a
-    // candidate, few enough that the loop is bounded whatever the data says.
+    // Enough tries that the HM rule below almost always finds a candidate, and
+    // few enough that the loop has a limit.
     enum { MAX_TRIES = 16 };
 
     u32 need;
@@ -227,26 +219,25 @@ u16 Ctr3dsMapSpecies(u16 species)
     if (species == SPECIES_NONE || species > SPECIES_CHIMECHO)
         return species;
 
-    // Without a save there is no trainer ID, so there is no stable mapping to
-    // give. Returning the original keeps the identity rather than inventing a
-    // seed of 0 that a later call would not reproduce.
+    // Without a save there is no trainer ID, so there is no stable mapping.
+    // Return the original species. A seed of 0 would not agree with later
+    // calls.
     if (gSaveBlock2Ptr == NULL)
         return species;
 
-    // The softlock guard. Surf, Waterfall and Dive gate progression outright,
-    // and Cut, Strength, Rock Smash and Flash gate large parts of the map. A
-    // mapping that stripped one of those from every obtainable species would be
-    // unwinnable, so the replacement must be able to learn everything the
-    // original could. The property this buys is easy to state: wherever vanilla
-    // gave you a mon that could learn a field HM, so does the randomiser.
+    // The softlock guard. Surf, Waterfall and Dive block the story, and Cut,
+    // Strength, Rock Smash and Flash block large parts of the map. The
+    // replacement must learn every field HM that the original can learn. Thus,
+    // where the original game gave a mon that can learn a field HM, the
+    // randomizer does too.
     //
-    // Items are never randomised at all, so the HMs themselves, the badges and
-    // every key item are safe by construction rather than by guard.
+    // Items are never randomized, so the HMs, the badges and all key items are
+    // always safe.
     need = FieldHmMask(species);
 
-    // ISO_RANDOMIZE on a local, the idiom this codebase already uses for a
-    // private stream (see sFeebasRngValue in src/wild_encounter.c). It touches
-    // neither gRngValue nor gRng2Value, so battle and link RNG are unperturbed.
+    // ISO_RANDOMIZE on a local variable, as for sFeebasRngValue in
+    // src/wild_encounter.c. It does not touch gRngValue or gRng2Value, so
+    // battle and link RNG do not change.
     h = RandomizerSeed() ^ (species * 2654435761u);
 
     for (i = 0; i < MAX_TRIES; i++)
@@ -256,39 +247,29 @@ u16 Ctr3dsMapSpecies(u16 species)
         h = ISO_RANDOMIZE1(h);
         h = ISO_RANDOMIZE2(h);
 
-        // The low bits of a linear congruential generator are the weakest, so
-        // take the index from higher up the word.
+        // The low bits of a linear congruential generator are the weakest. Take
+        // the index from higher bits.
         candidate = SpeciesFromIndex((h >> 8) % VALID_SPECIES_COUNT);
 
         if ((FieldHmMask(candidate) & need) == need)
             return candidate;
     }
 
-    // Nothing qualified in MAX_TRIES draws, and that is not the rare event the
-    // loop above assumes. The mask is preserved exactly, so a species that
-    // learns most of the field HMs draws from a very small pool: Tentacool's
-    // is 12 of 386, which 16 independent draws miss 60% of the time. Returning
-    // the original here therefore left the species with the TIGHTEST pools as
-    // the ones least likely to be randomised at all -- every water route kept
-    // its Tentacool on most save files -- which is most of why the feature
-    // looked like it was barely doing anything.
+    // No candidate qualified in MAX_TRIES draws. That is not rare. The HM mask
+    // must match, so a species that learns many field HMs has a very small
+    // pool. For example, Tentacool's pool is 12 of 386, and 16 random draws
+    // miss it 60% of the time.
     //
-    // So pick from the pool directly instead of giving up: count what qualifies,
-    // then take the nth. A species always covers its own mask, so the count is
-    // never zero and this always answers. It costs two passes over the species
-    // list, but it only runs when the draws above have already failed.
+    // Thus pick from the pool directly: count the candidates, then take the
+    // nth. A species always covers its own mask, so the count is never zero.
     //
-    // Chosen over the obvious "scan forward from where the hash landed and take
-    // the first match", which is one pass but badly clumped: that hands the
-    // whole gap after a long run of non-qualifying species to whichever mon
-    // ends the run, and measured over Tentacool's 12-species pool it gave one
-    // of them 60% of the seeds. Counting first makes every member of the pool
-    // equally likely, which is the property the draws above have and the reason
-    // they are still tried first.
+    // Do not scan forward from the hash and take the first match. That favors
+    // the species after a long gap in the pool: in Tentacool's pool, one
+    // species got 60% of the seeds. A count makes each member equally likely,
+    // like the draws above.
     //
-    // The guarantee is untouched: every candidate returned here passes the same
-    // mask test the loop above applies, so wherever vanilla gave a mon that
-    // could learn a field HM, this still does.
+    // Every candidate here passes the same mask test as the loop above, so the
+    // HM guarantee stays.
     {
         u32 count = 0;
         u32 pick;
@@ -310,22 +291,20 @@ u16 Ctr3dsMapSpecies(u16 species)
         }
     }
 
-    // Unreachable: the pool above always contains at least the original itself,
-    // so the pick always lands. Kept because a "cannot happen" is not a thing
-    // to leave to a fallthrough.
+    // This cannot occur: the pool always contains the original, so the pick
+    // always lands. Keep a return for safety.
     return species;
 }
 
 u16 Ctr3dsMapWildSpecies(u16 species)
 {
-    // The Battle Pike and Battle Pyramid do not store a species in the species
-    // field of their wild tables: they store a 1-BASED INDEX into a second
-    // table, create the mon with it, then read it back with
-    // GetMonData(...) - 1 and overwrite it with the real species
-    // (src/battle_pike.c:1113, src/battle_pyramid.c:1360). Feeding those an
-    // arbitrary species id is an out-of-bounds read, so they are excluded
-    // rather than randomised. Both predicates are plain gMapHeader tests and
-    // are safe to call during encounter generation.
+    // The Battle Pike and the Battle Pyramid do not store a species in their
+    // wild tables. They store a 1-based index into a second table and create
+    // the mon with it. Then they read the index back with GetMonData(...) - 1
+    // and write the real species (src/battle_pike.c, src/battle_pyramid.c). A
+    // random species id there reads out of bounds, so these two places are not
+    // randomized. Both tests only read gMapHeader and are safe during encounter
+    // generation.
     if (InBattlePike() || InBattlePyramid_())
         return species;
 
@@ -334,27 +313,22 @@ u16 Ctr3dsMapWildSpecies(u16 species)
 
 // ---- Shiny test switch -----------------------------------------------------
 //
-// Makes the next wild encounter shiny, so the bottom screen's shiny notice can
-// be exercised without waiting out the real odds of one encounter in 8192.
+// Make the next wild encounter shiny, to test the bottom screen's shiny notice.
+// The real odds are one encounter in 8192.
 //
-// It CREATES the mon rather than editing one the game already made, and that is
-// not a preference. In Gen 3 the personality is both the substructure order
-// (GetSubstruct, src/pokemon.c:71) and half the encryption key
-// (EncryptBoxMon, :3541, keyed on otId ^ personality). SetMonData does not
-// re-encrypt for MON_DATA_PERSONALITY -- the field is below
-// MON_DATA_ENCRYPT_SEPARATOR, so SetBoxMonData's decrypt/encrypt bracket does
-// not run for it at all (:4163). Writing a new personality into a finished mon
-// therefore leaves four substructs encrypted under the old key and read back
-// through the new one: the checksum fails and the game marks it a Bad Egg.
-// Which is to say the obvious implementation quietly destroys the Pokemon it
-// was asked to make shiny.
+// This function creates the mon. Do not edit a mon that already exists. In Gen
+// 3, the personality sets the substructure order (GetSubstruct) and is half the
+// encryption key (EncryptBoxMon, keyed on otId ^ personality). SetMonData does
+// not encrypt again for MON_DATA_PERSONALITY, because that field is below
+// MON_DATA_ENCRYPT_SEPARATOR. A new personality in a finished mon thus reads
+// the substructs with the wrong key. The checksum fails, and the game marks the
+// mon a Bad Egg.
 bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level)
 {
-    // The target is not a parameter, and that is the point. The only slot this
-    // is ever allowed to fill is the wild encounter's, so it names that slot
-    // itself rather than accepting one: there is no argument a caller could
-    // pass that would aim this at gPlayerParty. CreateWildMon hardcodes the
-    // same slot in both of its own creation calls, for the same reason.
+    // There is no target parameter. The only slot that this can fill is the
+    // wild encounter's, so the function names that slot itself. No caller can
+    // aim it at gPlayerParty. CreateWildMon uses the same fixed slot in both of
+    // its calls.
     struct Pokemon *mon = &gEnemyParty[0];
     u32 otId, personality;
     u16 lo, hi;
@@ -362,75 +336,60 @@ bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level)
     if (!Ctr3dsGetShinyTest())
         return FALSE;
 
-    // Same hazard RandomizerSeed() guards above: NULL until a file exists.
-    // Left armed rather than consumed, so arming it from the title screen is
-    // not silently thrown away.
+    // The same risk as RandomizerSeed() above: NULL until a file exists. Stay
+    // armed, so a switch set on the title screen is not lost.
     if (gSaveBlock2Ptr == NULL)
         return FALSE;
 
-    // The Battle Pike and Battle Pyramid reach CreateWildMon too, and they are
-    // excluded for the same reason Ctr3dsMapWildSpecies excludes them plus one
-    // more. Their wild tables hold a 1-BASED INDEX in the species field, not a
-    // species: the mon is created with the index and the real species is
-    // written over it afterwards (src/battle_pike.c:1113,
-    // src/battle_pyramid.c:1360), so what this function would make is not the
-    // Pokemon the player ends up facing. And nothing in the Frontier can be
-    // caught, so the notice this switch exists to test would not appear anyway.
-    // Staying armed rather than firing means walking through the Pyramid does
-    // not silently spend the arm.
+    // The Battle Pike and the Battle Pyramid also reach CreateWildMon. Exclude
+    // them for the same reason as Ctr3dsMapWildSpecies: their tables hold a
+    // 1-based index, and the real species is written after (src/battle_pike.c,
+    // src/battle_pyramid.c). Thus the mon made here is not the mon that the
+    // player meets. Also, nothing in the Frontier can be caught, so the notice
+    // does not appear. Stay armed, so the Pyramid does not use up the switch.
     if (InBattlePike() || InBattlePyramid_())
         return FALSE;
 
-    // A WILD encounter, never a trainer battle. Structurally true and audited:
-    // CreateWildMon is static to src/wild_encounter.c and has no callers
-    // outside it, so a trainer battle cannot reach this function at all --
-    // trainer parties are built by CreateNPCTrainerParty (src/battle_main.c),
-    // which never comes near the wild path. Emerald backs that up from the
-    // other side: those parties are created with OT_ID_RANDOM_NO_SHINY, which
-    // rerolls the trainer's ID until the mon is NOT shiny, so an opposing
-    // trainer's Pokemon cannot be shiny in this game whatever this switch does.
+    // A wild encounter only, never a trainer battle. CreateWildMon is static to
+    // src/wild_encounter.c and has no callers outside it, so a trainer battle
+    // cannot reach this function. CreateNPCTrainerParty (src/battle_main.c)
+    // builds trainer parties with OT_ID_RANDOM_NO_SHINY, so a trainer's Pokemon
+    // is never shiny.
     //
-    // The one thing not settled by where the code sits is WHEN it runs, so that
-    // is checked. Every wild encounter is generated in the overworld before the
-    // battle starts (gMain.inBattle is not set until src/battle_main.c:708), so
-    // being in a battle here means something other than a wild encounter is
-    // asking, and the arm is kept for a real one.
+    // Check the timing. Every wild encounter is made in the overworld before
+    // the battle starts (gMain.inBattle is set later, in src/battle_main.c). If
+    // a battle is already running, the caller is not a wild encounter, so stay
+    // armed.
     if (gMain.inBattle)
         return FALSE;
 
-    // NEVER an existing Pokemon, and never one of the player's. gPlayerParty and
-    // gEnemyParty are separate arrays (src/pokemon.c:83-84) and the only write
-    // below is CreateMon into the enemy slot named above, so the player's team
-    // is not merely left alone, it is unreachable from here. Nor is anything
-    // else that already exists: a box mon, a gift, an egg, or the roamer, which
-    // lives in the save and is rebuilt by BattleSetup_StartRoamerBattle without
-    // coming through this path at all.
+    // Never an existing Pokemon, and never one of the player's. The arrays
+    // gPlayerParty and gEnemyParty are separate, and the only write below is
+    // CreateMon into the enemy slot above. Thus the player's team cannot be
+    // reached from here. Nor can a box mon, a gift, an egg or the roamer, which
+    // BattleSetup_StartRoamerBattle builds on another path.
     //
-    // The slot itself is still checked for emptiness. CreateWildMon calls
-    // ZeroEnemyPartyMons() immediately above this, so it is empty by
-    // construction today; the check is what keeps a future caller from
-    // silently replacing a live Pokemon with a different one.
+    // Still check that the slot is empty. CreateWildMon calls
+    // ZeroEnemyPartyMons() just before this, so it is empty today. The check
+    // stops a future caller from replacing a live Pokemon.
     //
-    // A pure read: GetBoxMonData only runs its decrypt/encrypt bracket for a
-    // field ABOVE MON_DATA_ENCRYPT_SEPARATOR, and this one is below it, so
-    // asking the question does not disturb the mon being asked about.
+    // This read does not change the mon. GetBoxMonData decrypts only for fields
+    // above MON_DATA_ENCRYPT_SEPARATOR, and this field is below it.
     if (GetMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
         return FALSE;
 
-    // The same trainer ID CreateBoxMon would give the mon a moment from now
-    // under OT_ID_PLAYER_ID (src/pokemon.c), because shininess is a property of
-    // the pair and we have to know one to choose the other.
+    // The same trainer ID that CreateBoxMon gives the mon under OT_ID_PLAYER_ID
+    // (src/pokemon.c). Shininess depends on the pair, so one value must be
+    // known to choose the other.
     otId = T1_READ_32(gSaveBlock2Ptr->playerTrainerId);
 
     // Solve GET_SHINY_VALUE(otId, p) == 0 for the high half. The low half stays
-    // random, so gender, the stored ability slot and the nature still vary
-    // between test shinies instead of every one being the same Pokemon.
+    // random, so gender, the ability slot and the nature still vary between
+    // test shinies.
     //
-    // Constructed, not searched. CreateBoxMon's OT_ID_RANDOM_NO_SHINY loop
-    // spins Random32 until it does NOT get a shiny, which is cheap because it
-    // almost always exits first time; inverting it would average 8192 spins and
-    // drag the RNG far enough to change what the game does next. A test switch
-    // must not alter the run it is being used to observe.
+    // Calculate the value; do not search for it. A search would need about 8192
+    // Random32 calls on average, which moves the RNG and changes what the game
+    // does next. A test switch must not change the run that it tests.
     lo = Random();
     hi = (u16)(HIHALF(otId) ^ LOHALF(otId) ^ lo);
     personality = ((u32)hi << 16) | lo;
@@ -438,9 +397,9 @@ bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level)
     CreateMon(mon, species, level, USE_RANDOM_IVS, TRUE, personality,
               OT_ID_PLAYER_ID, 0);
 
-    // One shot, which is what the button says. Cleared here rather than by the
-    // UI because this is the only place that knows the encounter happened, and
-    // an armed switch nobody disarms means every Zigzagoon is gold.
+    // One shot, as the button says. Clear it here, because only this function
+    // knows that the encounter occurred. A switch that stays armed makes every
+    // wild mon shiny.
     Ctr3dsSetShinyTest(0);
 
     return TRUE;
@@ -455,13 +414,12 @@ static void SwapSlots(struct ItemSlot *a, struct ItemSlot *b)
     SWAP(*a, *b, temp);
 }
 
-// Item names are game-encoded and not necessarily EOS-terminated: the field is
-// a fixed u8[ITEM_NAME_LENGTH] and a maximum-length name fills it. So the end
-// of the array counts as end of string.
+// Item names are game-encoded and do not always end with EOS. The field is a
+// fixed u8[ITEM_NAME_LENGTH], and a name of maximum length fills it. Thus the
+// end of the array is also the end of the string.
 //
-// EOS is 0xFF, which sorts ABOVE every letter, so it cannot be compared as an
-// ordinary byte or "POTION" would sort after "POTIONS". It is tested for
-// explicitly instead.
+// EOS is 0xFF, which sorts after every letter. As a normal byte, "POTION" would
+// sort after "POTIONS". Thus test for EOS explicitly.
 static bool8 NameSortsFirst(u16 a, u16 b)
 {
     const u8 *pa = GetItemName(a);
@@ -495,17 +453,17 @@ void Ctr3dsSortBagPocket(u8 pocketId)
 
     pocket = &gBagPockets[pocketId];
 
-    // Push empty slots to the end first, so the used items are a prefix and
-    // neither sort below has to reason about emptiness. This is also what makes
-    // it safe to detect the end of the list by itemId: GetBagItemQuantity is
-    // static to src/item.c, so the encrypted quantity is not readable here.
+    // Move the empty slots to the end first, so the used items are a prefix and
+    // neither sort below must check for empty slots. The end of the list is
+    // then found by itemId. GetBagItemQuantity is static to src/item.c, so the
+    // encrypted quantity cannot be read here.
     CompactItemsInBagPocket(pocket);
 
     if (mode == CTR_BAGSORT_TYPE)
     {
-        // Ascending item id, which is category order in Emerald: medicine,
-        // then balls, then battle items, and so on. The game already applies
-        // this to the TM and berry pockets on every bag open.
+        // Item id order, which is category order in the game: medicine, then
+        // balls, then battle items, and so on. The game already does this to
+        // the TM and berry pockets at each bag open.
         SortBerriesOrTMHMs(pocket);
         return;
     }
@@ -513,8 +471,8 @@ void Ctr3dsSortBagPocket(u8 pocketId)
     for (count = 0; count < pocket->capacity && pocket->itemSlots[count].itemId != ITEM_NONE; count++)
         ;
 
-    // Selection sort, the same shape as SortBerriesOrTMHMs. A pocket holds at
-    // most a few dozen slots and this runs on a bag open, not on a repaint.
+    // A selection sort, like SortBerriesOrTMHMs. A pocket holds a few dozen
+    // slots at most, and this runs on a bag open, not on a repaint.
     for (i = 0; i + 1 < count; i++)
     {
         for (j = i + 1; j < count; j++)
@@ -529,13 +487,11 @@ void Ctr3dsSortBagNow(void)
 {
     u8 i;
 
-    // Ctr3dsSortBagPocket above is called from inside the game's own bag code,
-    // where the game knows what it is doing. This one is called from
-    // CtrBottomUpdate, which runs between frames with no such guarantee, so it
-    // carries the same gate the BAG tab's item use does. Re-ordering a pocket
-    // while the in-game bag is open would slide an item out from under its
-    // cursor, and mid-script it could contradict whatever the script is about
-    // to do.
+    // The game's own bag code calls Ctr3dsSortBagPocket above, at a safe time.
+    // CtrBottomUpdate calls this one between frames, with no such guarantee.
+    // Thus it has the same gate as the BAG tab's item use. A sort while the
+    // game's bag is open moves an item under the cursor. A sort during a script
+    // can conflict with the script.
     if (gMain.inBattle)
         return;
     if (gMain.callback2 != CB2_Overworld)
