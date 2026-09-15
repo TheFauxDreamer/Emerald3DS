@@ -12,7 +12,7 @@
 // See CtrSettingsFlush.
 //
 // This file does not write to a temp file and rename, as save.c does. The
-// payload is 24 bytes in one sector, so a write cannot tear. The magic and
+// payload is 164 bytes in one sector, so a write cannot tear. The magic and
 // version checks turn any bad file into "use the defaults". On a console, the
 // rename alone costs 51-56 ms. Thus the file opens once and is written in
 // place.
@@ -50,7 +50,27 @@
 // - v10 grows the struct, because v9 used the last padding byte. A v9 file is
 //   the first 24 bytes of a v10 file, so it migrates as a short read. The older
 //   checks below compare against SETTINGS_V9_SIZE, not sizeof(s).
-#define SETTINGS_VERSION 10
+// - v11 adds a table of per-save records, keyed on the trainer ID. Six values
+//   move into it. An older file has one set of them, and the first save that
+//   CtrSettingsAdopt() gets takes that set.
+#define SETTINGS_VERSION 11
+
+// The number of saves with their own record. When all are in use, a new save
+// replaces the least recently used record, as in 3ds/host/achievements.c.
+#define CTR_SETTINGS_SAVES 8
+
+// The values of one save (v11). A fixed size with every byte in use.
+struct CtrSaveSettings {
+    uint32_t playerId;                 // the save's full 32-bit trainer ID
+    uint32_t lastUsed;                 // the table clock at the last use
+    uint8_t  expAll;
+    uint8_t  levelCap;                 // CTR_CAP_*
+    uint8_t  randomizer;
+    uint8_t  bagSort;                  // CTR_BAGSORT_*
+    uint8_t  phoneCallsOff;
+    uint8_t  lastBall;
+    uint8_t  pad[2];                   // explicit, always written as 0
+};
 
 // A fixed size with every byte in use, so the file layout does not depend on
 // the compiler's alignment.
@@ -97,6 +117,14 @@ struct CtrSettings {
     // as in v5 and v7. It stores OFF, so zero means "animate".
     uint8_t  battleAnimOff;
     uint8_t  pad[3];
+    // v11: the per-save table. The values of expAll, levelCap, randomizer,
+    // bagSort, phoneCallsOff and lastBall are now in rec. Their bytes above
+    // keep an older file's values until a save takes them. Otherwise they are
+    // zero.
+    uint32_t clock;                    // the next lastUsed value
+    uint8_t  count;                    // records in use, from rec[0]
+    uint8_t  pad2[3];
+    struct CtrSaveSettings rec[CTR_SETTINGS_SAVES];
 };
 
 // The size of the struct in each older layout: all fields before the next
@@ -108,6 +136,18 @@ struct CtrSettings {
 #define SETTINGS_V6_SIZE  (offsetof(struct CtrSettings, audioDbgMuted) + 3)
 // Versions 7 to 9 are all 24 bytes: all fields before the v10 field.
 #define SETTINGS_V9_SIZE  offsetof(struct CtrSettings, battleAnimOff)
+// Version 10 is 28 bytes: all fields before the v11 table.
+#define SETTINGS_V10_SIZE offsetof(struct CtrSettings, clock)
+
+// If one of these fails, the compiler added padding, and settings_put() would
+// write uninitialized bytes to the card. Add explicit padding.
+_Static_assert(sizeof(struct CtrSaveSettings) == 16,
+               "CtrSaveSettings has implicit padding");
+_Static_assert(SETTINGS_V10_SIZE == 28, "the v10 fields must keep their offsets");
+_Static_assert(sizeof(struct CtrSettings)
+                   == SETTINGS_V10_SIZE + 8
+                      + CTR_SETTINGS_SAVES * sizeof(struct CtrSaveSettings),
+               "CtrSettings has implicit padding");
 
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
@@ -148,7 +188,7 @@ static uint64_t sLastChangeMs;
 // The file, open for the full session.
 //
 // A new open for each write is expensive. Create, close, delete and rename all
-// change the directory, and each is a call to the FS process. A write of 24
+// change the directory, and each is a call to the FS process. A write of 164
 // bytes at offset 0 of an open file changes no directory entry and touches one
 // sector.
 //
@@ -221,6 +261,165 @@ void CtrSettingsMarkDirty(void)
     sLastChangeMs = osGetTime();
 }
 
+// ---- per-save values --------------------------------------------------------
+//
+// Six gameplay values belong to a save, not to the console. The table keeps
+// one record for each save, keyed on its trainer ID. Main thread only: the I/O
+// thread sees only the copy in sPending.
+
+static uint32_t               sClock;
+static uint8_t                sCount;
+static struct CtrSaveSettings sRec[CTR_SETTINGS_SAVES];
+
+// The save in play, from CtrSettingsAdopt().
+static uint32_t sPlayerId;
+static int      sHavePlayer;
+
+// The values of a file older than v11, which had one set for all saves. The
+// first save with no record takes them.
+static struct CtrSaveSettings sLegacy;
+static int                    sLegacyPending;
+
+static int save_is_default(const struct CtrSaveSettings *v)
+{
+    return v->expAll == 0 && v->levelCap == CTR_CAP_OFF && v->randomizer == 0
+        && v->bagSort == CTR_BAGSORT_OFF && v->phoneCallsOff == 0
+        && v->lastBall == 0;
+}
+
+// Read the six live values.
+static void save_get(struct CtrSaveSettings *v)
+{
+    v->expAll        = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
+    v->levelCap      = (uint8_t)Ctr3dsGetLevelCap();
+    v->randomizer    = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
+    v->bagSort       = (uint8_t)Ctr3dsGetBagSort();
+    v->phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
+    v->lastBall      = (uint8_t)Ctr3dsGetLastBall();
+}
+
+// Set the six live values, or the defaults if v is NULL.
+//
+// Set the defaults first. Apply refuses a bad mode, and a bad byte must give
+// the default, not the value of the save before. The lastBall field has no
+// range check here: UiQuickBallItem() checks it with the game's constants.
+static void save_apply(const struct CtrSaveSettings *v)
+{
+    Ctr3dsApplyExpAll(0);
+    Ctr3dsApplyLevelCap(CTR_CAP_OFF);
+    Ctr3dsApplyRandomizer(0);
+    Ctr3dsApplyBagSort(CTR_BAGSORT_OFF);
+    Ctr3dsApplyPhoneCallsOff(0);
+    Ctr3dsApplyLastBall(0);
+
+    if (v == NULL)
+        return;
+
+    Ctr3dsApplyExpAll(v->expAll != 0);
+    Ctr3dsApplyLevelCap(v->levelCap);
+    Ctr3dsApplyRandomizer(v->randomizer != 0);
+    Ctr3dsApplyBagSort(v->bagSort);
+    Ctr3dsApplyPhoneCallsOff(v->phoneCallsOff != 0);
+    Ctr3dsApplyLastBall(v->lastBall);
+}
+
+static struct CtrSaveSettings *find_record(uint32_t playerId)
+{
+    for (unsigned i = 0; i < sCount; i++)
+        if (sRec[i].playerId == playerId)
+            return &sRec[i];
+
+    return NULL;
+}
+
+// A slot for a new save: the next free slot or, if all are in use, the least
+// recently used.
+static struct CtrSaveSettings *claim_record(void)
+{
+    struct CtrSaveSettings *r;
+
+    if (sCount < CTR_SETTINGS_SAVES)
+        return &sRec[sCount++];
+
+    r = &sRec[0];
+    for (unsigned i = 1; i < CTR_SETTINGS_SAVES; i++)
+        if (sRec[i].lastUsed < r->lastUsed)
+            r = &sRec[i];
+
+    return r;
+}
+
+// Copy the live values into the record of the save in play.
+static void store_current(void)
+{
+    struct CtrSaveSettings v = { 0 };
+    struct CtrSaveSettings *r;
+
+    save_get(&v);
+
+    r = find_record(sPlayerId);
+    if (r == NULL)
+    {
+        // A save with only the defaults needs no record. Thus it does not
+        // replace the record of a different save.
+        if (save_is_default(&v))
+            return;
+
+        r = claim_record();
+    }
+
+    v.playerId = sPlayerId;
+    v.lastUsed = ++sClock;
+    *r = v;
+}
+
+// The game side calls this on the first overworld frame of a save (Adopt in
+// 3ds/achievements.c). Apply the values of that save.
+void CtrSettingsAdopt(uint32_t playerId)
+{
+    struct CtrSaveSettings *r;
+    const char *how;
+
+    if (sHavePlayer && playerId == sPlayerId)
+        return;
+
+    // Keep the values of the save before. This cannot occur yet, because
+    // SoftReset does nothing on this port, so one boot has one save.
+    if (sHavePlayer)
+        store_current();
+
+    sPlayerId = playerId;
+    sHavePlayer = 1;
+
+    r = find_record(playerId);
+
+    if (r != NULL)
+    {
+        save_apply(r);
+        // In memory only, as in CtrAchStoreLoad(). The next write keeps it.
+        r->lastUsed = ++sClock;
+        how = "its record";
+    }
+    else if (sLegacyPending)
+    {
+        // The first save after an update from v10 or older takes the old
+        // values. Write them now, so the old file does not give them again.
+        sLegacyPending = 0;
+        save_apply(&sLegacy);
+        store_current();
+        CtrSettingsMarkDirty();
+        how = "the values of the old file";
+    }
+    else
+    {
+        save_apply(NULL);
+        how = "the defaults";
+    }
+
+    CtrLog("emerald3ds: settings: save %08lX gets %s\n",
+           (unsigned long)playerId, how);
+}
+
 void CtrSettingsLoad(void)
 {
     struct CtrSettings s;
@@ -244,7 +443,15 @@ void CtrSettingsLoad(void)
 
     if (s.version == SETTINGS_VERSION)
     {
-        if (n != sizeof(s))
+        if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
+            return;
+    }
+    else if (s.version == 10)
+    {
+        // At least 28 bytes, not exactly 28. The write never truncates, so a
+        // v10 build that writes over a v11 file leaves the old table after its
+        // bytes. The table is read only from a v11 file, so the tail is ignored.
+        if (n < SETTINGS_V10_SIZE)
             return;
     }
     else if (s.version == 9 || s.version == 8 || s.version == 7)
@@ -291,31 +498,12 @@ void CtrSettingsLoad(void)
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         Ctr3dsApplyTurboBind(i, s.turbo[i]);
 
-    // Zero for a migrated v3 file, which is the default for all four.
-    // Ctr3dsApplyLevelCap and Ctr3dsApplyBagSort refuse a mode out of range, so
-    // a bad byte leaves that option off.
-    Ctr3dsApplyExpAll(s.expAll != 0);
-    Ctr3dsApplyLevelCap(s.levelCap);
-    Ctr3dsApplyRandomizer(s.randomizer != 0);
-    Ctr3dsApplyBagSort(s.bagSort);
-
     // Zero for a migrated v3 or v4 file, which is CTR_FFAUDIO_NORMAL and the
     // default.
     Ctr3dsApplyFfAudio(s.ffAudio);
 
-    // Zero for a file older than v8, which means "calls occur", as in the
-    // original game.
-    Ctr3dsApplyPhoneCallsOff(s.phoneCallsOff != 0);
-
-    // Zero for a file older than v9: the strip shows, and no ball was thrown.
-    //
-    // The lastBall field has no range check. This is the one exception to the
-    // rule of this function. The range is FIRST_BALL..LAST_BALL in
-    // include/constants/items.h, a game header that this file cannot include. A
-    // bad byte fails the test in UiQuickBallItem(), and the strip then offers
-    // the first ball in the pocket.
+    // Zero for a file older than v9, which means "the strip shows".
     Ctr3dsApplyQuickBallOff(s.quickBallOff != 0);
-    Ctr3dsApplyLastBall(s.lastBall);
 
     // Zero for a file older than v10 (the short read above keeps it zero),
     // which means "animate".
@@ -324,12 +512,33 @@ void CtrSettingsLoad(void)
     // Zero for a file older than v6, which means "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
+
+    // The per-save values wait for CtrSettingsAdopt(). A short read of an older
+    // file leaves a newer field at zero, which is its default.
+    if (s.version == SETTINGS_VERSION)
+    {
+        sClock = s.clock;
+        sCount = s.count;
+        memcpy(sRec, s.rec, sizeof(sRec));
+    }
+
+    sLegacy.expAll        = s.expAll;
+    sLegacy.levelCap      = s.levelCap;
+    sLegacy.randomizer    = s.randomizer;
+    sLegacy.bagSort       = s.bagSort;
+    sLegacy.phoneCallsOff = s.phoneCallsOff;
+    sLegacy.lastBall      = s.lastBall;
+    sLegacyPending = !save_is_default(&sLegacy);
 }
 
 // The snapshot of every setting. Take it on the main thread, where the values
 // are. Nothing here touches the card.
 static void settings_build(struct CtrSettings *s)
 {
+    // The record of the save in play gets the live values first.
+    if (sHavePlayer)
+        store_current();
+
     // Clear it first, so the padding is written as zero, not as old stack data.
     memset(s, 0, sizeof(*s));
 
@@ -339,18 +548,28 @@ static void settings_build(struct CtrSettings *s)
     s->showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         s->turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
-    s->expAll     = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
-    s->levelCap   = (uint8_t)Ctr3dsGetLevelCap();
-    s->randomizer = (uint8_t)(Ctr3dsGetRandomizer() ? 1 : 0);
-    s->bagSort    = (uint8_t)Ctr3dsGetBagSort();
     s->ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
-    s->phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
     s->quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
     s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
-    s->lastBall      = (uint8_t)Ctr3dsGetLastBall();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s->audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
+
+    // The old per-save values stay until a save takes them. Otherwise these
+    // bytes are zero, from the memset.
+    if (sLegacyPending)
+    {
+        s->expAll        = sLegacy.expAll;
+        s->levelCap      = sLegacy.levelCap;
+        s->randomizer    = sLegacy.randomizer;
+        s->bagSort       = sLegacy.bagSort;
+        s->phoneCallsOff = sLegacy.phoneCallsOff;
+        s->lastBall      = sLegacy.lastBall;
+    }
+
+    s->clock = sClock;
+    s->count = sCount;
+    memcpy(s->rec, sRec, sizeof(s->rec));
 }
 
 // The card part. It runs on the I/O thread during play, and on the main thread
