@@ -290,9 +290,10 @@ void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame)
     if (gfx == NULL || gbaPal == NULL)
         return;
 
-    // gMonIconTable points to the full 32x64 sheet, so the second frame starts
-    // one frame of tiles later: 16 tiles of 32 bytes. The game gets the same
-    // frame with ANIMCMD_FRAME(1, ...) on a 32x32 sprite in 1D mapping.
+    // Each gMonIconTable entry points to the full 32x64 sheet, so the second
+    // frame starts one frame of tiles later: 16 tiles of 32 bytes. The game
+    // gets the same frame with ANIMCMD_FRAME(1, ...) on a 32x32 sprite in 1D
+    // mapping.
     gfx += (frame & 1) * (16 * 32);
 
     UiLoadPal(pal, gbaPal, 16);
@@ -428,7 +429,8 @@ void UiMonPic(int x, int y, u16 species)
 // and its dark outline makes it clear on all 20 frames.
 void UiPokeball(int x, int y)
 {
-    // 0 transparent, 1 outline, 2 top half, 3 bottom half.
+    // Color 0 is transparent, 1 the outline, 2 the top half and 3 the bottom
+    // half.
     static const u8 kBall[UI_BALL_H][UI_BALL_W] =
     {
         { 0,0,1,1,1,0,0 },
@@ -505,7 +507,7 @@ void UiFootprint(int x, int y, u16 species, u16 color)
     if (gfx == NULL)
         return;
 
-    // 4 tiles of 8 bytes, one byte for each 8-pixel row, the low bit on the
+    // Four tiles of 8 bytes, one byte for each 8-pixel row, the low bit on the
     // left.
     for (int t = 0; t < 4; t++)
     {
@@ -540,7 +542,7 @@ void UiFootprint(int x, int y, u16 species, u16 color)
 //   and F from FRZ. C follows the style of SLP's S.
 // - This table is only the pill, like sChevron below, so it draws 6px in.
 //
-// 0 transparent, 1 body, 2 the corner pixels, 3 the letters.
+// Color 0 is transparent, 1 the body, 2 the corner pixels and 3 the letters.
 #define CNF_INK_X  6
 #define CNF_INK_W  20
 
@@ -611,7 +613,7 @@ void UiStatusIcon(int x, int y, u8 ailment)
         u16 gbaPal[16];
 
         // The decompressor uses only the size word in the data, so check it
-        // against the destinations. gbaPal is on the stack.
+        // against the destinations. The gbaPal array is on the stack.
         if (GetDecompressedDataSize(gStatusGfx_Icons) > sizeof(tiles)
          || GetDecompressedDataSize(gStatusPal_Icons) > sizeof(gbaPal))
             return;
@@ -674,7 +676,8 @@ void UiTypeIcon(int x, int y, u8 type)
     icon = tiles + (u32)type * CTR_TYPE_ICON_BYTES;
     bank = pal + Ctr3dsGetTypeIconPalBank(type) * 16;
 
-    // 32x16, so 8 tiles in 1D sprite order: four across and two down.
+    // The icon is 32x16, so 8 tiles in 1D sprite order: four across and two
+    // down.
     for (int t = 0; t < 8; t++)
         UiBlit4bppTile(x + (t % 4) * 8, y + (t / 4) * 8, icon + t * 32, bank, TRUE);
 
@@ -860,9 +863,9 @@ void UiSparkle(int cx, int cy, u8 size)
 
 void UiSparkleRamp(int cx, int cy, u8 size, u16 pale, u16 body, u16 edge)
 {
-    // ax and ay are the star's bright horizontal axis in each frame, which (cx,
-    // cy) names. Do not center on the bounding box. Each frame has a longer
-    // bottom than top, so the twinkle would move up as it grows.
+    // The values ax and ay are the star's bright horizontal axis in each frame,
+    // which (cx, cy) names. Do not center on the bounding box. Each frame has a
+    // longer bottom than top, so the twinkle would move up as it grows.
     static const struct
     {
         const u8 *ink;

@@ -34,8 +34,9 @@ u8 gCtrSaveFlash[CTR_SAVE_FLASH_SIZE];
 
 void Ctr3dsInitGbaMemory(void)
 {
-    // .bss is already zero, but a GBA starts with these regions cleared. The
-    // explicit clear makes a second entry (or a future soft reset) safe.
+    // The .bss section is already zero, but a GBA starts with these regions
+    // cleared. The explicit clear makes a second entry (or a future soft reset)
+    // safe.
     memset(gGbaMem, 0, sizeof(gGbaMem));
 
     // A blank cart is erased flash. The save layer's checksums then find no
@@ -54,9 +55,9 @@ void Ctr3dsInitGbaMemory(void)
     *(vu16 *)(REG_BASE + REG_OFFSET_KEYINPUT) = KEYS_MASK;
 }
 
-// Give the PPU its four region bases. rp2350/ppu.c is host side and does not
-// depend on addresses (see ppu.h). Thus the same rasterizer runs on a static
-// block here and on SRAM on the RP2350.
+// Give the PPU its four region bases. The PPU (rp2350/ppu.c) is host side and
+// does not depend on addresses (see ppu.h). Thus the same rasterizer runs on a
+// static block here and on SRAM on the RP2350.
 void CtrGetGbaRegions(const void **reg, const void **pal,
                       const void **vram, const void **oam)
 {

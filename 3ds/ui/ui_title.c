@@ -118,8 +118,9 @@ void UiTitleDraw(void)
         sPalLoaded = TRUE;
     }
 
-    // 622 pixels at 2x2, once every 32 frames, only on the title screen.
-    // TITLE_X is even, so each rect is one paired store for each row.
+    // The logo is 622 pixels at 2x2, drawn once every 32 frames, only on the
+    // title screen. TITLE_X is even, so each rect is one paired store for each
+    // row.
     for (int row = 0; row < TITLE_ART_H; row++)
     {
         for (int col = 0; col < TITLE_ART_W; col++)

@@ -3,9 +3,9 @@
 
 // Achievements: the game-side half.
 //
-// 3ds/achievements.c defines each achievement and its unlock test, with the
-// game's own accessors (FlagGet, GetGameStat, the Pokedex counts). The host
-// side stores which ones each playthrough has (3ds/host/achievements.c),
+// The file 3ds/achievements.c defines each achievement and its unlock test,
+// with the game's own accessors (FlagGet, GetGameStat, the Pokedex counts). The
+// host side stores which ones each playthrough has (3ds/host/achievements.c),
 // through the CtrAchStore* calls in bridge.h.
 //
 // The bottom screen never reads that file directly. It reads everything through
@@ -75,7 +75,8 @@ struct AchProvider
 
     // Cheap questions about one achievement, answered from the provider's own
     // bits, with no condition read. The TROPHY tab counts and filters with
-    // these on every paint. get() below is for the rows that it draws.
+    // these on every paint. The get() function below is for the rows that it
+    // draws.
     u8    (*section)(u16 index);   // ACH_SECTION_*
     bool8 (*unlocked)(u16 index);
     bool8 (*unseen)(u16 index);

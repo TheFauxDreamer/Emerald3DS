@@ -22,8 +22,9 @@
 // - A White or Black Flute. Its flag lasts only until the next map load, so
 //   this file reads it on each frame (NoteFlute).
 //
-// 3ds/ACHIEVEMENTS.md lists every achievement. Change it in the same commit as
-// the tables below. CI (check_achievements_md.py) fails when the two disagree.
+// The file 3ds/ACHIEVEMENTS.md lists every achievement. Change it in the same
+// commit as the tables below. CI (check_achievements_md.py) fails when the two
+// disagree.
 
 #include "global.h"
 #include "battle_setup.h"             // GetTrainerFlagFromScriptPointer
@@ -186,7 +187,7 @@ static const u16 sEventItems[] =
 // Hoenn Pokedex or for more than about 200 in the National one. Both need trade
 // evolutions, and trading needs the Cable Club (the local-wireless branch).
 //
-// 3ds/ACHIEVEMENTS.md also lists every row, in the same order.
+// The file 3ds/ACHIEVEMENTS.md also lists every row, in the same order.
 
 // MAIN, Story (gold): the journey, in the game's order, with each badge in its
 // place.
@@ -1201,7 +1202,8 @@ void AchDebugTestToast(void)
     u32 mainGroups = 0;
     u16 index = 0;
 
-    // sGroups lists every MAIN group first, so they are its first run.
+    // The sGroups table lists every MAIN group first, so they are its first
+    // run.
     while (mainGroups < ARRAY_COUNT(sGroups)
            && sGroups[mainGroups].section == ACH_SECTION_MAIN)
         mainGroups++;

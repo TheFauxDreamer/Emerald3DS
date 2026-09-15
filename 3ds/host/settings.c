@@ -70,30 +70,31 @@ struct CtrSettings {
     uint8_t  bagSort;                  // CTR_BAGSORT_*
     // Added in v5.
     uint8_t  ffAudio;                  // CTR_FFAUDIO_*
-    // v6, in the three bytes that v5 kept as padding. The padding stops the
-    // compiler from rounding the struct up to 4 bytes, which would make
-    // settings_put() write uninitialized stack to the card.
+    // Added in v6, in the three bytes that v5 kept as padding. The padding
+    // stops the compiler from rounding the struct up to 4 bytes, which would
+    // make settings_put() write uninitialized stack to the card.
     //
     // It stores MUTED, not enabled, so the zeros in a v5 file mean "nothing is
     // muted", the default.
     uint8_t  audioDbgMuted[CTR_AUDIO_DBG_COUNT];
-    // v8, in the first of the three padding bytes of v7. It stores OFF, so the
-    // zero in a v7 file means "calls occur", which is what that file meant.
+    // Added in v8, in the first of the three padding bytes of v7. It stores
+    // OFF, so the zero in a v7 file means "calls occur", which is what that
+    // file meant.
     uint8_t  phoneCallsOff;
-    // v9, in the two bytes that v7 kept and v8 left. lastBall is a raw item id.
-    // It is the one value in this struct with no range check on load. The ball
-    // ids are game constants that this side cannot include, so
-    // UiQuickBallItem() checks them. quickBallOff stores OFF, like
-    // phoneCallsOff.
+    // Added in v9, in the two bytes that v7 kept and v8 left. The lastBall
+    // field is a raw item id. It is the one value in this struct with no range
+    // check on load. The ball ids are game constants that this side cannot
+    // include, so UiQuickBallItem() checks them. The quickBallOff field stores
+    // OFF, as phoneCallsOff does.
     //
-    // These were the last padding bytes. 22 + 2 is 24, which is already
-    // aligned.
+    // These were the last padding bytes. The size is now 22 + 2 = 24, which is
+    // already aligned.
     uint8_t  lastBall;
     uint8_t  quickBallOff;
-    // v10 grows the struct. 24 + 1 is 25, which the compiler would round up to
-    // 28. Then settings_put() would write three bytes of uninitialized stack to
-    // the card. Thus the padding is explicit again, as in v5 and v7. It stores
-    // OFF, so zero means "animate".
+    // Added in v10, which grows the struct. The compiler would round
+    // 24 + 1 = 25 bytes up to 28. Then settings_put() would write three bytes
+    // of uninitialized stack to the card. Thus the padding is explicit again,
+    // as in v5 and v7. It stores OFF, so zero means "animate".
     uint8_t  battleAnimOff;
     uint8_t  pad[3];
 };
@@ -102,10 +103,10 @@ struct CtrSettings {
 // version's new fields.
 #define SETTINGS_V3_SIZE  offsetof(struct CtrSettings, expAll)
 #define SETTINGS_V4_SIZE  offsetof(struct CtrSettings, ffAudio)
-// v5 and v6 have the same shape: 20 bytes. Only the meaning of the last three
-// is different.
+// Versions 5 and 6 have the same shape: 20 bytes. Only the meaning of the last
+// three is different.
 #define SETTINGS_V6_SIZE  (offsetof(struct CtrSettings, audioDbgMuted) + 3)
-// v7 to v9 are all 24 bytes: all fields before the v10 field.
+// Versions 7 to 9 are all 24 bytes: all fields before the v10 field.
 #define SETTINGS_V9_SIZE  offsetof(struct CtrSettings, battleAnimOff)
 
 // Defined in video.c and main.c, which own the live values.
@@ -151,8 +152,8 @@ static uint64_t sLastChangeMs;
 // bytes at offset 0 of an open file changes no directory entry and touches one
 // sector.
 //
-// It never closes, like the handle in log.c. fflush() pushes the bytes, and the
-// process exit closes the file.
+// It never closes, like the handle in log.c. The fflush() call pushes the
+// bytes, and the process exit closes the file.
 static FILE *sFile;
 static int   sOpenTried;
 
@@ -256,8 +257,8 @@ void CtrSettingsLoad(void)
     }
     else if (s.version == 6 || s.version == 5)
     {
-        // Both are 20 bytes. v5 wrote its last three bytes as zero padding, and
-        // zero is "not muted" in v6. Thus the two load the same.
+        // Both are 20 bytes. Version 5 wrote its last three bytes as zero
+        // padding, and zero is "not muted" in v6. Thus the two load the same.
         if (n != SETTINGS_V6_SIZE)
             return;
     }
@@ -308,8 +309,8 @@ void CtrSettingsLoad(void)
 
     // Zero for a file older than v9: the strip shows, and no ball was thrown.
     //
-    // lastBall has no range check. This is the one exception to the rule of
-    // this function. The range is FIRST_BALL..LAST_BALL in
+    // The lastBall field has no range check. This is the one exception to the
+    // rule of this function. The range is FIRST_BALL..LAST_BALL in
     // include/constants/items.h, a game header that this file cannot include. A
     // bad byte fails the test in UiQuickBallItem(), and the strip then offers
     // the first ball in the pocket.
@@ -377,8 +378,9 @@ static void settings_put(const struct CtrSettings *s)
     if (fseek(f, 0, SEEK_SET) == 0) {
         size_t n = fwrite(s, 1, sizeof(*s), f);
 
-        // fflush, not fclose: the handle stays open after this call. log.c uses
-        // the same method to get a line onto the card before a crash.
+        // This uses fflush, not fclose: the handle stays open after this call.
+        // The log (log.c) uses the same method to get a line onto the card
+        // before a crash.
         if (n != sizeof(*s) || fflush(f) != 0)
             CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
                    (unsigned)n, (unsigned)sizeof(*s));

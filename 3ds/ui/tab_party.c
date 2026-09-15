@@ -761,9 +761,9 @@ static void DrawMoveInfo(struct Pokemon *mon, u8 i)
 static void DrawSpread(struct Pokemon *mon, u16 species)
 {
     // The row order is the summary screen's: HP, ATK, DEF, SPA, SPD, SPE. The
-    // tables below use it. gNatureStatTable does not: its columns are ATK, DEF,
-    // SPEED, SPATK, SPDEF (src/pokemon.c). Thus the last table maps the
-    // columns. -1 is HP, which no nature changes.
+    // tables below use it. The nature table (gNatureStatTable) does not: its
+    // columns are ATK, DEF, SPEED, SPATK, SPDEF (src/pokemon.c). Thus the last
+    // table maps the columns. The value -1 is HP, which no nature changes.
     static const char *const names[6] = { "HP", "ATK", "DEF", "SPA", "SPD", "SPE" };
     static const u8 statField[6] = {
         MON_DATA_MAX_HP, MON_DATA_ATK, MON_DATA_DEF,
@@ -779,7 +779,7 @@ static void DrawSpread(struct Pokemon *mon, u16 species)
     };
     static const s8 natureCol[6] = { -1, 0, 1, 3, 4, 2 };
 
-    // struct SpeciesInfo has six named base stats, not an array, so the row
+    // The struct SpeciesInfo has six named base stats, not an array, so the row
     // order is written here by hand.
     const u8 base[6] = {
         gSpeciesInfo[species].baseHP,
@@ -794,8 +794,8 @@ static void DrawSpread(struct Pokemon *mon, u16 species)
     int y = MOVES_Y;
     int x;
 
-    // The EV total, in the empty label cell of the header. 510 is the game's
-    // limit (MAX_TOTAL_EVS), and GetMonEVCount is the game's own function.
+    // The EV total, in the empty label cell of the header. The game's limit is
+    // 510 (MAX_TOTAL_EVS), and GetMonEVCount is the game's own function.
     x = SPREAD_LABEL_X;
     x += UiNum(x, y, (s32)GetMonEVCount(mon), UiThemeText(), UiThemeShadow());
     UiText(x, y, UiAscii(label, "/510", sizeof(label)), UI_COL_DIM, UiThemeShadow());

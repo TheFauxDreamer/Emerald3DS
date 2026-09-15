@@ -124,8 +124,8 @@ static void table_reset(void)
     sTable.version = ACH_VERSION;
 }
 
-// Make the directory once for each boot. settings.c makes the same directory.
-// Each file keeps its own flag, so neither depends on the other.
+// Make the directory once for each boot. The code in settings.c makes the same
+// directory. Each file keeps its own flag, so neither depends on the other.
 static void ensure_dir(void)
 {
     static int done;
@@ -184,7 +184,8 @@ static void table_from_v1(const struct CtrAchFileV1 *v1)
         r->lastUsed = old->lastUsed;
         memcpy(r->unlocked, old->unlocked, sizeof(old->unlocked));
         memcpy(r->unseen, old->unseen, sizeof(old->unseen));
-        // places stays as table_reset() set it: zero, no place visited.
+        // The places array stays as table_reset() set it: zero, no place
+        // visited.
     }
 }
 

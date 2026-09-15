@@ -1,9 +1,9 @@
 // The log, for a port that has no place to print.
 //
 // The game uses the top screen and the touch UI uses the bottom screen. Thus
-// there is no console, and printf() goes nowhere. svcOutputDebugString()
-// reaches an emulator's log, but a real console discards it. Thus each line
-// also goes to a file on the SD card. Without it, "audio is off, for this
+// there is no console, and printf() goes nowhere. The svcOutputDebugString()
+// call reaches an emulator's log, but a real console discards it. Thus each
+// line also goes to a file on the SD card. Without it, "audio is off, for this
 // reason" and "audio runs and makes silence" look the same.
 //
 // Three rules:
@@ -23,8 +23,8 @@
 // controls it, so one switch prepares a build to share. A player's build must
 // not make files on their card or write to the SD card for each line.
 //
-// svcOutputDebugString stays in every build. It costs nothing and a console
-// discards it.
+// The svcOutputDebugString call stays in every build. It costs nothing and a
+// console discards it.
 //
 // On a console, the missing sdmc:/3ds/dspfirm.cdc warning thus has no
 // destination. It is about the player's SD card, and no build can carry a DSP

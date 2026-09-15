@@ -133,8 +133,8 @@ u32 Ctr3dsClampCappedExp(u16 species, u32 exp)
     if (cap >= MAX_LEVEL || species == SPECIES_NONE || species > SPECIES_CHIMECHO)
         return exp;
 
-    // gExperienceTables is [growthRate][MAX_LEVEL + 1], so an index by the cap
-    // is always in bounds. Clamp the total, not the gain, as
+    // The gExperienceTables array is [growthRate][MAX_LEVEL + 1], so an index
+    // by the cap is always in bounds. Clamp the total, not the gain, as
     // TryIncrementMonLevel does at MAX_LEVEL.
     ceiling = gExperienceTables[gSpeciesInfo[species].growthRate][cap];
 

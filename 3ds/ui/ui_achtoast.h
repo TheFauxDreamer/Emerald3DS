@@ -17,7 +17,7 @@
 #include "global.h"
 #include "../bridge.h"
 
-// 40x5 tiles along the top of the content area, y 0..40.
+// The toast is 40x5 tiles along the top of the content area, y 0..40.
 //
 // The shiny notice uses y 40..152 and the strip uses y 152..192. Thus the three
 // touch exactly and fill the 192px content area, with no overlap. All three can

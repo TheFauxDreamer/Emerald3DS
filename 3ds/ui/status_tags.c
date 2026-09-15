@@ -28,11 +28,11 @@
 
 // TRUE after the battle reaches the player's first action selection.
 //
-// gBattleMons is not cleared when a battle starts (see UiCatchableOpponent in
-// matchup.c). BattleIntroDrawTrainersOrMonsSprites clears status2. Before that,
-// status2 holds the values from the previous battle, and CNF could show during
-// the intro. Nothing can cause confusion before the first action, so the wait
-// costs nothing.
+// The game does not clear gBattleMons when a battle starts (see
+// UiCatchableOpponent in matchup.c). BattleIntroDrawTrainersOrMonsSprites
+// clears status2. Before that, status2 holds the values from the previous
+// battle, and CNF could show during the intro. Nothing can cause confusion
+// before the first action, so the wait costs nothing.
 //
 // Battles with no player choice (recorded battles, the Safari Zone) never set
 // this. Confusion does not occur there.

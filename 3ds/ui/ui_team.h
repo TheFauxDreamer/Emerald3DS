@@ -20,10 +20,10 @@
 // is open or not. Use this, not &gPlayerParty[slot], when a slot number is tied
 // to a cell on the screen or kept between frames.
 //
-// The rest of the port uses field order too. gBattlerPartyIndexes holds field
-// ids. Ctr3dsQueueBattleItem indexes gPlayerParty directly, which is correct
-// because it acts only during action selection, when no menu reorders the
-// party.
+// The rest of the port uses field order too. The gBattlerPartyIndexes array
+// holds field ids. Ctr3dsQueueBattleItem indexes gPlayerParty directly, which
+// is correct because it acts only during action selection, when no menu
+// reorders the party.
 struct Pokemon *UiPartyMon(u8 slot);
 
 // TRUE while the player fights with a partner trainer.

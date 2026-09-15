@@ -19,8 +19,8 @@
 #include "io_thread.h"
 #include "trace.h"
 
-// 3ds/Makefile gives these values. The defaults let this file build alone. A
-// missing value shows as "unknown" in the log, not as an old value.
+// The file 3ds/Makefile gives these values. The defaults let this file build
+// alone. A missing value shows as "unknown" in the log, not as an old value.
 #ifndef CTR_BUILD_STAMP
 #define CTR_BUILD_STAMP "build stamp unknown"
 #endif
@@ -104,10 +104,10 @@ static void sample_touch(CtrTouchState *t)
     uint32_t held = hidKeysHeld();
     int touching = (held & KEY_TOUCH) != 0;
 
-    // hidScanInput() clears the touch position on each scan and fills it only
-    // while the panel is pressed. Thus, on the release frame, hidTouchRead
-    // returns (0,0) and not the last contact point. Keep the last point here.
-    // Without this, every tap acts at the top-left corner.
+    // Each hidScanInput() call clears the touch position on each scan and fills
+    // it only while the panel is pressed. Thus, on the release frame,
+    // hidTouchRead returns (0,0) and not the last contact point. Keep the last
+    // point here. Without this, every tap acts at the top-left corner.
     if (touching)
         lastPos = pos;
 
@@ -141,8 +141,8 @@ void CtrTraceMsg(const char *msg)
 }
 #endif
 
-// The cartridge RTC, from the console clock. src/siirtc.c calls this in place
-// of the S-3511A chip, which a 3DS does not have.
+// The cartridge RTC, from the console clock. The code in src/siirtc.c calls
+// this in place of the S-3511A chip, which a 3DS does not have.
 //
 // Cached to the second. RtcCalcLocalTime() runs from DoTimeBasedEvents() on
 // each frame in the overworld, and the chip has one-second resolution.
@@ -275,7 +275,7 @@ int Ctr3dsGetTurboBind(int button)
 
 // TRUE when the bottom screen shows tabs that the save has not unlocked. It is
 // here, not on the game side, because it must persist, and the settings file is
-// host side. bottom_screen.c reads it through the bridge.
+// host side. The bottom screen (bottom_screen.c) reads it through the bridge.
 static uint8_t sShowAllTabs;
 
 // Sets the value with no write, for CtrSettingsLoad(), like
@@ -671,9 +671,9 @@ void Rp2350PresentFrame(void)
     }
 
     // Input changes only once for each displayed frame, which is the hardware's
-    // rate. hidScanInput() finds press edges by comparing with the previous
-    // scan. A scan on each game frame uses up the edge, and sample_touch() and
-    // CtrBottomUpdate() miss taps.
+    // rate. The hidScanInput() function finds press edges by a comparison with
+    // the previous scan. A scan on each game frame uses up the edge, and
+    // sample_touch() and CtrBottomUpdate() miss taps.
     //
     // One value for the full group also makes fast-forward correct: one press
     // gives one JOY_NEW and then held frames.

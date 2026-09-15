@@ -25,8 +25,8 @@
 
 // ---------------------------------------------------------------- layout ---
 //
-// 40x24 tiles, with the interior at x 8..312, y 8..184. The text has an 8px
-// margin inside that, from x 16 to x 304.
+// The tab is 40x24 tiles, with the interior at x 8..312, y 8..184. The text has
+// an 8px margin inside that, from x 16 to x 304.
 #define TROPHY_TW      (CTR_BOTTOM_WIDTH / 8)
 #define TROPHY_TH      (UI_CONTENT_H / 8)
 
