@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Checks that 3ds/ACHIEVEMENTS.md still lists exactly what 3ds/achievements.c
-defines: every achievement, on the right page and under the right category, in
-display order, with its id, title and description word for word. It also checks
-what C cannot at compile time: that ids are unique and fit the store.
+defines. That is every achievement, in display order, on the correct page and
+under the correct category. The id, title and description must be the same,
+word for word. It also checks what C cannot check at compile time: the ids are
+unique and fit the store.
 
-Run from anywhere: python3 3ds/check_achievements_md.py
-Exits 1, printing a diff, when the two disagree. Python 3 standard library only.
+Run from any directory: python3 3ds/check_achievements_md.py
+Exits 1 with a diff when the two do not agree. It uses only the Python 3
+standard library.
 """
 
 import difflib
@@ -35,7 +37,7 @@ def fail(msg):
 
 
 def c_string(literal):
-    """A C string literal's contents, with its octal escapes read as UTF-8."""
+    """The contents of a C string literal, with octal escapes read as UTF-8."""
     raw = literal[1:-1].encode("latin-1").decode("unicode_escape")
     return raw.encode("latin-1").decode("utf-8")
 
