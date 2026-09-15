@@ -14,7 +14,7 @@ The bottom screen works but was never designed. It is drawn entirely from
 `UiFillRect` / `UiRect` primitives, and its whole visual identity is borrowed:
 every panel is one of Emerald's 20 option-menu window frames, and every ink
 colour is read back out of `gStandardMenuPalette` at runtime
-([ui_draw.c:289](ui/ui_draw.c#L289)). That was the right call while the port was
+([ui_draw.c:274](ui/ui_draw.c#L274)). That was the right call while the port was
 proving it could read game state at all, and it is why the code is littered with
 defensive decisions (outlines on every arrow, a chevron in theme colours, a Poke
 Ball that carries its own dark edge, a shiny notice that paints its own dark
@@ -58,10 +58,10 @@ const u16 sBtnPal[]    = INCGFX_U16("3ds/graphics/skin/button.png", ".gbapal");
 | `tools/generate_wasm_assets.py` | rglobs every `.c`/`.h`/`.inc` in the tree for `INCGFX_*`, runs `gbagfx` per match into `build/assets/`. `3ds/ui/*.c` is already in scope; nothing new is registered. | `source_files()`, `generate_incgfx()` |
 | `gbagfx png -> 8bpp -plain` | **Linear, row-major, one byte per pixel.** No tile grid, no 8px alignment, any width, 256 colours. | `WritePlainImage`, [gfx.c:508](../tools/gbagfx/gfx.c#L508) |
 | `gbagfx png -> gbapal` | Writes the PNG's PLTE as BGR555, **as many entries as the PLTE has**, not always 256. | `HandlePngToGbaPaletteCommand` |
-| `preproc -g build/assets` | Resolves `root + source + args_as_path + extension` and emits the bytes inline. `build_objs.sh` passes `-g` for every game-side source, `3ds/ui/` included. | `CFile::TryConvertIncgfx`, `c_file.cpp:538`; [build_objs.sh:80](build_objs.sh#L80) |
-| CI | Already runs `generate_wasm_assets.py` before `build_objs.sh`. | `.github/workflows/build-3ds.yml:74`, `:80` |
+| `preproc -g build/assets` | Resolves `root + source + args_as_path + extension` and emits the bytes inline. `build_objs.sh` passes `-g` for every game-side source, `3ds/ui/` included. | `CFile::TryConvertIncgfx`, `c_file.cpp:538`; [build_objs.sh:82](build_objs.sh#L82) |
+| CI | Already runs `generate_wasm_assets.py` before `build_objs.sh`. | `.github/workflows/build-3ds.yml:85`, `:80` |
 
-`-plain` is an established in-tree pattern, not a novelty: `src/pokemon.c:1362`
+`-plain` is an established in-tree pattern, not a novelty: `src/pokemon.c:1363`
 uses it for Spinda's spots.
 
 ### Four hard rules for every asset
@@ -70,7 +70,7 @@ uses it for Spinda's spots.
 |---|---|---|
 | **Indexed PNG, colour type 3** | `ReadPng` rejects RGB and RGBA outright | [convert_png.c:90](../tools/gbagfx/convert_png.c#L90) |
 | **Bit depth 8** | a depth-4 file is re-packed as one flat bitstream that ignores per-row padding, so any odd width shears silently | `ConvertBitDepth`, [convert_png.c:48](../tools/gbagfx/convert_png.c#L48) |
-| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:123](ui/ui_draw.c#L123) |
+| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:114](ui/ui_draw.c#L114) |
 | **256 colours maximum per sheet** | one byte per pixel | `WritePlainImage` |
 
 Aseprite, GIMP and Photoshop all export this (Aseprite: Indexed mode, then Save
@@ -127,7 +127,7 @@ design record. Each is exactly 320x240, or an integer 2x / 4x multiple.
 |---|---|---|
 | `shell.png` | the bar and the content split | settled first, see below |
 | `overlays.png` | shiny notice and quick-throw strip, together | their geometry is coupled (see "The overlays" below) |
-| `party.png` | the 2x3 grid | **both** cell heights: 64px with no cheat tags, 56px under the 24px tag strip ([tab_party.c:46](ui/tab_party.c#L46)) |
+| `party.png` | the 2x3 grid | **both** cell heights: 64px with no cheat tags, 56px under the 24px tag strip ([tab_party.c:44](ui/tab_party.c#L44)) |
 | `party_detail.png` | the per-mon detail view | one left-column rect that all three tenants must fit: stats, a tapped move's info, the IV/EV spread |
 | `bag.png` | pockets, list, details, USE | |
 | `bag_picker.png` | the target picker | a 24px header over a 2x3 grid of 160x56 |
@@ -164,7 +164,7 @@ other wireframe is drawn against whatever split it establishes.
 
 Text slots are subject to the font, not the other way round. There is one font
 and two sizes: `UI_GLYPH_H` 15 with `UI_LINE_H` 16, and `UiTextBig` at 2x
-nearest-neighbour for `UI_GLYPH_BIG_H` 30 ([ui_text.h:18](ui/ui_text.h#L18)).
+nearest-neighbour for `UI_GLYPH_BIG_H` 30 ([ui_text.h:16](ui/ui_text.h#L16)).
 Wireframe text blocks have to be drawn to those heights.
 
 ### The overlays
@@ -174,8 +174,8 @@ current 192px content area:
 
 | Overlay | Rect | Defined at |
 |---|---|---|
-| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:159](ui/bottom_screen.c#L159) (`NOTICE_*`) |
-| quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:29](ui/ui_quickball.h#L29) (`UI_QB_*`) |
+| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:141](ui/bottom_screen.c#L141) (`NOTICE_*`) |
+| quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:25](ui/ui_quickball.h#L25) (`UI_QB_*`) |
 
 They **abut exactly** at y 152 and the strip ends on `UI_CONTENT_H`, because the
 one case where both are up (a catchable shiny) must not tear either border. Both
@@ -276,7 +276,7 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
   past a shorter array. No const-cast, no per-draw conversion, no
   cache-invalidation logic. 3KB of `.bss`.
 - Every entry point clamps against `0..UI_W` / `0..UI_H` exactly the way
-  `UiFillRect` ([ui_draw.c:65](ui/ui_draw.c#L65)) already does, so an off-screen
+  `UiFillRect` ([ui_draw.c:62](ui/ui_draw.c#L62)) already does, so an off-screen
   or oversized request is a no-op rather than an overrun. If `UiClipPush/Pop`
   (`SECOND_SCREEN_PLAN.md` step 1) lands first, they clamp against **the clip**
   instead, or a panel inside a clipped row paints over its neighbours.
@@ -294,7 +294,7 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
 
 The skin's ink, dim, shadow, accent and ground colours as RGB565 constants in
 one place, replacing the ad-hoc `UI_COL_*` block at
-[ui_shell.h:31](ui/ui_shell.h#L31), and taking over `UI_TABBAR_H` /
+[ui_shell.h:37](ui/ui_shell.h#L37), and taking over `UI_TABBAR_H` /
 `UI_CONTENT_H` from [ui_shell.h:14](ui/ui_shell.h#L14). The HP-bar, shiny-gold
 and Poke Ball colours stay where they are: those are the game's own art colours,
 hardcoded from the art for reasons documented at their definitions, and are
@@ -307,18 +307,18 @@ correct as they stand.
 Two function bodies and one colour block change, and about 300 call sites do
 not.
 
-**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:251](ui/ui_draw.c#L251))
+**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:236](ui/ui_draw.c#L236))
 has **14 call sites in seven files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
-encounters view ([view_encounters.c:432](ui/view_encounters.c#L432)), and both
-overlays ([bottom_screen.c:432](ui/bottom_screen.c#L432),
-[ui_quickball.c:197](ui/ui_quickball.c#L197)). Reimplement its body as a
+encounters view ([view_encounters.c:414](ui/view_encounters.c#L414)), and both
+overlays ([bottom_screen.c:466](ui/bottom_screen.c#L466),
+[ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
 `UiNineSlice` of `UI_SHEET_PANEL` and every one of them is reskinned untouched.
 Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
 function a one-line wrapper, so the 8px grid stops being a constraint on
 anything written from here on.
 
-**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:289](ui/ui_draw.c#L289))
+**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:274](ui/ui_draw.c#L274))
 are called **about 198 times**. Return the skin's ink colours instead of reading
 `gStandardMenuPalette` and every label on the screen becomes consistent in one
 edit.
@@ -329,12 +329,12 @@ secondary labels, button outlines and arrow fills, so moving the block into
 `ui_skin.h` with the skin's values retargets all of them in the same edit.
 
 Then drop `top[0] = UiFrameId()` from `UiStateHash()`
-([bottom_screen.c:524](ui/bottom_screen.c#L524)). Once the frame no longer
+([bottom_screen.c:546](ui/bottom_screen.c#L546)). Once the frame no longer
 drives the bottom screen it is a stale input to the repaint hash. `UiFrameId()`
 itself stays: it is still correct, and the top screen still uses the setting.
 
 Replace the in-game `UiClear(UI_COL_BG)` in `Redraw()`
-([bottom_screen.c:679](ui/bottom_screen.c#L679)) with a `UiTileFill` of the
+([bottom_screen.c:727](ui/bottom_screen.c#L727)) with a `UiTileFill` of the
 backdrop. The pre-game `UiClear(0)` a few lines above it stays black: that is
 the blank screen under the title, not a skin surface.
 
@@ -343,10 +343,10 @@ edits at all.** That is the checkpoint worth building to before anything else.
 
 ### The snapshot is on the skin's side
 
-`Redraw()` ([bottom_screen.c:646](ui/bottom_screen.c#L646)) no longer ends with
+`Redraw()` ([bottom_screen.c:696](ui/bottom_screen.c#L696)) no longer ends with
 the tab bar. It paints the still screen (ground, tab, strip, notice, bar), takes
 `UiSnapshot()`, and only then runs `DrawAnimatedLayer()` for the pieces that
-move. An animation step (`RedrawAnimated`, [:754](ui/bottom_screen.c#L754))
+move. An animation step (`RedrawAnimated`, [:754](ui/bottom_screen.c#L789))
 puts a few rects back from the snapshot and redraws only those.
 
 That fits the skin with no extra work: the backdrop and the panels are ground,
@@ -384,13 +384,13 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:188](ui/tab_extra.c#L188)); `DrawBtn` ([tab_map.c:476](ui/tab_map.c#L476)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:845](ui/tab_party.c#L845)) |
-| inline outline | BAG pagers, USE ([tab_bag.c:432](ui/tab_bag.c#L432)) and CANCEL; DEX pagers and BACK ([tab_dex.c:417](ui/tab_dex.c#L417)); PARTY BACK ([tab_party.c:875](ui/tab_party.c#L875)); encounters pagers and BACK ([view_encounters.c:401](ui/view_encounters.c#L401)); THROW ([ui_quickball.c:248](ui/ui_quickball.c#L248)); DISMISS ([bottom_screen.c:488](ui/bottom_screen.c#L488)) |
+| named helper | `DrawButtonH` ([tab_extra.c:161](ui/tab_extra.c#L161)); `DrawBtn` ([tab_map.c:428](ui/tab_map.c#L428)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)) |
+| inline outline | BAG pagers, USE ([tab_bag.c:414](ui/tab_bag.c#L414)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:885](ui/tab_party.c#L885)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:513](ui/bottom_screen.c#L513)) |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX and the encounters view |
 
-The BACK buttons are 38x22 ([tab_party.c:107](ui/tab_party.c#L107)), 42x22
-([tab_dex.c:96](ui/tab_dex.c#L96), and the encounters view, which matched DEX
-on purpose) and 56x20 ([tab_bag.c:108](ui/tab_bag.c#L108), BAG's CANCEL). Add
+The BACK buttons are 38x22 ([tab_party.c:97](ui/tab_party.c#L97)), 42x22
+([tab_dex.c:91](ui/tab_dex.c#L91), and the encounters view, which matched DEX
+on purpose) and 56x20 ([tab_bag.c:98](ui/tab_bag.c#L98), BAG's CANCEL). Add
 one widget to `ui_gfx`:
 
 ```c
@@ -415,7 +415,7 @@ is wrong on two counts now:
 - It bakes the pressed state into the snapshot, and it doubles the full
   repaints every tap costs.
 - The bottom screen reaches the panel in 48-row bands, five frames per picture,
-  top to bottom ([video.c:579](host/video.c#L579)), and a new picture waits for
+  top to bottom ([video.c:558](host/video.c#L558)), and a new picture waits for
   a run already in flight. A full repaint on press shows 1 to 5 frames after the
   touch depending on its row, the tab bar last, and on a tap shorter than five
   frames it holds the release's result back by the remainder.
@@ -426,7 +426,7 @@ icons are:
 1. `UiButton` records each button it draws (rect, label or glyph, state) in a
    small static table, cleared at the top of `Redraw()`.
 2. `ui_draw.c` gains `UiSetPointer(const CtrTouchState *)`, called once per
-   frame from `CtrBottomUpdate` ([bottom_screen.c:775](ui/bottom_screen.c#L775)).
+   frame from `CtrBottomUpdate` ([bottom_screen.c:810](ui/bottom_screen.c#L810)).
 3. `DrawAnimatedLayer` gains a last step, after whichever tenant it ran: while
    the pointer is `touching`, find the recorded button under it, restore its
    rect from the snapshot and draw it in the pressed band.
@@ -438,7 +438,7 @@ icons are:
 
 Mind the touch latch. `sample_touch` holds the last contact point because
 `hidTouchRead` returns `(0,0)` on the release frame
-([host/main.c:96](host/main.c#L96)), which is why every handler opens with
+([host/main.c:107](host/main.c#L107)), which is why every handler opens with
 `if (!t->justReleased) return;`. The press step must gate on `t->touching`, not
 on coordinates alone, or the control under the last tap draws as held forever.
 
@@ -451,7 +451,7 @@ tab bar's five-frame delay reads as sluggish, the follow-up is host-side
 ## Step 6: the shell, then the tabs
 
 **Shell, with both overlays.** `DrawTabBar`
-([bottom_screen.c:620](ui/bottom_screen.c#L620)) currently draws flat
+([bottom_screen.c:661](ui/bottom_screen.c#L661)) currently draws flat
 rectangles. It becomes the bar's ground, a per-cell art state, an icon from
 `icons.png` and the label beneath it, at whatever `UI_TABBAR_H` `shell.png`
 established. The notice and the strip are re-fitted in the same pass, because
@@ -469,14 +469,14 @@ Keep the existing convention of constants derived from each other
 (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`) rather than tabulated twice, and
 check that the touch handler uses the same expression the draw code does.
 PARTY's animated layer restores rects computed from those same constants
-(`UiPartyRedrawAnimated`, [tab_party.c:387](ui/tab_party.c#L387)), so it moves
+(`UiPartyRedrawAnimated`, [tab_party.c:396](ui/tab_party.c#L396)), so it moves
 with the cell or icons get drawn where the cell no longer is.
 
 **The trap specific to re-laying-out these surfaces is that there is no
 clipping.** Every panel width in the tree is hand-measured against the longest
 known game string; BAG's list panel is 24 tiles because that leaves exactly
 108px, the width of the widest item description line in the game
-([tab_bag.c:45](ui/tab_bag.c#L45)). Narrowing any panel that shows game text
+([tab_bag.c:41](ui/tab_bag.c#L41)). Narrowing any panel that shows game text
 means re-measuring that string, or implementing `UiClipPush/Pop` first (step 1
 of `SECOND_SCREEN_PLAN.md`; the blitters already do per-pixel bounds tests, so
 it is roughly four one-line edits and zero extra per-pixel cost).
@@ -488,8 +488,8 @@ it is roughly four one-line edits and zero extra per-pixel cost).
 Modal state lives in file statics that survive a tab switch, so leaving a view
 by tapping another tab and coming back re-enters it: `sDetailOpen` (PARTY),
 `sEntryOpen` (DEX), `sView` (BAG's picker), `sOpen`
-([view_encounters.c:118](ui/view_encounters.c#L118), MAP's encounters view) and
-MAP's fly confirm, `sConfirm` ([tab_map.c:148](ui/tab_map.c#L148)). Known bug,
+([view_encounters.c:107](ui/view_encounters.c#L107), MAP's encounters view) and
+MAP's fly confirm, `sConfirm` ([tab_map.c:127](ui/tab_map.c#L127)). Known bug,
 step 0 of `SECOND_SCREEN_PLAN.md`. Folding the reset into the tab switch is a
 few lines while those files are already open. Out of scope unless explicitly
 taken up.
@@ -513,7 +513,7 @@ animated layer), [ui_quickball.c](ui/ui_quickball.c) /
 
 **Untouched:** the Makefiles, `build_objs.sh`, the `.rsf`, CI, the host side,
 and every `src/` file. `3ds/ui/*.c` is already globbed by
-[build_objs.sh:106](build_objs.sh#L106), and `INCGFX` lines there are already in
+[build_objs.sh:108](build_objs.sh#L108), and `INCGFX` lines there are already in
 `generate_wasm_assets.py`'s scope.
 
 **When this lands, update the documents that describe the code as it is.**
@@ -524,7 +524,7 @@ drawing API, which gains `UiPanel`, `UiButton` and the `ui_gfx` calls and loses
 the "text on a frame must use `UiThemeText()`" rule once frames no longer apply
 here; and section 14, the layout and overlay constants at whatever values
 `shell.png` settled. In code, the comment above the notice's geometry
-([bottom_screen.c:151](ui/bottom_screen.c#L151)) that still calls the content
+([bottom_screen.c:139](ui/bottom_screen.c#L139)) that still calls the content
 height load bearing on this document's say-so.
 
 ---
@@ -547,8 +547,8 @@ bash 3ds/build_objs.sh && make -C 3ds
   visibly depresses and springs back on slide-off; after each pass in step 6,
   that surface matches its wireframe.
 - **Clipping**, which is where a new blitter fails silently rather than loudly:
-  the BAG target picker's cells ([tab_bag.c:441](ui/tab_bag.c#L441)) and the
-  PARTY cells ([tab_party.c:543](ui/tab_party.c#L543)) both draw panels at
+  the BAG target picker's cells ([tab_bag.c:423](ui/tab_bag.c#L423)) and the
+  PARTY cells ([tab_party.c:562](ui/tab_party.c#L562)) both draw panels at
   computed offsets near the screen edge. Watch those two rather than the static
   layouts.
 - **Repaint cost, on the console.** Build with `CTR_DEBUG_MENU` and read
@@ -565,7 +565,7 @@ bash 3ds/build_objs.sh && make -C 3ds
   moves.
 - **Touch parity per surface.** Every control still reachable, and nothing
   tappable that is not drawn: the IV/EV button carries a species check for
-  exactly that reason ([tab_party.c:1053](ui/tab_party.c#L1053)).
+  exactly that reason ([tab_party.c:1063](ui/tab_party.c#L1063)).
 - **On hardware, not only in an emulator** (`AGENTS.md`). The two bugs this
   codebase has hit hardest, the null save-block read and the decompress overrun,
   were both invisible in Azahar.

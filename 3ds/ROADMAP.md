@@ -334,7 +334,7 @@ top scale and turbo binds as the price of an unrelated feature.
 Four things that cost real time and are not recoverable by reading the code:
 
 - **A level cap must gate exp, never the level field.** `CalculateMonStats`
-  (`src/pokemon.c:2840`) recomputes `MON_DATA_LEVEL` from `MON_DATA_EXP` every
+  (`src/pokemon.c:2841`) recomputes `MON_DATA_LEVEL` from `MON_DATA_EXP` every
   time it runs, and it runs from `BoxMonToMon`, evolution, PC deposit and
   withdraw, and item use. Anything that clamped the level would be silently
   undone by the next unrelated call. Exp is the source of truth, so the gates
@@ -567,7 +567,7 @@ bridge functions in game types in `include/link.h`, the way
 `bridge.h` into `src/`.
 
 - `LinkVSync()` (line 2094) becomes the pump. It already runs once per frame from
-  `VBlankIntr()` (`src/main.c:427`) whenever `gWirelessCommType == 0` and
+  `VBlankIntr()` (`src/main.c:452`) whenever `gWirelessCommType == 0` and
   `gLinkVSyncDisabled` is clear, which is exactly the cable case.
 - Drive `gLink.state` from UDS connection status instead of the SIO handshake:
   `LINK_STATE_HANDSHAKE` completes when `total_nodes` matches and holds steady
@@ -594,7 +594,7 @@ inventing a checksum to satisfy it.
 
 ## C.3: LINK tab on the bottom screen
 
-`UI_TAB_LINK` added to `enum UiTab` and to `sTabs[]` (`3ds/ui/bottom_screen.c:56`)
+`UI_TAB_LINK` added to `enum UiTab` and to `sTabs[]` (`3ds/ui/bottom_screen.c:58`)
 with flag `0`, always available, like BAG. The tab bar already divides by the
 visible count, so a fifth tab needs no layout change.
 
@@ -612,7 +612,7 @@ an automatic scan-then-host would suffer from.
 
 ## C: Files
 
-- `3ds/host/link.c` (new), plus `HOST_SRCS` in `3ds/Makefile:42`.
+- `3ds/host/link.c` (new), plus `HOST_SRCS` in `3ds/Makefile:43`.
 - `3ds/bridge.h`: the transport seam, stdint only, next to the existing
   `Ctr3dsGetClock` block.
 - `src/link.c`: one `#if PLATFORM_3DS` block over the transport functions.
@@ -687,12 +687,12 @@ A sweep for other instances came back clean:
 
 | Loop | Waits on | Status |
 |---|---|---|
-| `party_menu.c:553` | `IsDma3ManagerBusyWithBgCopy()` directly | was the bug, fixed at source |
+| `party_menu.c:559` | `IsDma3ManagerBusyWithBgCopy()` directly | was the bug, fixed at source |
 | `berry_tag_screen.c:201` | via `FreeTempTileDataBuffersIfPossible()` | already safe |
 | `pokeblock.c:506` | via `FreeTempTileDataBuffersIfPossible()` | already safe |
 | `credits.c:429` | nothing, self-advancing | safe |
 | `battle_tower.c:2318/2528` | bounded RNG retry | safe |
-| `VBlankIntrWait()` x2 | no-op stub, `rp2350/bios.c:198` | `ereader_helpers.c` only, unreachable |
+| `VBlankIntrWait()` x2 | no-op stub, `rp2350/bios.c:215` | `ereader_helpers.c` only, unreachable |
 
 `FreeTempTileDataBuffersIfPossible()` (`src/menu.c:1760`) already carried an
 upstream `#if WASM || RP2350` inline-drain for this same problem, evidence the

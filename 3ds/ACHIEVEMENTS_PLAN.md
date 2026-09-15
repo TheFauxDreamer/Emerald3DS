@@ -251,13 +251,13 @@ tab.**
   1. **A user-supplied ROM to hash.** Emerald3DS has no ROM, so it would have to
      claim the retail hash.
   2. **Game RAM at retail offsets, passed straight through.** Here
-     `EWRAM_DATA`/`IWRAM_DATA` are plain `.bss` (`include/gba/defines.h:10-17`).
+     `EWRAM_DATA`/`IWRAM_DATA` are plain `.bss` (`include/gba/defines.h:10-18`).
      RA's Emerald set follows `gSaveBlock1Ptr`/`gSaveBlock2Ptr`, which move on
      every warp (`src/load_save.c:77`), so it would need a retail-address
      translation layer that rewrites pointer values. Building it needs a GBA
      `.map`, and CI has no agbcc.
 - Other costs: curl + mbedtls portlibs (only citro2d/citro3d/ctru are linked,
-  `3ds/Makefile:114`; the `.rsf` already grants `http:C`/`soc:U`/`ssl:C`), a
+  `3ds/Makefile:122`; the `.rsf` already grants `http:C`/`soc:U`/`ssl:C`), a
   network thread, swkbd login, and text-only badges because there is no libpng.
 - The provider interface below is where an RA provider would plug in later.
   Nothing else in the UI would change.
@@ -312,7 +312,7 @@ bring its own per-logical-frame `rc_client_do_frame` hook in
   latency is under a second for about 50 entries. Dex counts walk the dex only on
   their own turn.
 - **Adopting a playthrough (important pitfall).** The key is
-  `T1_READ_32(gSaveBlock2Ptr->playerTrainerId)` (the same read `3ds/tweaks.c:423`
+  `T1_READ_32(gSaveBlock2Ptr->playerTrainerId)` (the same read `3ds/tweaks.c:384`
   uses). A new ID is adopted **only on a frame where
   `gMain.callback2 == CB2_Overworld`**. A New Game sets the trainer ID during
   Birch's speech, while the previous save's flags are still loaded until
@@ -324,7 +324,7 @@ bring its own per-logical-frame `rc_client_do_frame` hook in
   unlocked from your save". After that, each new unlock gets its own toast,
   queued in a small ring and shown one after another.
 - **One event hook.** "Catch a shiny" is a fenced `#if PLATFORM_3DS` line in
-  `Cmd_givecaughtmon` (`src/battle_script_commands.c:10094`). It calls
+  `Cmd_givecaughtmon` (`src/battle_script_commands.c:10110`). It calls
   `Ctr3dsAchOnCaught(mon)`, which checks `IsMonShiny` and sets that
   achievement's event bit. This is the same pattern as the existing tweak hooks
   in that file.
@@ -365,14 +365,14 @@ once, on the debug page.
   one at about :742 and the two close paths). `CtrAchDrain()` is added to
   `io_main` and to `CtrIoExit` (`3ds/host/io_thread.c`) and declared in
   `io_thread.h`. Load at boot beside `CtrSettingsLoad()` (main.c about :772). Add
-  `host/achievements.c` to `HOST_SRCS` (`3ds/Makefile:54`). Both sides'
+  `host/achievements.c` to `HOST_SRCS` (`3ds/Makefile:55`). Both sides'
   `achievements.o` are safe: the game objects go to `3ds/build/obj` and the host
   objects to `3ds/build`.
 
 ### TROPHY tab (`3ds/ui/tab_trophy.c`)
 
 - Shell wiring (cheatsheet "Adding a tab"): `UI_TAB_TROPHY` goes **before**
-  `UI_TAB_EXTRA` in `enum UiTab` (`ui_shell.h:19`), so EXTRA stays rightmost. Add a
+  `UI_TAB_EXTRA` in `enum UiTab` (`ui_shell.h:24`), so EXTRA stays rightmost. Add a
   `{ "TROPHY", 0 }` row to `sTabs[]`, which is always available like BAG and
   EXTRA. Add a `case` to both switches in `bottom_screen.c` (Redraw and
   `CtrBottomUpdate`), declare `UiTrophyDraw/Touch/StateKey` in `ui_shell.h`, and
@@ -422,12 +422,12 @@ once, on the debug page.
   - `UiOverlayActive()` also returns TRUE for the toast, because the party grid's
     top-row icons sit inside y 0..40 (`CellTop(0)` is 0, or 24 with the cheat
     tag strip). `DrawCell` then bakes them via `OverlayIconFrame()`
-    (`tab_party.c:323`).
+    (`tab_party.c:311`).
   - `DrawAnimatedLayer` skips the party redraw while the toast is up, the same as
-    for the strip: the party branch at `bottom_screen.c:887` gains
+    for the strip: the party branch at `bottom_screen.c:737` gains
     `!UiAchToastActive()`.
   - The single-core branch in `CtrBottomUpdate`, `else if (!UiQuickBallActive())`
-    at `bottom_screen.c:1044`, gains `!UiAchToastActive()` too. Otherwise it asks
+    at `bottom_screen.c:864`, gains `!UiAchToastActive()` too. Otherwise it asks
     for cheap redraws that draw nothing for the party and upload an unchanged
     screen. The second-core branch at `:1031` needs no change, because it
     already asks `UiOverlayActive()`.

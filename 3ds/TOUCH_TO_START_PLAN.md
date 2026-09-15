@@ -28,10 +28,10 @@ What the exploration found:
   but O, U, C and H have to be drawn to the same rules.
 - The blink is `SpriteCB_PressStartCopyrightBanner` (`src/title_screen.c:409`):
   it toggles `sprite->invisible` every 16 frames while `sAnimate` is TRUE.
-- START is taken in `Task_TitleScreenPhase3` (`src/title_screen.c:780`), which
+- START is taken in `Task_TitleScreenPhase3` (`src/title_screen.c:822`), which
   only runs while `gMain.callback2 == MainCB2`.
 - The bottom screen paints its pre-game screen in `Redraw()`'s `!sInGame` branch
-  (`3ds/ui/bottom_screen.c:666`), and `CtrBottomUpdate()` drops every touch while
+  (`3ds/ui/bottom_screen.c:713`), and `CtrBottomUpdate()` drops every touch while
   `!sInGame` (`:795`). `SoftReset` is a no-op on this port, so the title is only
   ever reached before `sInGame` latches.
 - The top screen defaults to 1.5x, so the banner shows 10.5px tall. Drawn at 2x

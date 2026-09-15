@@ -66,7 +66,7 @@ What the game already does:
 - **The islands:** all four maps and encounters are complete in this tree.
 - **The items stay put:** all four are key items, which never leave the bag
   once in it. They can't be deposited (`TryDepositItem`,
-  `src/item_menu.c:2252`), tossed or sold, and no script removes them.
+  `src/item_menu.c:2253`), tossed or sold, and no script removes them.
 - **Catch flags:** each island's script sets a flag only on a catch:
   `FLAG_CAUGHT_LATIAS_OR_LATIOS`, `FLAG_CAUGHT_MEW`, `FLAG_CAUGHT_HO_OH` and
   `FLAG_CAUGHT_LUGIA`. Deoxys uses `FLAG_BATTLED_DEOXYS`, which despite its name

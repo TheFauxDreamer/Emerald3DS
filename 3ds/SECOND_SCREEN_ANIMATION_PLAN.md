@@ -65,7 +65,7 @@ turns on core 0.
 
 `7db93d4` moved the rasteriser to core 2 (core 1 on an Old 3DS), started just
 before `CtrBottomUpdate` and collected after it, so the two overlap
-([host/main.c:710](host/main.c#L710) to [:735](host/main.c#L735)). Measured on a
+([host/main.c:703](host/main.c#L703) to [:735](host/main.c#L727)). Measured on a
 New 3DS XL at that commit: rasteriser ~4.5 ms mean and 8.6 ms worst, full paint
 2.4 to 3.9 ms, about 10 ms spare per frame, and no dropped frames in five
 minutes of play. The budget those compromises were protecting is no longer the
@@ -99,12 +99,12 @@ Visible losses, oldest first. "Before" is how the code was first written.
 
 | # | What | Before | Now | What the player sees today |
 |---|---|---|---|---|
-| 1 | Bottom upload sliced (`66e6da5`) | whole screen in one frame | 48 rows a frame, five frames per picture ([host/video.c:579](host/video.c#L579)); a new picture waits for a run in flight ([:741](host/video.c#L741)) | every bottom animation shows at 12 fps at most; a tap or tab switch lands up to 5 frames late, up to 9 if a run is in flight, and wipes down in bands |
-| 2 | Icon pace (`daa46b6`) | swap every 6 frames, `ICON_ANIM_FRAMES`, the pace of Emerald's own party menu | every 12 frames on the shared clock ([ui/bottom_screen.c:245](ui/bottom_screen.c#L245)) | icons visibly slower than the in-game party menu |
-| 3 | Shiny twinkle (`daa46b6`) | every frame, `NOTICE_CYCLE` 64 frames: each size held 4/4/6/4/4 frames, then dark for 42; corners 16 frames apart | 8 steps of 12 frames ([:293](ui/bottom_screen.c#L293), [:352](ui/bottom_screen.c#L352)); each size held 12 frames; corners 24 apart | five changes a second |
-| 4 | Shiny glint (`daa46b6`) | a slanted 4 px gold band crossing the panel behind the text over 24 frames (`DrawSweep`, `NOTICE_SWEEP_END`, `SWEEP_W`, `SWEEP_SLANT`) | removed; a two-step "burst" stands in ([:298](ui/bottom_screen.c#L298)) | the effect is gone |
-| 5 | Party frozen under an overlay (`ccc5fd7`, `0d221a3`, `5219f5b`, `92f3947`) | icons kept animating under the shiny panel, and bars kept sliding | all six icons baked at frame 0 while the shiny panel or the quick-throw strip is up ([ui/tab_party.c:584](ui/tab_party.c#L584), [:889](ui/tab_party.c#L889)), and the HP block baked at whatever value it had ([:620](ui/tab_party.c#L620)) | the grid stops moving at every action select of a catchable battle, and **a bar that starts sliding under an overlay stalls near its old value** until something else forces a repaint. That part is a bug, not a trade-off |
-| 6 | BATTLE ANIM toggle (`92f3947`) | none | EXTRA page 3, default ON ([ui/tab_extra.c:431](ui/tab_extra.c#L431)) | its hint, "off = smoother battles", stops being true |
+| 1 | Bottom upload sliced (`66e6da5`) | whole screen in one frame | 48 rows a frame, five frames per picture ([host/video.c:558](host/video.c#L558)); a new picture waits for a run in flight ([:741](host/video.c#L733)) | every bottom animation shows at 12 fps at most; a tap or tab switch lands up to 5 frames late, up to 9 if a run is in flight, and wipes down in bands |
+| 2 | Icon pace (`daa46b6`) | swap every 6 frames, `ICON_ANIM_FRAMES`, the pace of Emerald's own party menu | every 12 frames on the shared clock ([ui/bottom_screen.c:202](ui/bottom_screen.c#L202)) | icons visibly slower than the in-game party menu |
+| 3 | Shiny twinkle (`daa46b6`) | every frame, `NOTICE_CYCLE` 64 frames: each size held 4/4/6/4/4 frames, then dark for 42; corners 16 frames apart | 8 steps of 12 frames ([:293](ui/bottom_screen.c#L233), [:352](ui/bottom_screen.c#L275)); each size held 12 frames; corners 24 apart | five changes a second |
+| 4 | Shiny glint (`daa46b6`) | a slanted 4 px gold band crossing the panel behind the text over 24 frames (`DrawSweep`, `NOTICE_SWEEP_END`, `SWEEP_W`, `SWEEP_SLANT`) | removed; a two-step "burst" stands in ([:298](ui/bottom_screen.c#L236)) | the effect is gone |
+| 5 | Party frozen under an overlay (`ccc5fd7`, `0d221a3`, `5219f5b`, `92f3947`) | icons kept animating under the shiny panel, and bars kept sliding | all six icons baked at frame 0 while the shiny panel or the quick-throw strip is up ([ui/tab_party.c:600](ui/tab_party.c#L600), [:889](ui/tab_party.c#L899)), and the HP block baked at whatever value it had ([:620](ui/tab_party.c#L639)) | the grid stops moving at every action select of a catchable battle, and **a bar that starts sliding under an overlay stalls near its old value** until something else forces a repaint. That part is a bug, not a trade-off |
+| 6 | BATTLE ANIM toggle (`92f3947`) | none | EXTRA page 3, default ON ([ui/tab_extra.c:383](ui/tab_extra.c#L383)) | its hint, "off = smoother battles", stops being true |
 
 Efficiency changes from the same commits stay exactly as they are, because they
 cost nothing visible and reverting them would only cost time: the snapshot and
@@ -136,11 +136,11 @@ on core 2; full paint 2.4 to 3.9 ms; animation step 0.9 to 1.2 ms; bottom copy
 therefore about 2 ms.
 
 Where it lands matters more than how big it is. Today the bottom copy and
-transfer run **after** the join ([host/video.c:741](host/video.c#L741)), so they
+transfer run **after** the join ([host/video.c:733](host/video.c#L733)), so they
 are serial on core 0. They read only the UI's own framebuffer, which is final
 once `CtrBottomUpdate` returns, and the rasteriser never touches it or the
 bottom texture. Moved **before** the wait at
-[host/video.c:693](host/video.c#L693), the upload sits inside the ~4.2 ms that
+[host/video.c:683](host/video.c#L683), the upload sits inside the ~4.2 ms that
 core 0 currently spends waiting (`ppu.wait`).
 
 | Case | Core 0 inside the overlap | Frame, estimated |
@@ -151,7 +151,7 @@ core 0 currently spends waiting (`ppu.wait`).
 
 Two caveats:
 - **Fast-forward.** `CtrBottomUpdate` runs on subframe 0 but the render is only
-  started on the presenting subframe ([host/main.c:699](host/main.c#L699)), so
+  started on the presenting subframe ([host/main.c:696](host/main.c#L696)), so
   under fast-forward the paint overlaps nothing. That is not a blocker, since the
   rasteriser only runs on presented frames, but it is not free there.
 - **An Old 3DS** runs the rasteriser on core 1 at 80% of that core. It is not
@@ -204,48 +204,48 @@ int Ctr3dsRasteriserOnOwnCore(void);
 ```
 
 Implement it in [host/video.c](host/video.c) as `sPpuCore >= 0`
-([:181](host/video.c#L181)). `ppu_thread_start()` ([:263](host/video.c#L263))
+([:181](host/video.c#L165)). `ppu_thread_start()` ([:263](host/video.c#L246))
 settles that value inside `CtrVideoInit()`, which `main()` runs before
 `CtrBottomInit()`, so it is constant for the session. Every later change applies
 only when it returns TRUE.
 
-**Upload.** In `CtrVideoPresent()` ([host/video.c:665](host/video.c#L665)), on
+**Upload.** In `CtrVideoPresent()` ([host/video.c:642](host/video.c#L642)), on
 the second-core path:
 
 - When `CtrBottomIsDirty()`, upload the whole bottom screen **before**
-  `LightEvent_Wait(&sPpuDone)` ([:693](host/video.c#L693)), then
+  `LightEvent_Wait(&sPpuDone)` ([:693](host/video.c#L683)), then
   `CtrBottomClearDirty()`.
-- Use the existing `upload()` ([:527](host/video.c#L527)) with `sBotStage`,
+- Use the existing `upload()` ([:527](host/video.c#L509)) with `sBotStage`,
   `BOT_TEX_W`, `CtrBottomFramebuffer()`, `CTR_BOTTOM_WIDTH` x
   `CTR_BOTTOM_HEIGHT`, `&sBotTex` and `kProfBot`. That is exactly the call
   `66e6da5` replaced, so the profile stage names do not change.
 - The top upload stays after the join; it needs the rasteriser's output.
-- The inline path keeps `snapshot_bottom()` ([:587](host/video.c#L587)) and
-  `upload_bottom_slice()` ([:600](host/video.c#L600)) as they are.
+- The inline path keeps `snapshot_bottom()` ([:587](host/video.c#L565)) and
+  `upload_bottom_slice()` ([:600](host/video.c#L578)) as they are.
 - Rewrite the `upload()` comment ("The TOP screen's path, and now only that",
-  [:523](host/video.c#L523)) and the `BOT_CHUNK_ROWS` comment
-  ([:579](host/video.c#L579)) to say which path uses which, and why.
+  [:523](host/video.c#L490)) and the `BOT_CHUNK_ROWS` comment
+  ([:579](host/video.c#L558)) to say which path uses which, and why.
 
 ### Stage 2: the clock, and the party under an overlay
 
-**Clock.** `UI_ANIM_STEP_FRAMES` ([ui/bottom_screen.c:245](ui/bottom_screen.c#L245))
+**Clock.** `UI_ANIM_STEP_FRAMES` ([ui/bottom_screen.c:202](ui/bottom_screen.c#L202))
 becomes a function of the guard: 6 on the second-core path, 12 otherwise. The
 icons already flip on `UiAnimStepped()`
-([ui/tab_party.c:248](ui/tab_party.c#L248)), so they get the game's pace back
+([ui/tab_party.c:240](ui/tab_party.c#L240)), so they get the game's pace back
 with no change of their own.
 
 **Party under an overlay.** On the second-core path:
 
-- `DrawCell()` ([ui/tab_party.c:584](ui/tab_party.c#L584)) and the detail view
-  ([:889](ui/tab_party.c#L889)) bake `sIconFrame` rather than frame 0 while
+- `DrawCell()` ([ui/tab_party.c:600](ui/tab_party.c#L600)) and the detail view
+  ([:889](ui/tab_party.c#L899)) bake `sIconFrame` rather than frame 0 while
   `UiOverlayActive()`.
 - `CtrBottomUpdate()` asks for a **full** repaint whenever `UiPartyTick()` moves
   anything while `UiOverlayActive()`
-  ([ui/bottom_screen.c:881](ui/bottom_screen.c#L881)). Today that branch skips
-  the cheap redraw under the strip ([:894](ui/bottom_screen.c#L894)), and under
+  ([ui/bottom_screen.c:917](ui/bottom_screen.c#L917)). Today that branch skips
+  the cheap redraw under the strip ([:894](ui/bottom_screen.c#L742)), and under
   the shiny panel it runs a cheap redraw that draws only sparkles and uploads an
   unchanged screen.
-- The baked HP block ([ui/tab_party.c:620](ui/tab_party.c#L620)) already reads
+- The baked HP block ([ui/tab_party.c:639](ui/tab_party.c#L639)) already reads
   the sliding value, so the bars slide again and the stall is gone.
 - The overlay is painted after the tab, so nothing can draw through it. The rule
   that the snapshot holds nothing that moves still holds: while an overlay is
@@ -256,17 +256,17 @@ with no change of their own.
 
 On the second-core path only:
 
-- `NoticeTick()` ([ui/bottom_screen.c:311](ui/bottom_screen.c#L311)) counts
+- `NoticeTick()` ([ui/bottom_screen.c:318](ui/bottom_screen.c#L318)) counts
   frames rather than steps.
 - Restore the per-frame twinkle: `NOTICE_CYCLE` 64 and the original
   `TwinkleSize` thresholds from `38d8870` (`git show 38d8870 --
   3ds/ui/bottom_screen.c`), as a second table beside the step-based one
-  ([:352](ui/bottom_screen.c#L352)). Keep the cycle a power of two, for the
+  ([:352](ui/bottom_screen.c#L275)). Keep the cycle a power of two, for the
   reason the comment above `NOTICE_CYCLE` gives.
 - Return TRUE only on frames where some corner's size actually changes, so a
   frame with nothing new uploads nothing.
 - Restore `DrawSweep()` from the same commit, drawn in `DrawNotice()`
-  ([:428](ui/bottom_screen.c#L428)) behind the rule and the text while the frame
+  ([:428](ui/bottom_screen.c#L461)) behind the rule and the text while the frame
   count is under `NOTICE_SWEEP_END` (24). Each glint frame asks for a full
   repaint, plus one more after the last so the band leaves the snapshot before
   the cheap sparkle path resumes.
@@ -276,7 +276,7 @@ The single-core path keeps the step-based twinkle and the burst unchanged.
 
 ### Stage 4: the hint and the docs
 
-- **BATTLE ANIM** ([ui/tab_extra.c:431](ui/tab_extra.c#L431)): on the
+- **BATTLE ANIM** ([ui/tab_extra.c:383](ui/tab_extra.c#L383)): on the
   second-core path the hint reads "off = still in battle" instead of "off =
   smoother battles". The toggle, its setting and its default are unchanged.
 - **Cheatsheet section 7:** "So there is one clock", "Keep the step period
@@ -294,26 +294,26 @@ The single-core path keeps the step-based twinkle and the burst unchanged.
   status note already records.
 - **Comments that state a single-core rule as universal**, rewritten to say which
   path they describe:
-  - the clock comment at [ui/bottom_screen.c:245](ui/bottom_screen.c#L245) and
-    the repaint figures at [:762](ui/bottom_screen.c#L762);
+  - the clock comment at [ui/bottom_screen.c:202](ui/bottom_screen.c#L202) and
+    the repaint figures at [:762](ui/bottom_screen.c#L621);
   - "Half the game's pace is the price" at
-    [ui/tab_party.c:174](ui/tab_party.c#L174), and the 4.9 ms at
-    [:297](ui/tab_party.c#L297);
-  - [ui/ui_draw.h:157](ui/ui_draw.h#L157), [ui/view_encounters.c:107](ui/view_encounters.c#L107)
-    and [ui/ui_shell.h:80](ui/ui_shell.h#L80).
+    [ui/tab_party.c:150](ui/tab_party.c#L150), and the 4.9 ms at
+    [:297](ui/tab_party.c#L252);
+  - [ui/ui_draw.h:152](ui/ui_draw.h#L152), [ui/view_encounters.c:95](ui/view_encounters.c#L95)
+    and [ui/ui_shell.h:73](ui/ui_shell.h#L73).
 - **Comments that are simply out of date**, fixed while the files are open:
-  - [ui/ui_shell.h:84](ui/ui_shell.h#L84) says the shiny notice is the only
+  - [ui/ui_shell.h:77](ui/ui_shell.h#L77) says the shiny notice is the only
     overlay; the quick-throw strip is one too.
-  - [ui/ui_shell.h:103](ui/ui_shell.h#L103) says the icons change every six
-    frames, and [:122](ui/ui_shell.h#L122) says only sliding slots are redrawn;
+  - [ui/ui_shell.h:94](ui/ui_shell.h#L94) says the icons change every six
+    frames, and [:122](ui/ui_shell.h#L113) says only sliding slots are redrawn;
     `UiPartyRedrawAnimated` redraws all six.
-  - [ui/tab_party.c:569](ui/tab_party.c#L569), [:574](ui/tab_party.c#L574) and
-    [:887](ui/tab_party.c#L887) name `UiPartyRedrawIcons`, since renamed.
+  - [ui/tab_party.c:494](ui/tab_party.c#L494), [:574](ui/tab_party.c#L498) and
+    [:887](ui/tab_party.c#L780) name `UiPartyRedrawIcons`, since renamed.
   - [SECOND_SCREEN_CHEATSHEET.md:575](SECOND_SCREEN_CHEATSHEET.md#L575) names
     `UiPartyIconOnly()`, now `UiPartyAnimOnly()`, and says a slide forces a full
     rebuild; it takes the cheap path now.
   - "Dark for most of the cycle" at
-    [ui/bottom_screen.c:350](ui/bottom_screen.c#L350) is wrong for the step
+    [ui/bottom_screen.c:273](ui/bottom_screen.c#L273) is wrong for the step
     version, where each corner is lit five steps of eight.
 
 ## Verification

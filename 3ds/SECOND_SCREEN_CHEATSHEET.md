@@ -14,7 +14,7 @@ The bottom screen is **game-side C**. It is compiled with Emerald's own headers
 into `libpokeemerald.a`, so `gPlayerParty`, `GetMonData`, `gItems`, the fonts
 and the mon icons are ordinary symbols. Nothing scrapes RAM and nothing is
 reimplemented. It paints into one static `320x240` RGB565 buffer
-(`sFb`, [ui_draw.c:22](ui/ui_draw.c#L22)), and the host uploads that buffer to a
+(`sFb`, [ui_draw.c:23](ui/ui_draw.c#L23)), and the host uploads that buffer to a
 PICA200 texture only when the UI says it changed. There is no heap, no view
 stack, no widget library, and no text clipping. Everything is a static in a
 file, drawn with rectangles and blits at hand-measured coordinates.
@@ -32,8 +32,8 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
      CtrVideoRenderBegin()           3ds/host/video.c     snapshot video state,
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)
-     sample_touch(&touch)            3ds/host/main.c:84
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:922   OVERLAPS the rasteriser
+     sample_touch(&touch)            3ds/host/main.c:96
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:810   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        tab-bar tap  OR  UiXTouch(touch)
                                        UiPartyTick()      HP bar animation
@@ -90,7 +90,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:818](host/main.c#L818),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:811](host/main.c#L811),
   after audio init and before `AgbMain()`.
 
 ---
@@ -173,7 +173,7 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:137](ui/bottom_screen.c#L137)) is the
+- The **shiny notice** ([bottom_screen.c:129](ui/bottom_screen.c#L129)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -265,14 +265,14 @@ sixth, so the bar is full. Do not add a seventh. `SECOND_SCREEN_PLAN.md`
 proposes converting EXTRA into a launcher instead, which is now the only way to
 add a view.
 
-1. Add to `enum UiTab` in [ui_shell.h:19](ui/ui_shell.h#L19), before `UI_TAB_COUNT`.
+1. Add to `enum UiTab` in [ui_shell.h:24](ui/ui_shell.h#L24), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:59](ui/bottom_screen.c#L59):
+3. Add a row to `sTabs[]` at [bottom_screen.c:58](ui/bottom_screen.c#L58):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:825](ui/bottom_screen.c#L825))
-   and to the one in `CtrBottomUpdate()` ([:998](ui/bottom_screen.c#L998)).
+4. Add a `case` to the `switch` in `Redraw()` ([:825](ui/bottom_screen.c#L729))
+   and to the one in `CtrBottomUpdate()` ([:998](ui/bottom_screen.c#L901)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
-   glob in [build_objs.sh:113](build_objs.sh#L113). **See the naming hazard in
+   glob in [build_objs.sh:116](build_objs.sh#L116). **See the naming hazard in
    section 12.**
 
 Tab visibility mirrors `BuildNormalStartMenu()` (`src/start_menu.c`): a tab
@@ -283,7 +283,7 @@ gated on a progress flag must not appear before the player has it.
 
 ## 6. Touch
 
-`CtrTouchState` ([bridge.h:46](bridge.h#L46)):
+`CtrTouchState` ([bridge.h:47](bridge.h#L47)):
 
 ```c
 typedef struct {
@@ -294,7 +294,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:957](ui/bottom_screen.c#L957)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:851](ui/bottom_screen.c#L851)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -316,7 +316,7 @@ in order:
 
 Two things follow, and both are load bearing:
 
-1. **`sample_touch` latches the last contact point** ([host/main.c:100](host/main.c#L100)).
+1. **`sample_touch` latches the last contact point** ([host/main.c:111](host/main.c#L111)).
    `hidTouchRead` returns `(0,0)` on the release frame, so the coordinates are
    held. That also means `t->x`/`t->y` keep the last tap's position forever
    after release.
@@ -329,25 +329,25 @@ Two things follow, and both are load bearing:
 Acting on release rather than press means a touch that slides off a control does
 not fire it. Keep that convention.
 
-Hit testing is one helper, [ui_draw.c:606](ui/ui_draw.c#L606):
+Hit testing is one helper, [ui_draw.c:948](ui/ui_draw.c#L948):
 
 ```c
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:679](ui/tab_extra.c#L679), which tests the
+(see `UiExtraTouch` at [tab_extra.c:856](ui/tab_extra.c#L856), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
-as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:246](ui/tab_dex.c#L246).
+as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L237).
 
 ### Press and hold
 
-`UiHoldRepeat` ([ui_draw.c:619](ui/ui_draw.c#L619)) is the one exception to the
+`UiHoldRepeat` ([ui_draw.c:959](ui/ui_draw.c#L959)) is the one exception to the
 `justReleased` guard, and it is why the guard moved down a few lines in the two
-list tabs. Both scroll controls in DEX ([tab_dex.c:486](ui/tab_dex.c#L486)) and
-BAG ([tab_bag.c:602](ui/tab_bag.c#L602)) run through it:
+list tabs. Both scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)) and
+BAG ([tab_bag.c:577](ui/tab_bag.c#L577)) run through it:
 
 ```c
 static UiHold sHoldUp, sHoldDn;   // one counter per control, beside its state
@@ -386,20 +386,20 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   dedicated button (BAG's USE, MAP's YES/NO confirm).
 - **One column, several tenants.** The party detail view's left column shows the
   stat block, a tapped move's details, or the IV/EV spread
-  ([tab_party.c:516](ui/tab_party.c#L516)), never two at once, while the moves
+  ([tab_party.c:761](ui/tab_party.c#L761)), never two at once, while the moves
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:612](ui/tab_party.c#L612), dim frame off, doubled accent outline on). A
+  ([:612](ui/tab_party.c#L851), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
-  ([tab_party.c:816](ui/tab_party.c#L816)). Without it the toggle would flip
+  ([tab_party.c:1063](ui/tab_party.c#L1063)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in three different places:
-  [tab_party.c:106](ui/tab_party.c#L106) (38x22),
-  [tab_dex.c:96](ui/tab_dex.c#L96) (42x22),
-  [tab_bag.c:104](ui/tab_bag.c#L104) (56x20 cancel).
+  [tab_party.c:97](ui/tab_party.c#L97) (38x22),
+  [tab_dex.c:91](ui/tab_dex.c#L91) (42x22),
+  [tab_bag.c:98](ui/tab_bag.c#L98) (56x20 cancel).
 - **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`) are file
   statics that survive a tab switch, so leaving a detail view by tapping another
   tab and coming back re-enters it. Fixing this is step 0 of
@@ -420,7 +420,7 @@ Do not conflate them. Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:652](ui/bottom_screen.c#L652)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:541](ui/bottom_screen.c#L541)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -455,20 +455,20 @@ MAP's fly row is the one other thing that depends on the party, and
   That is why `top[4]` is a dispatch, not an XOR of everything.
 - **Never share a slot between two keys.** Two contributions that happen to
   cancel show up as a panel that stops updating, which is the exact failure the
-  hash exists to prevent. See the comment at [tab_map.c:583](ui/tab_map.c#L583).
+  hash exists to prevent. See the comment at [tab_map.c:634](ui/tab_map.c#L634).
 - **Most new views need no key at all.** Static data (a learnset, a type chart,
   base stats) changes only under the view's own touch handler, which already
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:1032](ui/tab_party.c#L1032)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1022](ui/tab_party.c#L1022)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
   lands the last hit would leave the panel stale. Six reads is the right price
   for a panel that is up; it is the wrong price on the four tabs that cannot
   show it.
-- **`GetMonData` decrypts in place** (`src/pokemon.c:3745`). Hashing many mons
+- **`GetMonData` decrypts in place** (`src/pokemon.c:3746`). Hashing many mons
   through it costs a decrypt round trip each. `MON_DATA_PERSONALITY`,
   `MON_DATA_OT_ID` and `MON_DATA_SANITY_HAS_SPECIES` sit before
   `MON_DATA_ENCRYPT_SEPARATOR` (`include/pokemon.h:8-19`) and answer from the
@@ -823,7 +823,7 @@ whole 256-entry BG palette, not a 16-colour bank.
 **Everything that is read uses one font at one size.** `gFontNormalLatinGlyphs`
 at `UI_GLYPH_H` 15. There is no larger Latin font in the ROM, so for a headline
 that must be read rather than looked for, `UiTextBig` scales those same glyphs
-2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four times the
+2x nearest-neighbour ([ui_text.h:32](ui/ui_text.h#L32)); it costs four times the
 fill per glyph, so it is not a general-purpose call. Pair it with
 `UiTextBigWidth` for centring, and `UI_GLYPH_BIG_H` (30) for row pitch.
 
@@ -866,7 +866,7 @@ invisible text. Do not "simplify" `ui_text.c` back onto it.
 **There is no clipping, wrapping, ellipsis or truncation.** Every panel width in
 the tree is hand-measured against the longest known game string. For example
 BAG's list panel is 24 tiles because that leaves exactly 108px, the width of the
-widest item description line in the game ([tab_bag.c:45](ui/tab_bag.c#L45)).
+widest item description line in the game ([tab_bag.c:41](ui/tab_bag.c#L41)).
 
 That does not survive player-authored text: nicknames, OT names, box names. If
 you add a view showing any of those, either measure and truncate yourself or
@@ -891,7 +891,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:86
+static bool8 SaveDataLive(void);   // bottom_screen.c:79
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -936,7 +936,7 @@ in its own input, so an overrun lands in the neighbouring statics.
 that decompresses to 8192 bytes while `gMonFrontPicTable` reports the size of
 one frame, and the 6KB overrun repainted the cached window-frame palette. The
 symptom was every other tab's border changing colour. See
-[ui_draw.c:275](ui/ui_draw.c#L275) and [tab_map.c:125](ui/tab_map.c#L125).
+[ui_draw.c:376](ui/ui_draw.c#L376) and [tab_map.c:131](ui/tab_map.c#L131).
 
 ---
 
@@ -945,7 +945,7 @@ symptom was every other tab's border changing colour. See
 Two things write: the BAG tab, and the quick-throw strip. Their gates are the
 design, not a detail.
 
-### Out of battle: four gates ([tab_bag.c:153](ui/tab_bag.c#L153))
+### Out of battle: four gates ([tab_bag.c:148](ui/tab_bag.c#L148))
 
 ```c
 static bool8 CanUseItemNow(void)
@@ -1006,7 +1006,7 @@ lives in `UiQuickBallItem()` where those constants are. That is the exception to
 
 ### Classify by the game's tables, not by item id
 
-`ItemTargeting()` ([tab_bag.c:188](ui/tab_bag.c#L188)) drives everything off
+`ItemTargeting()` ([tab_bag.c:181](ui/tab_bag.c#L181)) drives everything off
 `GetItemEffectType()` and `GetItemBattleUsage()`, so it classifies every item of
 a class the same way and cannot fall behind the data. Items needing a move
 choice as well as a target are refused outright rather than defaulting to slot 0.
@@ -1017,7 +1017,7 @@ screen, so driving one from here would fight the overworld for BG layers.
 
 ### Leaving the overworld
 
-`DoFly()` ([tab_map.c:315](ui/tab_map.c#L315)) is the reference for replacing
+`DoFly()` ([tab_map.c:313](ui/tab_map.c#L313)) is the reference for replacing
 `gMain.callback2` from the bottom screen. It is safe only because
 `CtrBottomUpdate` runs at the end of a frame. Before leaving you **must** call:
 
@@ -1068,7 +1068,7 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ### Object-name collision hazard
 
-[build_objs.sh:113](build_objs.sh#L113) globs `3ds/ui/*.c` non-recursively and
+[build_objs.sh:116](build_objs.sh#L116) globs `3ds/ui/*.c` non-recursively and
 writes `$OBJ/$(basename).o` into the **same** object directory as all of
 `src/*.c`, with `3ds/ui` globbed last. A file named `3ds/ui/pokedex.c` would
 silently overwrite `src/pokedex.o` and delete the game's Pokedex from the
@@ -1112,7 +1112,7 @@ value without writing the file back out during the load that produced it.
    with explicit `pad`, or `settings_put()` writes uninitialised stack to the
    card. Choose the sense so that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:544](ui/tab_extra.c#L544)) in a bit range nothing else
+   `UiExtraStateKey()` ([:544](ui/tab_extra.c#L678)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1147,12 +1147,12 @@ padding back with it.**
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:329](host/main.c#L329)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:334](host/main.c#L334)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
 - **A setting behind `CTR_DEBUG_MENU` must be neutralised, not just hidden**
-  ([bridge.h:195](bridge.h#L195)). Hiding the control leaves the value, and two
+  ([bridge.h:207](bridge.h#L207)). Hiding the control leaves the value, and two
   of the debug settings persist, so a shipping build could inherit "show every
   tab" or a muted PSG channel from a debug session with no control to undo it.
   Guard in **`Apply`**, not in `Get`: `CtrSettingsLoad()` calls `Apply`
@@ -1241,7 +1241,7 @@ appears.
 | A battle partner's Pokemon look like the player's | A party view that does not ask `UiAllySlot` (section 10). In a partner battle slots 3-5 are the partner's. |
 | A battler is drawn in front of the textbox during a move's effect (top screen) | An OBJ-window sprite rendered as an ordinary one. `rp2350/ppu.c` implements the OBJ window now; see `docs/PORTING.md`, the reference-inherited defects. |
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
-| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:297](tweaks.c#L297). |
+| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:278](tweaks.c#L278). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | A playthrough gets another save's achievements | Conditions were read while the save in memory belonged to someone else. A New Game sets the trainer ID in Birch's speech while the old save's flags are still loaded, until `NewGameInitData()` clears them; a soft reset reloads the card's save under whatever was being played. So a playthrough is adopted only on a `CB2_Overworld` frame, and nothing is evaluated unless the save block's trainer ID matches it ([achievements.c](achievements.c), `Current` and `Adopt`). |
 | Saved achievements come back as the wrong ones | An achievement's id was changed or reused. The id is its bit in `achievements.bin`, so ids are permanent: a new achievement takes the next unused id, and a retired one's id is never handed out again. Row order is free. The EXTRA debug row counts duplicate ids, and so does `3ds/check_achievements_md.py`. |

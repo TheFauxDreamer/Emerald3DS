@@ -104,8 +104,8 @@ static void sample_touch(CtrTouchState *t)
     uint32_t held = hidKeysHeld();
     int touching = (held & KEY_TOUCH) != 0;
 
-    // Each hidScanInput() call clears the touch position on each scan and fills
-    // it only while the panel is pressed. Thus, on the release frame,
+    // Each hidScanInput() call clears the touch position, and fills it only
+    // while the panel is pressed. Thus, on the release frame,
     // hidTouchRead returns (0,0) and not the last contact point. Keep the last
     // point here. Without this, every tap acts at the top-left corner.
     if (touching)
