@@ -932,6 +932,9 @@ static void Adopt(u32 id)
 {
     bool8 known, seeded;
 
+    // The per-save settings use the same rule (3ds/host/settings.c).
+    CtrSettingsAdopt(id);
+
     sPlayerId = id;
     sLive = TRUE;
     sCursor = 0;

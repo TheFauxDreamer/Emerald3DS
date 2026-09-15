@@ -985,8 +985,9 @@ limitation rather than an oversight, and any new battle write inherits it.
 
 ### Persisted state that is not save data
 
-The last ball thrown is a byte of `settings.bin`, not of the save block. The
-write is one fenced line in `HandleAction_UseItem()` (`src/battle_util.c`),
+The last ball thrown is in `settings.bin`, not in the save block. Each save has
+its own value, in its record (see section 13). The write is one fenced line in
+`HandleAction_UseItem()` (`src/battle_util.c`),
 which is the single point every route the player can choose a ball by passes
 through -- the d-pad bag, the touch BAG tab and the strip all arrive as
 `B_ACTION_USE_ITEM`.
@@ -1106,11 +1107,17 @@ value without writing the file back out during the load that produced it.
 
    Range-check inside `Apply`, never trust the caller: a corrupt settings byte
    must leave the default standing.
-3. **`3ds/host/settings.c`**: append a `uint8_t` to `struct CtrSettings`, bump
-   `SETTINGS_VERSION`, add a `SETTINGS_Vn_SIZE` short-read migration, add the
-   `extern` and the load/save lines. Keep the struct's every byte spoken for
-   with explicit `pad`, or `settings_put()` writes uninitialised stack to the
-   card. Choose the sense so that a zero byte means the old default.
+3. **`3ds/host/settings.c`**: first decide if the value belongs to the console
+   or to the save.
+   - **Per console:** use a byte of `pad[3]` in `struct CtrSettings`, and add
+     the `extern` and the load/save lines.
+   - **Per save:** use a byte of `pad[2]` in `struct CtrSaveSettings`, and add
+     the value to `save_get()`, `save_apply()` and `save_is_default()`.
+
+   Then bump `SETTINGS_VERSION`, and let the load accept the old version. Keep
+   every byte of both structs in use, with explicit `pad`. Otherwise
+   `settings_put()` writes uninitialized stack to the card. Choose the sense so
+   that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
    `UiExtraStateKey()` ([:544](ui/tab_extra.c#L678)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
@@ -1122,7 +1129,7 @@ The file is `sdmc:/3ds/emerald3ds/settings.bin`. It is opened once at boot and
 rewritten in place, on a `CTR_SETTINGS_QUIET_MS` debounce so a pass through the
 settings costs one write. Two things it deliberately does NOT copy from
 `save.c`, both because they were measured on a console and found expensive for
-no gain at 24 bytes:
+no gain at this size:
 
 - **No `.tmp` and rename.** The payload is one sector, so there is no torn
   state to protect against, and the magic/version check turns anything odd into
@@ -1134,14 +1141,31 @@ A failed write is also not retried: one attempt per change, or a read-only card
 would turn one tap into an FS attempt on every frame for the rest of the
 session.
 
-The struct is currently **24 bytes at v9 with no padding left**. Every version
-from v5 on has grown by claiming bytes its predecessor wrote as explicit zero
-padding, which is why v6, v8 and v9 needed no migration at all -- same size, and
-each new field means at zero exactly what that file already meant. That padding
-existed to stop the compiler rounding the struct up to its 4-byte alignment and
-`settings_put()` then putting uninitialised stack on the card. There is none
-left, so **the next field added grows the struct to 25 and must bring explicit
-padding back with it.**
+The struct is **164 bytes at v11**:
+
+- Bytes 0 to 27 are the v10 layout. They hold the per-console values, and the
+  last three bytes are `pad`.
+- Then comes the per-save table: a clock, a count, and `CTR_SETTINGS_SAVES` (8)
+  records of 16 bytes. Each record has two bytes of `pad`.
+
+From v5 on, most versions used bytes that the version before wrote as zero
+padding. Thus v6, v8 and v9 needed no migration. The padding stops the compiler
+from rounding a struct up to its 4-byte alignment. The `_Static_assert` lines in
+`settings.c` fail if a struct gets implicit padding.
+
+**Six values are per save**: EXP All, the level cap, the randomizer, the bag
+sort, the phone-call switch and the last ball. Each save has a record, keyed on
+its full 32-bit trainer ID. When all 8 records are in use, a new save replaces
+the least recently used record, as in the achievements store.
+
+- At boot, only the per-console values load. The six stay at their defaults.
+- On the first overworld frame of a save, `Adopt()` in `3ds/achievements.c`
+  calls `CtrSettingsAdopt()`. That applies the save's record, or the defaults
+  if the save has no record.
+- A save with only default values gets no record, so it does not replace the
+  record of a different save.
+- A file from v10 or older has one set of values for all saves. The first save
+  adopted takes that set. After that, the six bytes in the v10 part are zero.
 
 **Three settings deliberately break the pattern**, and all three are worth
 knowing before you copy it:

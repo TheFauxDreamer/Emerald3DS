@@ -329,6 +329,13 @@ a v3 file is **migrated**, not discarded, since the v4 fields are appended and
 every v3 offset is unchanged. Discarding would have silently reset the player's
 top scale and turbo binds as the price of an unrelated feature.
 
+Version 11 makes the tweaks per save. Before v11, a randomizer that the player
+set for one save was also on for every other save. Now each save has a record,
+keyed on its trainer ID. The record holds EXP All, the level cap, the
+randomizer, the bag sort, the phone-call switch and the last ball. The first
+save that a v11 build loads takes the values of the older file. Every other save
+starts at the defaults.
+
 ## Facts worth recording
 
 Four things that cost real time and are not recoverable by reading the code:

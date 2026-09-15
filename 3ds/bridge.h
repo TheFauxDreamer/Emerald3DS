@@ -223,6 +223,8 @@ int  Ctr3dsGetShowAllTabs(void);
 // not in the save block. A tapped setting must persist even if the player does
 // not save, and settings.bin is written after the tap.
 //
+// Each save has its own values (see CtrSettingsAdopt below).
+//
 // The randomizer has no seed field. It comes from the save's trainer ID. Thus a
 // mapping is stable for one playthrough and different between playthroughs. A
 // toggle off and on does not change it.
@@ -264,7 +266,8 @@ int  Ctr3dsGetPhoneCallsOff(void);
 // FIRST_BALL..LAST_BALL in include/constants/items.h, a game header that
 // bridge.h cannot include. A copy of the numbers here could drift from the
 // originals. UiQuickBallItem() (3ds/ui/ui_quickball.c) checks the value where
-// the real constants are. Zero means that nothing was thrown yet.
+// the real constants are. Zero means that nothing was thrown yet. Each save has
+// its own value.
 void Ctr3dsSetLastBall(int item);
 int  Ctr3dsGetLastBall(void);
 
@@ -305,6 +308,18 @@ int  Ctr3dsGetBattleAnimOff(void);
 // must poll it, because its button is not the only thing that changes it.
 void Ctr3dsSetShinyTest(int on);
 int  Ctr3dsGetShinyTest(void);
+
+// ---- per-save settings -----------------------------------------------------
+//
+// EXP All, the level cap, the randomizer, the bag sort, the phone-call switch
+// and the last ball belong to a save, not to the console. The file
+// 3ds/host/settings.c keeps one record for each save, keyed on the save's full
+// 32-bit trainer ID. A save with no record gets the defaults.
+//
+// The game side calls this on the first overworld frame of a save (Adopt in
+// 3ds/achievements.c). The host then applies the values of that save. Main
+// thread only.
+void CtrSettingsAdopt(uint32_t playerId);
 
 // ---- achievements store ----------------------------------------------------
 //

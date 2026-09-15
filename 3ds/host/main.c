@@ -306,7 +306,7 @@ int Ctr3dsGetShowAllTabs(void)
 }
 
 // Gameplay tweaks (EXTRA page 2), with the same Apply/Set/Get split as above.
-// Apply changes the value with no write, for CtrSettingsLoad(). Set also
+// Apply changes the value with no write, for 3ds/host/settings.c. Set also
 // writes. Get reads. Apply range-checks the two enums, like
 // Ctr3dsApplyTurboBind: a bad settings byte must keep the default.
 //
