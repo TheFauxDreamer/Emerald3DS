@@ -136,24 +136,23 @@ void RLUnCompVram(const u32 *src, void *dest) { RlUnComp(src, dest); }
 static void AffineTerms(s16 xScale, s16 yScale, u16 rotation,
                         s32 *pa, s32 *pb, s32 *pc, s32 *pd)
 {
-    // 65536 = one full turn, NOT 256.
+    // The divisor is 65536, one full turn, not 256.
     //
-    // GBATEK describes ObjAffineSet's angle as "8bit = 360 degrees", which reads
-    // like the parameter is 0..255. It is not: the field is a u16 and the BIOS
-    // indexes its 256-entry sin/cos table with alpha >> 8, so a full turn is
-    // 0x10000. web/app.js got this wrong and this file faithfully copied it.
+    // GBATEK says that the angle of ObjAffineSet is "8bit = 360 degrees",
+    // which seems to mean 0..255. But the field is a u16, and the BIOS uses
+    // alpha >> 8 as an index into its 256-entry sin/cos table. Thus a full
+    // turn is 0x10000.
     //
-    // The failure mode is why it survived so long. Callers always pass multiples
-    // of 256 -- sprite.c does `(rotation + (frameCmd->rotation << 8)) & ~0xFF`,
-    // and pokedex_cry_screen.c literally writes `needle->rotation * 256` -- so
-    // dividing by 256 made every angle an exact whole number of turns. sin came
-    // out 0 and cos 1 EVERY time: a clean identity matrix, never garbage. Affine
-    // scaling still worked (that is a separate term), so the Game Freak intro
-    // letters looked right and nothing pointed at rotation.
+    // Callers always give multiples of 256. For example, sprite.c uses
+    // `(rotation + (frameCmd->rotation << 8)) & ~0xFF`, and
+    // pokedex_cry_screen.c uses `needle->rotation * 256`. With a divisor of
+    // 256, each angle is a whole number of turns: sin is 0 and cos is 1, an
+    // identity matrix. The affine scale is a separate term, so it still works,
+    // and only rotation fails.
     //
-    // Visible effect: no affine sprite has ever rotated. The Poke Ball slid
-    // sideways during a catch instead of rolling, and the Pokedex cry meter
-    // needle never moved.
+    // With the wrong divisor, no affine sprite rotates. The Poke Ball slides
+    // during a catch and does not roll, and the needle of the Pokedex cry meter
+    // does not move.
     float angle = rotation * (float)(2.0 * M_PI) / 65536.0f;
     float s = sinf(angle) * 256.0f;
     float c = cosf(angle) * 256.0f;

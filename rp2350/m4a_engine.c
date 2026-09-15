@@ -1,30 +1,31 @@
-// C reimplementation of src/m4a_1.s -- the GBA "m4a" (MP2K) sound engine's
-// assembly core: the song command interpreter and the PCM mixer.
+// A C version of src/m4a_1.s, the assembly core of the GBA "m4a" (MP2K) sound
+// engine: the song command interpreter and the PCM mixer.
 //
-// The pokeemerald tree keeps the high-level engine in C (src/m4a.c) but the hot
-// core lives in hand-written ARM/Thumb assembly. This file reimplements every
-// symbol that assembly exports, in portable C, so the real m4a.c engine path
-// can run on a target that cannot execute it.
+// The pokeemerald tree keeps the high-level engine in C (src/m4a.c), but the
+// hot core is hand-written ARM and Thumb assembly. This file is a portable C
+// version of each symbol that the assembly exports. Thus the real m4a.c engine
+// can run on a target that cannot execute that assembly.
 //
-// WHY a reimplementation exists at all: the RP2350's Cortex-M33 is Thumb-2 only
-// and physically cannot run ARMv4T ARM-mode code. That reason does not apply
-// everywhere -- see rp2350/m4a_port.h -- and this file is the half that a
-// target able to assemble the original is expected to drop.
+// The reason for this file: the Cortex-M33 of the RP2350 can execute only
+// Thumb-2, not ARMv4T ARM-mode code. That reason does not apply to all targets
+// (see rp2350/m4a_port.h). A target that can assemble the original does not use
+// this file.
 //
-// The mixer renders into gSoundInfo.pcmBuffer exactly like the GBA DirectSound
-// path (signed-8-bit, two PCM_DMA_BUF_SIZE halves: first = right, second =
-// left). What happens to that buffer afterwards is m4a_mix.c's business.
+// The mixer renders into gSoundInfo.pcmBuffer as the GBA DirectSound path does:
+// signed 8-bit, two PCM_DMA_BUF_SIZE halves, first right, then left. The file
+// m4a_mix.c handles the buffer after that.
 //
-// Fidelity notes vs. the asm:
-//  - The asm mixes 4 samples per 32-bit word with a rotate/accumulate trick and
-//    discards inter-byte carries. We accumulate each output sample as a plain
-//    signed-8-bit add with wraparound -- the standard faithful C model of the
-//    MP2K mixer (bit-identical except in the rare hard-overflow carry case).
-//  - maxLines (the per-scanline render deadline) is ignored: we always mix every
-//    active channel in full. There is no VCOUNT race to lose.
-//  - Compressed (TONEDATA_TYPE_CMP) and reverse (TONEDATA_TYPE_REV) samples go
-//    through MixChannelSpecial, which decodes the BDPCM block format rather
-//    than transliterating the reference's pointer arithmetic.
+// Differences from the assembly:
+// - The assembly mixes 4 samples in each 32-bit word with a rotate and
+//   accumulate method, and discards the carries between bytes. This file adds
+//   each output sample as a plain signed 8-bit add that wraps. That is the
+//   usual correct C model of the MP2K mixer. It is bit-identical, except for
+//   the rare case of a hard overflow carry.
+// - This file ignores maxLines (the render deadline for each scanline), and
+//   always mixes each active channel fully. There is no VCOUNT race to lose.
+// - Compressed (TONEDATA_TYPE_CMP) and reverse (TONEDATA_TYPE_REV) samples go
+//   through MixChannelSpecial. It decodes the BDPCM block format, and does not
+//   copy the pointer arithmetic of the original.
 
 #include "global.h"
 #include "gba/m4a_internal.h"
@@ -36,17 +37,8 @@
 #define TONEDATA_TYPE_CMP        0x20
 #define WAVE_DATA_FLAG_LOOP      0xC0
 
-// How many sample frames the PSG is rendered in at a time.
-//
-// Kept small deliberately. These buffers are stereo and on the stack, and the
-// mono wrappers nest one inside another, so a large chunk costs four times what
-// it looks like. The RP2350 port's SDK stack defaults to 2 KB and calls the
-// mono path from the frame hook, which a 256-frame chunk would come close to
-// exhausting. At 64 frames the deepest path uses 512 bytes.
-//
-// The cost of chunking is re-reading the PSG registers once per chunk, which is
-// idempotent within a frame: the only side effect is consuming the NRx4 trigger
-// bit, and that happens on the first chunk exactly as it should.
+// The PSG render chunk, in sample frames. See the note on PSG_CHUNK in
+// m4a_mix.c.
 #define PSG_CHUNK 64
 
 // SOUND_INFO_PTR is a macro (gba/defines.h) for the SoundInfo pointer slot.
@@ -111,15 +103,15 @@ void SoundMainBTM(void)
 
 // One accumulated sample, into both halves of the PCM buffer.
 //
-// The add wraps at s8 rather than saturating, which is what the reference does:
-// it mixes four samples per 32-bit word and discards the inter-byte carries. So
-// five channels summing past +-127 fold to the opposite sign, and the waveform
-// takes a full-scale step that no peak counter can see -- the result is still
-// within +-127 either way.
+// The add wraps at s8, and does not saturate, as the original does. The
+// original mixes four samples in each 32-bit word, and discards the carries
+// between bytes. Thus five channels with a sum past +-127 go to the opposite
+// sign. The waveform makes a full-scale step that no peak counter can see,
+// because the result stays in +-127.
 //
-// Counted here, in the one place all three mixer loops go through, because
-// "does that actually happen in this game" is a question about frequency and
-// guessing at it has not worked.
+// This counts the wraps here, because all three mixer loops come through this
+// place. The question is how often it occurs in this game, and only a count can
+// answer it.
 static inline void MixAccum(s8 *bufR, s8 *bufL, s32 i, s32 addR, s32 addL)
 {
     s32 sumR = bufR[i] + addR;
@@ -135,16 +127,16 @@ static inline void MixAccum(s8 *bufR, s8 *bufL, s32 i, s32 addR, s32 addL)
 // ----------------------------------------------------------------------------
 // Compressed (BDPCM) and reverse-playback sample generation.
 //
-// A compressed wave stores 64 samples per 33-byte block: one verbatim sample,
-// then 32 bytes of 4-bit deltas indexing gDeltaEncodingTable, low nibble before
-// high. The high nibble of the first packed byte is unused, because 1 base plus
-// 63 deltas already fills the block.
+// A compressed wave stores 64 samples in each 33-byte block: one verbatim
+// sample, then 32 bytes of 4-bit deltas. Each delta is an index into
+// gDeltaEncodingTable, low nibble before high. The high nibble of the first
+// packed byte is not used, because 1 base and 63 deltas fill the block.
 //
-// The reference (SoundMainRAM_Unk1/Unk2 in src/m4a_1.s) rewrites
-// chan->currentPointer into a sample index and caches the decoded block in
-// chan->xpi. This does the same work index-first, which is what the format
-// wants anyway, and keys the cache on the wave and block instead so two
-// channels reading different compressed samples cannot see each other's buffer.
+// The original (SoundMainRAM_Unk1/Unk2 in src/m4a_1.s) changes
+// chan->currentPointer into a sample index, and keeps the decoded block in
+// chan->xpi. This does the same work by index, which suits the format. Its
+// cache key is the wave and the block. Thus two channels that read different
+// compressed samples cannot see the buffer of the other.
 // ----------------------------------------------------------------------------
 
 static const struct WaveData *sDecodedWav;
@@ -164,7 +156,7 @@ static s32 BdpcmSample(const struct WaveData *wav, u32 index)
 
         sDecodeBuf[k++] = (s8)acc;
 
-        // Only the low nibble of the first packed byte carries a delta.
+        // Only the low nibble of the first packed byte has a delta.
         packed = *p++;
         acc = (s8)(acc + gDeltaEncodingTable[packed & 0xF]);
         sDecodeBuf[k++] = (s8)acc;
@@ -185,9 +177,9 @@ static s32 BdpcmSample(const struct WaveData *wav, u32 index)
     return sDecodeBuf[index & 63];
 }
 
-// One sample by index, honouring compression and playback direction. Clamped
-// rather than trusted: the interpolator reads index+1, which is past the end on
-// the final sample of a non-looping wave.
+// One sample by index, with compression and playback direction. The index is
+// clamped, because the interpolator reads index+1, which is past the end on the
+// last sample of a wave that does not loop.
 static s32 SpecialSample(const struct SoundChannel *chan,
                          const struct WaveData *wav, s32 index)
 {
@@ -207,10 +199,10 @@ static s32 SpecialSample(const struct SoundChannel *chan,
     return wav->data[index];
 }
 
-// The compressed/reverse counterpart of the plain sample loops below. Same
-// interpolation and same loop handling; only the fetch differs, so a fixed-rate
-// channel falls out of it too (inc of one whole sample leaves the interpolation
-// weight at zero).
+// The compressed and reverse version of the plain sample loops below. It has
+// the same interpolation and the same loop handling, and only the fetch is
+// different. Thus it also works for a fixed-rate channel: an inc of one whole
+// sample keeps the interpolation weight at zero.
 static void MixChannelSpecial(struct SoundInfo *si, struct SoundChannel *chan,
                               s8 *bufR, s8 *bufL, s32 n, s32 envR, s32 envL)
 {
@@ -275,8 +267,8 @@ static void MixChannelSpecial(struct SoundInfo *si, struct SoundChannel *chan,
 
     chan->fw = fw;
     chan->count = count;
-    // Kept in step for anything that inspects it, the telemetry included, even
-    // though this path indexes rather than walks.
+    // Kept in step for all code that reads it, the telemetry also, but this
+    // path uses an index and does not walk the pointer.
     chan->currentPointer = wav->data + (size - count);
 }
 
@@ -486,39 +478,38 @@ apply_env:
 }
 
 // ----------------------------------------------------------------------------
-// SoundMainRAM: clear this frame's window of both PCM halves, then mix every
-// active channel into it. Restores the SoundInfo lock (ident) on exit.
+// SoundMainRAM: clear the window of this frame in both PCM halves, then mix
+// each active channel into it. Restores the SoundInfo lock (ident) on exit.
 // ----------------------------------------------------------------------------
-// Which of the pcmDmaPeriod windows of pcmBuffer was written last, and the
-// window the reverb takes its delayed tap from. See SoundMain.
+// The dma argument is the window of pcmBuffer that this frame writes. The tap
+// argument is the window that the reverb takes its delayed tap from. See
+// SoundMain.
 static void MixAllChannels(struct SoundInfo *si, s8 *dma, const s8 *tap, s32 n)
 {
-    // The frame starts from the reverb feedback rather than from silence,
-    // whenever a reverb depth is set.
+    // The frame starts from the reverb feedback, not from silence, when a
+    // reverb depth is set.
     //
-    // The previous claim here was that Emerald never configures reverb because
-    // m4aSoundInit passes 0. That is true of the INITIAL mode and false of
-    // everything after it: MPlayStart calls m4aSoundMode(songHeader->reverb)
-    // for any song whose header sets SOUND_MODE_REVERB_SET (src/m4a.c:734), and
-    // 479 of Emerald's 529 songs are built with -R50 (sound/songs/midi/midi.cfg).
-    // So nearly all of the soundtrack asks for reverb 50 and was getting none.
+    // The m4aSoundInit function sets no reverb, but MPlayStart calls
+    // m4aSoundMode(songHeader->reverb) for each song whose header sets
+    // SOUND_MODE_REVERB_SET (src/m4a.c:734). Of the 529 songs in Emerald, 479
+    // are built with -R50 (sound/songs/midi/midi.cfg). Thus almost all of the
+    // music uses reverb 50.
     //
-    // The pass is the reference's (SoundMainRAM_Reverb, src/m4a_1.s): seed each
-    // sample with the scaled sum of FOUR taps, being left and right at two
-    // DIFFERENT positions in the DMA ring. ipatix/agbplay implements the same
-    // thing as
-    //     (rbuf[pos].l + rbuf[pos].r + rbuf[pos2].l + rbuf[pos2].r) * intensity / 4
-    // over a delay line sized (rate / fps) * numAgbBuffers -- several frames,
-    // not one.
+    // This pass is the one of the original (SoundMainRAM_Reverb, src/m4a_1.s).
+    // It sets each sample to the scaled sum of four taps: left and right at two
+    // different positions in the DMA ring. The ipatix/agbplay player does the
+    // same thing as:
     //
-    // This port used to render into a single window and take BOTH taps from it,
-    // doubling the current one. The gain came out identical, which is why the
-    // comment here used to call the missing delay unimportant. It is not: two
-    // taps at different delays is a reverb, and one tap at 16.7 ms fed back is
-    // a comb filter with a notch every 60 Hz. That colours everything
-    // metallically, moves the apparent balance between instruments, and smears
-    // notes together -- on 479 of Emerald's 529 songs, which are built with
-    // -R50 (sound/songs/midi/midi.cfg).
+    //   (rbuf[pos].l + rbuf[pos].r + rbuf[pos2].l + rbuf[pos2].r)
+    //       * intensity / 4
+    //
+    // It uses a delay line of (rate / fps) * numAgbBuffers samples, which is
+    // several frames, not one.
+    //
+    // Two taps at different delays make a reverb. One tap at 16.7 ms with
+    // feedback makes a comb filter, with a notch every 60 Hz. That gives all
+    // sounds a metal color, changes the balance between the instruments, and
+    // joins notes together.
     s32 reverb = gM4aReverbOn ? si->reverb : 0;
 
     if (reverb == 0)
@@ -539,7 +530,7 @@ static void MixAllChannels(struct SoundInfo *si, s8 *dma, const s8 *tap, s32 n)
             s32 l2 = tap[i + PCM_DMA_BUF_SIZE];
             s32 v = ((r + l + r2 + l2) * reverb) >> 9;
 
-            // The reference's rounding fixup, kept verbatim.
+            // The rounding fix of the original, kept verbatim.
             if (v & 0x80)
                 v += 1;
 
@@ -571,18 +562,19 @@ void SoundMain(void)
 
     si->CgbSound();
 
-    // Render into a rotating window of pcmBuffer, exactly as the GBA's DMA
-    // double-buffering does. There is no DMA here, so the rotation feeds
-    // nothing -- it exists so the reverb has a delay line with real history in
-    // it rather than one frame of its own output.
+    // Render into a rotating window of pcmBuffer, as the DMA double buffer of
+    // the GBA does. There is no DMA here, so nothing reads the rotation. It
+    // exists so that the reverb has a delay line with real history, not one
+    // frame of its own output.
     //
-    // pcmDmaPeriod is PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank (1584 / 224 = 7),
-    // so the delayed tap lands about 100 ms back, which is a reverb. Taking it
-    // from the same window made it 16.7 ms, which is a comb filter.
+    // The pcmDmaPeriod value is PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank, which
+    // is 1584 / 224 = 7. Thus the delayed tap is about 100 ms back, which makes
+    // a reverb. A tap from the same window would be 16.7 ms back, which makes a
+    // comb filter.
     //
-    // The window comes from Rp2350MixWindowOffset() rather than from a counter
-    // of our own, because the mixer seam has to read the SAME window this wrote
-    // and only one of the two is replaceable. See the transcription there.
+    // The window comes from Rp2350MixWindowOffset(), not from a counter in this
+    // file. The mixer interface must read the same window that this wrote, and
+    // only one of the two is replaceable. See the copy of the assembly there.
     {
         s32 n = si->pcmSamplesPerVBlank;
         s32 period = si->pcmDmaPeriod;
@@ -592,9 +584,9 @@ void SoundMain(void)
         if (period < 1)
             period = 1;
 
-        // The NEXT window round the ring holds the oldest data in it, which is
-        // the position the reference's `addne r7, r5, r8` picks, wrapping to
-        // window 0 exactly where its `cmp r4, 0x2` special case does.
+        // The next window in the ring holds the oldest data. That is the
+        // position that `addne r7, r5, r8` in the original selects. It wraps to
+        // window 0 at the same point as its `cmp r4, 0x2` special case.
         old = cur + n;
         if (old >= period * n)
             old = 0;
@@ -615,18 +607,18 @@ void m4aSoundVSync(void)
     if (si == NULL || si->ident - ID_NUMBER > 1)
         return;
 
-    // The counter half of the reference's m4aSoundVSync, and only that half.
+    // The counter half of m4aSoundVSync in the original, and only that half.
     //
-    // The rest of it re-arms the two DirectSound DMA channels, which is
-    // meaningless with no DMA engine: the mixer seam drains pcmBuffer directly.
-    // The counter is not meaningless, because it is what sequences the window
-    // SoundMain renders into -- see Rp2350MixWindowOffset. It used to be absent
-    // entirely, which pinned the window at 0 and left the reverb with no delay
-    // line to tap.
+    // The rest of it arms the two DirectSound DMA channels again, which has no
+    // meaning with no DMA engine: the mixer interface reads pcmBuffer directly.
+    // The counter has a meaning, because it sets the window that SoundMain
+    // renders into (see Rp2350MixWindowOffset). Without it, the window stays at
+    // 0, and the reverb has no delay line.
     //
-    // Counts down to 1 and reloads, matching `subs r1, 1 / bgt / reload`: a
-    // counter that starts at 0 goes negative on the first tick and is reloaded,
-    // which is how the reference recovers from an uninitialised one too.
+    // It counts down to 1 and loads again, as `subs r1, 1 / bgt / reload` does.
+    // A counter that starts at 0 goes negative on the first tick and loads
+    // again. That is also how the original recovers from a counter that is not
+    // initialized.
     counter = (s32)si->pcmDmaCounter - 1;
     if (counter <= 0)
         counter = si->pcmDmaPeriod;
@@ -987,16 +979,17 @@ void ply_note(u32 note_cmd, struct MusicPlayerInfo *mplayInfo, struct MusicPlaye
 
     if (cgbType != 0)
     {
-        // A CGB voice gets exactly one channel, indexed by its type (1..4),
-        // instead of the pool search the DirectSound path does below: the GBA
-        // has one square-1, one square-2, one wave and one noise generator, so
+        // A CGB voice gets exactly one channel, with its type (1..4) as the
+        // index. The DirectSound path below searches a pool, but the GBA has
+        // one square-1, one square-2, one wave and one noise generator. Thus
         // there is nothing to search for.
         //
-        // struct CgbChannel and struct SoundChannel are deliberately overlaid
-        // (statusFlags, priority, track, frequency and wav/wavePointer all sit
-        // at identical offsets, and both are 0x40 bytes), which is why the
-        // reference drives both kinds through one code path from here on. The
-        // cast mirrors that; the build already uses -fno-strict-aliasing.
+        // The structs CgbChannel and SoundChannel overlay each other on
+        // purpose. The fields statusFlags, priority, track, frequency and
+        // wav/wavePointer are at the same offsets, and both structs are 0x40
+        // bytes. Thus the original drives both kinds through one code path from
+        // here on. The cast does the same. The build already uses
+        // -fno-strict-aliasing.
         struct CgbChannel *cgb = si->cgbChans;
 
         if (cgb == NULL)
@@ -1004,10 +997,10 @@ void ply_note(u32 note_cmd, struct MusicPlayerInfo *mplayInfo, struct MusicPlaye
 
         chan = (struct SoundChannel *)(cgb + (cgbType - 1));
 
-        // Steal rules, from ply_note in src/m4a_1.s: a free or already
-        // releasing channel is taken outright, otherwise this note has to
-        // outrank the one playing. Equal priority is broken by track address,
-        // so a later track cannot cut off an earlier one.
+        // Steal rules, from ply_note in src/m4a_1.s. A free channel, or one
+        // that is already in release, is taken. If not, this note must have a
+        // higher priority than the one that plays. At equal priority, the track
+        // address decides, so a later track cannot stop an earlier one.
         {
             u8 sf = chan->statusFlags;
 
@@ -1088,27 +1081,23 @@ chan_found:;
         clear_modM(track);
     TrkVolPitSet(mplayInfo, track);
 
-    // One 32-bit store in the reference (ply_note, m4a_1.s): SoundChannel's
-    // gateTime/midiKey/velocity/priority at 0x10..0x13 are copied wholesale
-    // from MusicPlayerTrack's gateTime/key/velocity/runningStatus at
-    // 0x04..0x07, with priority overwritten by the computed value two
-    // instructions later. Hand-copying that word as individual fields lost the
-    // two in the middle.
+    // The original does this with one 32-bit store (ply_note, m4a_1.s). It
+    // copies gateTime, key, velocity and runningStatus of MusicPlayerTrack at
+    // 0x04..0x07 to gateTime, midiKey, velocity and priority of SoundChannel at
+    // 0x10..0x13. Two instructions later, it overwrites priority with the
+    // calculated value. Thus these fields must all be copied.
     //
-    // chan->velocity is the one that silenced the port. ChnVolSetAsm multiplies
-    // by it, so leaving it at the zero-initialised 0 made rightVolume and
-    // leftVolume 0 for every note ever played. Everything else looked perfect:
-    // song playing on 8 tracks, channels live, envelopeVolume climbing to 0xFF,
-    // real sample data under currentPointer, and every output sample
-    // multiplied by nothing.
+    // The chan->velocity field is necessary for sound. ChnVolSetAsm multiplies
+    // by it, so a velocity of 0 makes rightVolume and leftVolume 0 for each
+    // note.
     //
-    // chan->midiKey is not cosmetic either: ply_endtie matches on it to find
-    // the channel to release, so a permanent 0 meant tied notes were never
-    // released.
+    // The chan->midiKey field is necessary too. The ply_endtie command finds
+    // the channel to release by it, so with a key of 0, tied notes never
+    // release.
     //
-    // The other two packed stores in the same routine, attack/decay/sustain/
-    // release and pseudoEchoVolume/pseudoEchoLength, are already unpacked
-    // correctly below; this was the only one missed.
+    // The two other packed stores in the same routine are
+    // attack/decay/sustain/release and pseudoEchoVolume/pseudoEchoLength. The
+    // code below already unpacks them.
     chan->gateTime = track->gateTime;
     chan->midiKey  = track->key;
     chan->velocity = track->velocity;
@@ -1132,23 +1121,23 @@ chan_found:;
 
     if (cgbType != 0)
     {
-        // The CGB tail of ply_note. Deliberately no `count`: a PSG note has no
-        // sample to run out of, it plays until the length counter or the
+        // The CGB end of ply_note. It has no `count`, on purpose: a PSG note
+        // has no sample that can end. It plays until the length counter or the
         // envelope stops it.
         struct CgbChannel *cgb = (struct CgbChannel *)chan;
         u8 ps = tone->pan_sweep;
 
         cgb->length = tone->length;
 
-        // pan_sweep is one byte doing two jobs. Bit 7 set means it encodes a
-        // PAN value, so there is no sweep to take; an all-zero sweep field
-        // likewise means none. Both cases fall back to 8, the reference's
-        // inert value.
+        // The pan_sweep field is one byte with two jobs. With bit 7 set, it
+        // holds a PAN value, so there is no sweep. A sweep field of all zeros
+        // also means no sweep. In both cases, the value is 8, the inert value
+        // of the original.
         cgb->sweep = (!(ps & 0x80) && (ps & 0x70)) ? ps : 8;
 
-        // Through the SoundInfo hook rather than calling MidiKeyToCgbFreq
-        // directly, exactly as the reference does: MPlayExtender is what
-        // installs it, so a build without CGB support cannot reach here.
+        // Through the SoundInfo hook, not a direct call to MidiKeyToCgbFreq, as
+        // the original does. MPlayExtender installs the hook, so a build
+        // without CGB support cannot get here.
         chan->frequency = si->MidiKeyToCgbFreq(cgbType, midiKey, track->pitM);
     }
     else

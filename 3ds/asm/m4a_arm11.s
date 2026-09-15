@@ -7,29 +7,30 @@
 @     ...
 @     lt_SoundMainRAM_Buffer: .word SoundMainRAM_Buffer + 1
 @
-@ On a GBA that buffer is an IWRAM copy m4aSoundInit makes, because IWRAM is
-@ zero-wait-state and the mixer is the hot loop. Here it cannot be: IWRAM is an
-@ offset into gGbaMem (3ds/gba_mem.c), an ordinary .bss array, and a CXI has no
-@ read/write/execute segment to put code in. There is also nothing to gain,
-@ since the ARM11 runs .text at full speed.
+@ On a GBA, that buffer is an IWRAM copy that m4aSoundInit makes, because IWRAM
+@ has zero wait states and the mixer is the hot loop. That is not possible
+@ here. IWRAM is an offset into gGbaMem (3ds/gba_mem.c), a usual .bss array,
+@ and a CXI has no read/write/execute segment for code. Also, a copy gives no
+@ speed, because the ARM11 runs .text at full speed.
 @
-@ So SoundMainRAM_Buffer is two instructions here that jump to the real routine,
-@ and src/m4a.c skips the copy that would otherwise write to read-only memory.
+@ Thus SoundMainRAM_Buffer is two instructions here that jump to the real
+@ routine. Also, src/m4a.c does not make the copy, which would write to
+@ read-only memory.
 @
-@ Two details, both of which have already gone wrong once:
+@ Two important details:
 @
-@   NO .thumb_func, and no .type. For a Thumb %function the toolchain sets bit 0
-@   of the symbol itself, and the `+ 1` in that literal would then be added on
-@   top and land one halfword past the entry. A plain NOTYPE label at an even
-@   address makes the `+ 1` the Thumb bit, exactly as it is for the real buffer.
+@ - No .thumb_func, and no .type. For a Thumb %function, the toolchain sets
+@   bit 0 of the symbol itself. The `+ 1` in that literal would then add one
+@   more, and point one halfword past the entry. A plain NOTYPE label at an
+@   even address makes the `+ 1` the Thumb bit, as for the real buffer.
 @
-@   A trampoline rather than an alias. `.set` cannot name a symbol from another
-@   object, and `ld --defsym` evaluates its expression before symbol resolution,
-@   so `--defsym SoundMainRAM_Buffer=SoundMainRAM` silently resolved to 0 and
-@   the tail jump faulted at address 0 with no link error.
+@ - A trampoline, not an alias. The `.set` directive cannot name a symbol from
+@   a different object. The linker evaluates `ld --defsym` before symbol
+@   resolution, so `--defsym SoundMainRAM_Buffer=SoundMainRAM` gives 0 with no
+@   link error, and the tail jump faults at address 0.
 @
-@ r3 is the register SoundMain loaded the target into, so clobbering it is free.
-@ r0-r2 and r4-r7 carry the mixer's arguments and are left alone.
+@ SoundMain loaded the target into r3, so this code can overwrite r3. The
+@ registers r0-r2 and r4-r7 hold the arguments of the mixer, and do not change.
 
 	.section .text.m4a_arm11, "ax", %progbits
 	.thumb
