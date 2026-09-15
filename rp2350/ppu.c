@@ -32,10 +32,9 @@
 // previous frame during the backdrop pass; sprites can alpha-blend over
 // sprites.
 //
-// The OBJ window is implemented, in both renderers: a sprite in OBJ mode 2 is
-// never drawn, and with DISPCNT bit 15 set its opaque texels are the window's
-// region (see winRowFor). Both used to draw those sprites as ordinary ones and
-// give the window no region at all.
+// Both renderers implement the OBJ window. A sprite in OBJ mode 2 is never
+// drawn. With DISPCNT bit 15 set, its opaque texels are the region of the
+// window (see winRowFor).
 
 #include "ppu.h"
 
@@ -114,28 +113,21 @@ static uint16_t pal565fx[512] PPU_EWRAM;
 static uint16_t bevb5[32], bevb6[64];
 
 // ---- windows ----------------------------------------------------------------
-// Window bounds do NOT wrap. GBATEK:
+// Window bounds do not wrap. GBATEK:
 //
 //   "Garbage values of X2>240 or X1>X2 are interpreted as X2=240.
 //    Garbage values of Y2>160 or Y1>Y2 are interpreted as Y2=160."
 //
-// so an inverted range runs from X1/Y1 to the screen edge, and is empty when the
-// start is already past it. This used to wrap (>= start || < end), matching
-// web/app.js, and the reference was wrong the same way -- both were fixed
-// together so ppu_validate.sh stays byte-exact.
+// Thus an inverted range goes from X1 or Y1 to the edge of the screen. It is
+// empty when the start is already past the edge. The reference in web/app.js
+// has the same clamp, so ppu_validate.sh stays byte-exact.
 //
-// Code that builds window bounds from task data can produce an inverted range --
-// battle_anim_dark.c and battle_anim_effects_2.c both assemble gBattle_WIN0H
-// that way -- and wrapping drew those rows where hardware draws nothing.
+// Code that makes window bounds from task data can make an inverted range. For
+// example, battle_anim_dark.c and battle_anim_effects_2.c make gBattle_WIN0H in
+// that way. A wrap would draw those rows, where the hardware draws nothing.
 //
-// This was once credited with the battle-intro bug where the entry grass drew
-// over the textbox. It was not that. The intro's per-scanline writes look like
-// window values but go to REG_BG3HOFS (sIntroScanlineParams16Bit in
-// src/battle_main.c), so they are BG3 scroll offsets, and the grass bug was the
-// equal-priority BG draw order in renderFrame below. This clamp is still right;
-// it just fixed something else.
-//
-// This one is vertical (win0v/win1v); winrowFill below is the horizontal half.
+// This function is the vertical half (win0v and win1v). The horizontal half is
+// winrowFill below.
 static bool inWindowRange(int value, uint16_t range) {
     int start = range >> 8;
     int end = range & 0xff;
@@ -152,7 +144,7 @@ static int winrow_u;   // the row's uniform mask value, or -1 if not uniform
 static void winrowFill(uint16_t hrange, uint8_t val) {
     int start = hrange >> 8;
     int end = hrange & 0xff;
-    // X1>X2, or X2>240, clamps X2 to the right edge -- never a wrap. See the
+    // If X1>X2 or X2>240, X2 clamps to the right edge. It never wraps. See the
     // note on inWindowRange.
     if (start > end || end > WIDTH) end = WIDTH;
     if (start >= end) return;   // X1 at or past the right edge: nothing shown
@@ -161,18 +153,19 @@ static void winrowFill(uint16_t hrange, uint8_t val) {
 
 static void objWinFill(int y, uint8_t val);   // with the sprite list below
 
-// Returns the row's mask array, or NULL meaning "mask is 0x3f everywhere".
+// Returns the mask array of the row, or NULL, which means "the mask is 0x3f
+// everywhere".
 //
-// The OBJ window (DISPCNT bit 15) is the silhouette of every sprite in OBJ
-// mode 2, and inside it the layers come from WINOUT's high byte. It ranks
-// below WIN0 and WIN1 and above the outside, so it is stamped straight over
-// the outside fill and the two rectangles then overwrite it as before.
+// The OBJ window (DISPCNT bit 15) is the silhouette of each sprite in OBJ mode
+// 2. Inside it, the layers come from the high byte of WINOUT. It is below WIN0
+// and WIN1 and above the outside. Thus this stamps it directly over the outside
+// fill, and the two rectangles then overwrite it.
 //
-// This is what the battle's metal shine and stat-change effects stand on.
-// CreateInvisibleSpriteCopy (src/battle_anim_mons.c) makes a priority-0,
-// mode-2 copy of the battler so the effect on BG1 shows only inside the mon.
-// Without a region, that copy was drawn as an ordinary sprite in front of
-// everything, including the textbox, and the effect itself never showed.
+// The metal shine and stat-change effects in battle need it.
+// CreateInvisibleSpriteCopy (src/battle_anim_mons.c) makes a priority-0, mode-2
+// copy of the battler, so the effect on BG1 shows only inside the Pokemon.
+// Without a region, that copy would show as a usual sprite in front of all
+// layers, and also in front of the text box. The effect would not show.
 static const uint8_t *winRowFor(int y) {
     if (!F.windowsOn) return NULL;
     if (winrow_y != y) {
@@ -478,10 +471,10 @@ static int g_nspr;
 // skip-scanning the whole list 4 times per line.
 static uint8_t g_sprByPrio[4][128] PPU_EWRAM;
 static int g_nsprByPrio[4];
-// OBJ-window sprites (mode 2) share g_spr, filled from the far end:
-// g_spr[127 - k] for k < g_nobjwin. Each OAM entry is one sprite or the
-// other, so the two ends can never meet, and this costs no new buffer (the
-// RP2350's EWRAM region is packed to the byte).
+// OBJ-window sprites (mode 2) use g_spr too, from the far end: g_spr[127-k] for
+// k < g_nobjwin. Each OAM entry is one sprite or the other, so the two ends can
+// never meet. This needs no new buffer (the EWRAM region of the RP2350 is full
+// to the byte).
 static int g_nobjwin;
 
 static void buildSpriteList(uint16_t dispcnt) {
@@ -501,8 +494,8 @@ static void buildSpriteList(uint16_t dispcnt) {
         if (!affine && (a0 & 0x0200)) continue;  // disabled
         int shape = (a0 >> 14) & 3;
         if (shape == 3) continue;
-        // OBJ mode 2 is the OBJ window. Never drawn: it only marks the
-        // window's region, and only while DISPCNT has that window on.
+        // OBJ mode 2 is the OBJ window. It is never drawn. It only marks the
+        // region of the window, and only while DISPCNT has that window on.
         bool objwin = ((a0 >> 10) & 3) == 2;
         if (objwin && !(dispcnt & 0x8000)) continue;
         sprite_t *s = objwin ? &g_spr[127 - g_nobjwin++] : &g_spr[g_nspr++];
@@ -811,11 +804,11 @@ static bool objPixel(const sprite_t *s, int x, int y, int *palIdx) {
     return true;
 }
 
-// Stamp the OBJ window's region on line y into winrow: every opaque texel of
-// every mode-2 sprite on the line. Walks exactly the coordinates spritesLine
-// draws (the same row test, flips and affine stepping), one objPixel per
-// pixel. These sprites exist only for a handful of effects, so none of
-// spritesLine's fast paths are worth copying.
+// Stamp the region of the OBJ window on line y into winrow: each opaque texel
+// of each mode-2 sprite on the line. This walks the same coordinates that
+// spritesLine draws (the same row test, flips and affine steps), with one
+// objPixel for each pixel. Only a few effects use these sprites, so the fast
+// paths of spritesLine are not necessary here.
 static void objWinFill(int y, uint8_t val) {
     for (int k = 0; k < g_nobjwin; k++) {
         const sprite_t *s = &g_spr[127 - k];
@@ -1070,21 +1063,21 @@ static void renderFrame(void) {
         } else {
             backdropLine(y);
             PSLOT(2);
-            // Painter's order: back (priority 3) to front (0), last write wins.
+            // Painter's order: back (priority 3) to front (0), and the last
+            // write wins.
             //
-            // Within one priority the BGs are walked HIGHEST number first. On
-            // the GBA a tie goes to the lower-numbered BG, so it has to be the
-            // one painted last. g_bg[] is filled in ascending BG number, hence
-            // the descending index.
+            // At one priority, the loop goes through the BGs from the highest
+            // number first. On the GBA, the lower-numbered BG wins a tie, so it
+            // must be painted last. The g_bg[] array is in ascending BG number,
+            // so the index descends.
             //
-            // This used to walk ascending, which put BG1 in front of BG0 at
-            // equal priority -- the battle's own layout (both are priority 0 in
-            // gBattleBgTemplates), so the intro's entry grass on BG1 slid across
-            // the textbox on BG0 instead of behind it. web/app.js had the same
-            // order and was fixed with this, so ppu_validate.sh stays exact.
+            // The battle puts BG0 (the text box) and BG1 (the intro grass) both
+            // at priority 0 (gBattleBgTemplates). An ascending order would draw
+            // the grass over the text box. The web/app.js reference uses the
+            // same order, so ppu_validate.sh stays exact.
             //
-            // Sprites stay AFTER the BG loop: a sprite sits in front of every BG
-            // of its own priority.
+            // Sprites come after the BG loop, because a sprite is in front of
+            // each BG of its own priority.
             for (int priority = 3; priority >= 0; priority--) {
                 for (int i = g_nbg - 1; i >= 0; i--) {
                     if (g_bg[i].priority == priority) {
