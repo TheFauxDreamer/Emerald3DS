@@ -1,8 +1,8 @@
 // Information about the opposing mon. See matchup.h.
 //
 // The type chart walk copies the real one in src/battle_script_commands.c, not
-// the simple copy in battle_ai_switch_items.c. gTypeEffectiveness has a
-// TYPE_FORESIGHT marker. The rows after it are the Ghost immunities. They
+// the simple copy in battle_ai_switch_items.c. The gTypeEffectiveness table has
+// a TYPE_FORESIGHT marker. The rows after it are the Ghost immunities. They
 // apply, except when the target is under Foresight. Do not treat the marker as
 // the end of the table, or Normal moves hit Ghosts.
 

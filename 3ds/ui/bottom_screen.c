@@ -69,13 +69,13 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
 
 // TRUE when there is save data to read.
 //
-// gSaveBlock1Ptr and gSaveBlock2Ptr are NULL until a file loads
+// The gSaveBlock1Ptr and gSaveBlock2Ptr pointers are NULL until a file loads
 // (src/load_save.c). FlagGet() reads through gSaveBlock1Ptr, so an earlier call
 // reads near address 0x1300. A real ARM11 faults there. The state hash polls
 // every frame, so gate every save read on this function.
 //
-// This is not the same test as sInGame. sInGame stays TRUE through battles and
-// menus. This function only says if save data exists.
+// This is not the same test as sInGame. The sInGame flag stays TRUE through
+// battles and menus. This function only says if save data exists.
 static bool8 SaveDataLive(void)
 {
     return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
@@ -136,8 +136,8 @@ static void EnsureTabVisible(void)
 // must dismiss it. The tabs keep their layouts, and the panel covers them.
 // UiWindowFrame fills its center tiles, so the panel is opaque.
 //
-// 30x14 tiles is 240x112. It centers exactly in 320x192 on 8px boundaries, 40px
-// from each side. Keep these numbers in whole tiles.
+// An area of 30x14 tiles is 240x112 pixels. It centers exactly in 320x192 on
+// 8px boundaries, 40px from each side. Keep these numbers in whole tiles.
 #define NOTICE_TX     5
 #define NOTICE_TY     5
 #define NOTICE_TW     30
@@ -242,8 +242,8 @@ bool8 UiOverlayActive(void)
 
 // The twinkle length on each path: 64 frames, or 8 steps.
 //
-// Both are powers of two. sNoticeTime is a u16, and 65536 divides by both, so
-// the wrap occurs on a cycle boundary.
+// Both are powers of two. The sNoticeTime counter is a u16, and 65536 divides
+// by both, so the wrap occurs on a cycle boundary.
 #define NOTICE_FRAME_CYCLE  64
 #define NOTICE_STEP_CYCLE   8
 #define NOTICE_CORNERS      4

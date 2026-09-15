@@ -1,7 +1,8 @@
 // Text for the bottom screen, in the game's own font (game side).
 //
-// This uses the game's glyph data and does not ship a font. ui_text.c decodes
-// the 2bpp glyphs itself, and does not touch the game's gCurGlyph.
+// This uses the game's glyph data and does not ship a font. The code in
+// ui_text.c decodes the 2bpp glyphs itself, and does not touch the game's
+// gCurGlyph.
 //
 // Strings here are game-encoded (charmap.txt) and end with EOS. They are not
 // ASCII. GetSpeciesName(), GetItemName() and gRegionMapEntries[].name already

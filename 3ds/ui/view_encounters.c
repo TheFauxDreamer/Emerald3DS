@@ -345,7 +345,7 @@ static void DrawCell(int cx, int ry, u16 species)
 static void DrawHeader(void)
 {
     // Not MAP_NAME_LENGTH: GetMapNameGeneric's empty-name fallback writes 18
-    // and a terminator. tab_map.c uses 32 for the same reason.
+    // and a terminator. The MAP tab (tab_map.c) uses 32 for the same reason.
     u8 name[32];
     u32 pages = PageCount();
 

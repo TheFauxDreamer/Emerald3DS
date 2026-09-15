@@ -5,7 +5,8 @@
 //
 // Page 2 contains cheats: EXP All, a level cap, a species randomizer and a bag
 // sort order. They are on their own page, so the player does not see them
-// first. 3ds/tweaks.c holds the behavior. This file only draws the toggles.
+// first. The file 3ds/tweaks.c holds the behavior. This file only draws the
+// toggles.
 //
 // Page 3 is quality of life. Page 4 is the debug menu, if the build has it.
 //
@@ -28,7 +29,8 @@
 #include "../achievements.h"
 #endif
 
-// The speeds double at each step. 3x is too close to 2x to need a button.
+// The speeds double at each step. A 3x scale is too close to 2x to need a
+// button.
 static const u8 sSpeeds[] = { 1, 2, 4, 8 };
 #define SPEED_COUNT   ARRAY_COUNT(sSpeeds)
 
@@ -196,8 +198,8 @@ static void DrawPage1(void)
                    sSpeeds[i] == Ctr3dsGetSpeed());
     }
 
-    // Highlight FAST, not 1x. 1x is the default, and the accent outline means
-    // "changed". The turbo binds below use it the same way.
+    // Highlight FAST, not 1x. The 1x speed is the default, and the accent
+    // outline means "changed". The turbo binds below use it the same way.
     {
         int fast = (Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST);
 
@@ -675,11 +677,11 @@ u32 UiTweakStateKey(void)
 
 u32 UiExtraStateKey(void)
 {
-    // sPage uses bits 0-1 and the tweaks start at bit 4, so bit 2 is free. Only
-    // the button above changes this value, but fold it in anyway: a setting on
-    // the screen must not go stale. The three audio switches go at bit 24,
-    // clear of UiTweakStateKey's range (which ends at bit 17 after the shift
-    // below).
+    // The sPage value uses bits 0-1 and the tweaks start at bit 4, so bit 2 is
+    // free. Only the button above changes this value, but fold it in anyway: a
+    // setting on the screen must not go stale. The three audio switches go at
+    // bit 24, clear of UiTweakStateKey's range (which ends at bit 17 after the
+    // shift below).
     u32 audio = 0;
 
     for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)

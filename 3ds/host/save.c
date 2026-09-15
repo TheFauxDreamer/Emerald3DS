@@ -7,11 +7,11 @@
 // Writes to the array are free. The question is when to write the SD card. A
 // write marks the image dirty. Two paths then flush it.
 //
-// The main path is CtrSaveCommit(). src/save.c calls it when a save finishes,
-// so the file is current before the "saved the game" message clears. That makes
-// the save durable. The process does not always exit cleanly. A close of the
-// emulator window kills it, and aptMainLoop() does not report that. Thus the
-// exit flush does not run.
+// The main path is CtrSaveCommit(). The game (src/save.c) calls it when a save
+// finishes, so the file is current before the "saved the game" message clears.
+// That makes the save durable. The process does not always exit cleanly. A
+// close of the emulator window kills it, and aptMainLoop() does not report
+// that. Thus the exit flush does not run.
 //
 // The debounce is the second path, for writes outside a save (the special
 // sectors, a chunked link save between steps). It turns a burst into one file
@@ -91,7 +91,8 @@ void CtrSaveLoad(void)
 // Write the image. It writes a temp file and swaps it in, so an interrupted
 // flush (battery pull, crash, emulator close) cannot leave a half-written save.
 //
-// sDirty clears only on success, so the next frame retries any failure below.
+// The sDirty flag clears only on success, so the next frame retries any failure
+// below.
 void CtrSaveFlush(int force)
 {
     unsigned int t0;
@@ -101,9 +102,9 @@ void CtrSaveFlush(int force)
     if (!force && now_ms() - sLastWriteMs < CTR_SAVE_QUIET_MS)
         return;
 
-    // 128 KB and a three-way rename, in the same part of the frame as the
-    // settings write. It runs from the frame loop, so measure it. If it is
-    // slow, the player sees the game stop and nothing else tells why.
+    // This writes 128 KB and does a three-way rename, in the same part of the
+    // frame as the settings write. It runs from the frame loop, so measure it.
+    // If it is slow, the player sees the game stop and nothing else tells why.
     t0 = CtrTimeNowMs();
 
     mkdir("sdmc:/3ds", 0777);
@@ -160,8 +161,9 @@ void CtrSaveFlush(int force)
 
 // Write the image now, with no debounce.
 //
-// src/save.c calls this when a save completes. Thus the save does not depend on
-// the process living long enough for a timer or for the exit path.
+// The game (src/save.c) calls this when a save completes. Thus the save does
+// not depend on the process living long enough for a timer or for the exit
+// path.
 void CtrSaveCommit(void)
 {
     CtrSaveFlush(1);

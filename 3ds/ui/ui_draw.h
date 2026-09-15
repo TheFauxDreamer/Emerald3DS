@@ -138,9 +138,9 @@ void UiChevron(int x, int y);
 
 // A gold sparkle, at the three sizes of the game's shiny animation.
 //
-// gold_stars.png has six 8x8 tiles: tiles 0-3 are a 16x16 star, tile 4 an 8x8
-// star and tile 5 a small twinkle. Thus `size` 0 to 2 selects a frame of the
-// art, not a scale. There is no scaler.
+// The file gold_stars.png has six 8x8 tiles: tiles 0-3 are a 16x16 star, tile 4
+// an 8x8 star and tile 5 a small twinkle. Thus `size` 0 to 2 selects a frame of
+// the art, not a scale. There is no scaler.
 //
 // It is centered on (cx, cy) at the star's bright horizontal axis, not at its
 // bounding box. The three frames have different shapes, and a box center makes

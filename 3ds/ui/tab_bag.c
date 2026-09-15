@@ -35,11 +35,11 @@
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
 
-// Two panels, both on the player's window frame. 24 + 16 tiles fill the 40-tile
-// width.
+// Two panels, both on the player's window frame. Together, 24 + 16 tiles fill
+// the 40-tile width.
 //
-// 24 tiles is the maximum for the list. The details column then has 108px of
-// text width. The widest line in an item description is exactly 108px.
+// The list is 24 tiles wide at most. The details column then has 108px of text
+// width. The widest line in an item description is exactly 108px.
 #define PANEL_Y       24
 #define PANEL_TY      (PANEL_Y / 8)
 #define PANEL_TH      ((UI_CONTENT_H - PANEL_Y) / 8)

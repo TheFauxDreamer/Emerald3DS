@@ -1,7 +1,7 @@
 // The seam between the two halves of this port.
 //
-// include/gba/types.h (game) and <3ds.h> (libctru) both define u8/u16/u32
-// differently, and the game's include/ hides libc headers (string.h,
+// The headers include/gba/types.h (game) and <3ds.h> (libctru) both define
+// u8/u16/u32 differently, and the game's include/ hides libc headers (string.h,
 // strings.h). A translation unit that includes both does not build. Thus:
 //
 //   game-side TUs : src/**, rp2350/{bios,asm_stubs,m4a_1}.c, 3ds/gba_mem.c,
@@ -59,8 +59,8 @@ void CtrBottomUpdate(const CtrTouchState *touch);
 int  CtrBottomIsDirty(void);
 void CtrBottomClearDirty(void);
 
-// 320x240 RGB565, in row order. The pointer does not change. Valid after
-// CtrBottomInit().
+// The framebuffer is 320x240 RGB565, in row order. The pointer does not change.
+// Valid after CtrBottomInit().
 const uint16_t *CtrBottomFramebuffer(void);
 
 // ---------------------------------------------------------------- host side --
@@ -252,8 +252,8 @@ int  Ctr3dsGetBagSort(void);
 // that the story needs can be turned off here.
 //
 // Stored as "off", so a zero settings byte means that calls occur. Files from
-// before this option have zero there. audioDbgMuted in settings.c uses the same
-// idea.
+// before this option have zero there. The audioDbgMuted field in settings.c
+// uses the same idea.
 void Ctr3dsSetPhoneCallsOff(int on);
 int  Ctr3dsGetPhoneCallsOff(void);
 
@@ -301,7 +301,7 @@ int  Ctr3dsGetBattleAnimOff(void);
 // the mon if they catch it. Fast-forward resets on each launch for the same
 // reason.
 //
-// 3ds/tweaks.c clears it on the game side when it fires. Thus the EXTRA tab
+// On the game side, 3ds/tweaks.c clears it when it fires. Thus the EXTRA tab
 // must poll it, because its button is not the only thing that changes it.
 void Ctr3dsSetShinyTest(int on);
 int  Ctr3dsGetShinyTest(void);
@@ -309,7 +309,7 @@ int  Ctr3dsGetShinyTest(void);
 // ---- achievements store ----------------------------------------------------
 //
 // The achievements that a playthrough has unlocked, and which of those the
-// player has not seen yet. 3ds/host/achievements.c keeps them in
+// player has not seen yet. The file 3ds/host/achievements.c keeps them in
 // sdmc:/3ds/emerald3ds/achievements.bin. The game side (3ds/achievements.c)
 // decides what an achievement is and when it unlocks, because every condition
 // uses a game accessor. This side only keeps the bits.
@@ -371,13 +371,14 @@ int Rp2350MixFrame(int8_t *out, int n);
 int Rp2350MixFrame16(int16_t *out, int n);
 
 // Interleaved stereo PCM16: `out` holds 2*n samples, left then right. This is
-// the preferred form. m4a renders DirectSound into two buffers and pans every
-// note, and the PSG pans its four channels through NR51. The two mono forms
-// above lose that placement.
+// the preferred form. The m4a engine renders DirectSound into two buffers and
+// pans every note. The PSG pans its four channels through NR51. The two mono
+// forms above lose that placement.
 int Rp2350MixFrameStereo16(int16_t *out, int n);
 
-// m4a engine data for the audio health report in 3ds/host/audio.c. Also defined
-// on the game side in rp2350/m4a_mix.c, which records these on every mix.
+// The m4a engine data for the audio health report in 3ds/host/audio.c. Also
+// defined on the game side in rp2350/m4a_mix.c, which records these on every
+// mix.
 //
 // It answers what the host side cannot: does the sound engine run? `ident` must
 // be ID_NUMBER after m4aSoundInit, and `samplesPerVBlank` must be 224.

@@ -32,8 +32,9 @@ extern const struct PokedexEntry gPokedexEntries[];
 
 // ---------------------------------------------------------------- layout ---
 //
-// 14 + 26 tiles fill the 40-tile width. The left pane holds a 64px sprite in
-// its 8px frame. 14 tiles give 96px of interior, which is enough.
+// Together, 14 + 26 tiles fill the 40-tile width. The left pane holds a 64px
+// sprite in its 8px frame. A width of 14 tiles gives 96px of interior, which is
+// enough.
 #define LEFT_TW        14
 #define RIGHT_TX       LEFT_TW
 #define RIGHT_TW       ((CTR_BOTTOM_WIDTH / 8) - LEFT_TW)
@@ -182,8 +183,8 @@ static void FormatWeight(u8 *dst, u16 weight)
     dst[i] = EOS;
 }
 
-// "No" and three zero-padded digits, as in CreateMonDexNum (src/pokedex.c).
-// gText_NumberClear01 is the game's prefix. It has an extra symbol and a
+// "No" and three zero-padded digits, as in CreateMonDexNum (src/pokedex.c). The
+// gText_NumberClear01 string is the game's prefix. It has an extra symbol and a
 // control code, which UiText can handle.
 static void FormatDexNum(u8 *dst, u16 num)
 {

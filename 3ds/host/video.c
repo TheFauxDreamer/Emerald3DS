@@ -1,8 +1,8 @@
 // Presentation: the software PPU's output on the top screen, and the game-drawn
 // touch UI on the bottom screen.
 //
-// rp2350/ppu.c renders the GBA frame into a linear 240x160 RGB565 buffer. Two
-// facts apply before it can go on the screen:
+// The PPU (rp2350/ppu.c) renders the GBA frame into a linear 240x160 RGB565
+// buffer. Two facts apply before it can go on the screen:
 // - PICA200 textures must have power-of-two sizes and are stored in 8x8
 //   Morton-order tiles. The display-transfer engine does the tiling. Its input
 //   and output widths must agree, so the PPU output first goes into a buffer
@@ -130,8 +130,8 @@ static int sReady;
 // CtrProfile, CtrLogSlow or CtrLog, because their tables have no lock and are
 // for the main thread only. It returns its time in sPpuTicks.
 //
-// rp2350/ppu.c does not change. It already treats the regions as a static
-// snapshot during a render.
+// The PPU (rp2350/ppu.c) does not change. It already treats the regions as a
+// static snapshot during a render.
 
 #ifndef CTR_PPU_THREAD
 #define CTR_PPU_THREAD 1
@@ -153,7 +153,7 @@ static uint8_t sSnapOam[SNAP_OAM_SIZE]   __attribute__((aligned(32)));
 // rasterizer's own input when inline.
 static const void *sLiveReg, *sLivePal, *sLiveVram, *sLiveOam;
 
-// 0x18 is the highest priority that userland can ask for. On its own core, the
+// The highest priority that userland can ask for is 0x18. On its own core, the
 // worker competes with no thread of this port, so this matters only against the
 // system's threads on core 1.
 #define PPU_THREAD_PRIO     0x18
@@ -355,8 +355,8 @@ static void apply_top_filter(void)
 }
 
 #if CTR_BOOT_DIAG
-// Kept so that the diagnostics below can read DISPCNT. ppu_set_memory() uses
-// these, and video.c does not need them again.
+// Kept so that the diagnostics below can read DISPCNT. The ppu_set_memory()
+// call uses these, and video.c does not need them again.
 static const uint8_t *sRegBase;
 #endif
 
@@ -545,11 +545,12 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
 // is 49,152 bytes. A repaint takes five frames to reach the panel. On this path
 // the animations step five times a second, so the delay is not visible.
 //
-// 48 is a multiple of 8. A tiled texture stores eight rows in a strip, and the
-// strips are in order. Thus any band that starts on an 8-row boundary is one
-// contiguous run in both buffers. The source is at row * BOT_TEX_W, and the
-// destination is at (row / 8) * BOT_TEX_W * 8. TEX_TRANSFER_FLAGS has no flip
-// and no scaling, so a band lands where it came from.
+// The value 48 is a multiple of 8. A tiled texture stores eight rows in a
+// strip, and the strips are in order. Thus any band that starts on an 8-row
+// boundary is one contiguous run in both buffers. The source is at row *
+// BOT_TEX_W, and the destination is at (row / 8) * BOT_TEX_W * 8.
+// TEX_TRANSFER_FLAGS has no flip and no scaling, so a band lands where it came
+// from.
 //
 // Only hardware can confirm this destination arithmetic. If it is wrong, the
 // 48-row bands show in the wrong order. That is easy to see and harms nothing
@@ -674,10 +675,10 @@ void CtrVideoPresent(void)
         if (!sPpuPending)
             CtrVideoRenderBegin();
 
-        // ppu.wait is the time that the main thread had nothing to do. Near
-        // zero means that the paint, the bottom upload and the audio took as
-        // long as the rasterizer. Close to `ppu` means that the second core
-        // saved nearly all of it.
+        // The ppu.wait stage is the time when the main thread had nothing to
+        // do. Near zero means that the paint, the bottom upload and the audio
+        // took as long as the rasterizer. Close to `ppu` means that the second
+        // core saved nearly all of it.
         tw = CtrTicksNow();
         LightEvent_Wait(&sPpuDone);
         __dmb();

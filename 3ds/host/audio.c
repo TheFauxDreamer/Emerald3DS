@@ -1,10 +1,10 @@
-// m4a to NDSP audio.
+// Audio, from m4a to NDSP.
 //
-// rp2350/m4a_mix.c is the port's mixer seam, compiled into the game archive. It
-// gives signed 16-bit samples with DirectSound and the four PSG channels
-// already summed. Rp2350MixFrameStereo16() gives interleaved, panned L,R
-// samples, and Rp2350MixFrame16() gives a downmix. NDSP plays PCM16 directly,
-// so the samples reach the DSP with no conversion.
+// The file rp2350/m4a_mix.c is the mixer interface of the port, compiled into
+// the game archive. It gives signed 16-bit samples with DirectSound and the
+// four PSG channels already summed. Rp2350MixFrameStereo16() gives interleaved,
+// panned L,R samples, and Rp2350MixFrame16() gives a downmix. NDSP plays PCM16
+// directly, so the samples reach the DSP with no conversion.
 //
 // The mixer runs once for each game frame and can stall (a load, a save flush),
 // but the DSP uses samples at a constant rate. A ring buffer between them
@@ -23,9 +23,9 @@
 #include "../bridge.h"
 #include "trace.h"
 
-// m4a makes this many samples for each VBlank at SOUND_MODE_FREQ_13379
-// (gPcmSamplesPerVBlankTable[3] in src/m4a_tables.c; m4a.c uses freq - 1, and
-// SOUND_MODE_FREQ_13379 is freq 4).
+// The m4a engine makes this many samples for each VBlank at
+// SOUND_MODE_FREQ_13379 (gPcmSamplesPerVBlankTable[3] in src/m4a_tables.c;
+// m4a.c uses freq - 1, and SOUND_MODE_FREQ_13379 is freq 4).
 #define SAMPLES_PER_FRAME 224
 
 // The 3DS panel paces the game, not the GBA's 59.7275 Hz. Thus the game makes
@@ -37,8 +37,8 @@
 // more than the game makes, which empties the ring and clicks about every six
 // seconds.
 //
-// 224 x 59.8261 = 13401 Hz. That is also closer to the GBA's 13379, so the
-// pitch error is 0.16%.
+// The rate is 224 x 59.8261 = 13401 Hz. That is also closer to the GBA's 13379,
+// so the pitch error is 0.16%.
 #define REFRESH_HZ  59.8261f
 #define SAMPLE_RATE (SAMPLES_PER_FRAME * REFRESH_HZ)   // 13401 Hz
 
@@ -67,12 +67,12 @@
 // abort at address 0 a few seconds after boot.
 #define RING_FRAMES (SAMPLES_PER_FRAME * 16)
 
-// libctru makes the NDSP service thread at this priority (ndspInit, in
-// libctru/source/ndsp/ndsp.c). The value is fixed there.
+// The libctru library makes the NDSP service thread at this priority (ndspInit,
+// in libctru/source/ndsp/ndsp.c). The value is fixed there.
 #define NDSP_THREAD_PRIO 0x18
 
-// The main thread's priority after NDSP starts. 0x30 is the priority of every
-// .3dsx under hbmenu, which is how NDSP is usually tested. It gives this order:
+// The main thread's priority after NDSP starts. Every .3dsx under hbmenu runs
+// at priority 0x30, which is how NDSP is usually tested. It gives this order:
 //
 //     0x18  NDSP service thread   (ndsp.c)
 //     0x1A  GSP event thread      (gspgpu.c)   signals VBlank / P3D / PPF
@@ -144,14 +144,15 @@ static int16_t *ring_slot(uint32_t frame)
 //
 // The 3DS scheduler uses strict priority, with no round-robin between different
 // priorities. A lower-priority thread runs only while all higher ones are
-// blocked. libctru runs NDSP's work on its own thread at 0x18. AffinityMask 1
-// and SystemModeExt Legacy keep that thread and this one on core 0. A main
-// thread above it would starve the DSP whenever the rasterizer has work, which
-// is always. Under hbmenu, a .3dsx gets main priority 0x30, below NDSP.
+// blocked. The libctru library runs the NDSP work on its own thread at 0x18.
+// AffinityMask 1 and SystemModeExt Legacy keep that thread and this one on core
+// 0. A main thread above it would starve the DSP whenever the rasterizer has
+// work, which is always. Under hbmenu, a .3dsx gets main priority 0x30, below
+// NDSP.
 //
-// 3ds/emerald3ds.rsf asks for main priority 0x10, which would be above NDSP. On
-// hardware, the main thread was already at 0x18 or below, and this function
-// changed nothing. Thus the log below always reports the priority.
+// The file 3ds/emerald3ds.rsf asks for main priority 0x10, which would be above
+// NDSP. On hardware, the main thread was already at 0x18 or below, and this
+// function changed nothing. Thus the log below always reports the priority.
 //
 // The guard stays. It costs one comparison, and the exheader still asks for the
 // wrong value.
@@ -185,10 +186,11 @@ void CtrAudioInit(void)
 {
     Result rc = ndspInit();
     if (R_FAILED(rc)) {
-        // Usually a missing DSP firmware dump. libctru loads the DSP component
-        // from sdmc:/3ds/dspfirm.cdc, and ndspInit() fails if that file is not
-        // there. The game works without sound, so this is a warning, but it
-        // must be visible. Otherwise it looks like "the port has no sound".
+        // Usually a missing DSP firmware dump. The libctru library loads the
+        // DSP component from sdmc:/3ds/dspfirm.cdc, and ndspInit() fails if
+        // that file is not there. The game works without sound, so this is a
+        // warning, but it must be visible. Otherwise it looks like "the port
+        // has no sound".
         //
         // In a debug build, it goes to sdmc:/3ds/emerald3ds/log.txt and to the
         // emulator's debug output (3ds/host/log.c). A release build writes no
@@ -361,9 +363,9 @@ static void health_report(void)
            (unsigned long)dsPeak, (unsigned long)psgPeak,
            (unsigned long)cryPeak, (unsigned long)clipped);
 
-    // jumps= is the number of jumps. atFrameStart= is how many were on the
-    // first sample of a frame. Near jumps means that the click is at the frame
-    // boundary. Near 0 means that it is in the audio.
+    // The jumps= value is the number of jumps. The atFrameStart= value is how
+    // many were on the first sample of a frame. Near jumps means that the click
+    // is at the frame boundary. Near 0 means that it is in the audio.
     CtrLog("emerald3ds: discontinuities - jumps=%lu atFrameStart=%lu "
            "biggest=%lu at sample %lu of %d, dsWrap=%lu\n",
            (unsigned long)sJumpCount, (unsigned long)sJumpAtFrameStart,

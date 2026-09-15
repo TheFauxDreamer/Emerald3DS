@@ -1,7 +1,7 @@
 // Shared state and layout for the bottom-screen views (game side).
 //
-// bottom_screen.c owns the tab bar, the view stack and the redraw policy. Each
-// tab_*.c owns its content area and its touch handling.
+// The shell (bottom_screen.c) owns the tab bar, the view stack and the redraw
+// policy. Each tab_*.c owns its content area and its touch handling.
 
 #ifndef CTR_UI_SHELL_H
 #define CTR_UI_SHELL_H
@@ -14,8 +14,8 @@
 #define UI_TABBAR_H   48
 #define UI_CONTENT_H  (CTR_BOTTOM_HEIGHT - UI_TABBAR_H)   // 192 = 24 tiles
 
-// The tabs that show depend on what the player has unlocked. bottom_screen.c
-// follows BuildNormalStartMenu() (src/start_menu.c).
+// The tabs that show depend on what the player has unlocked. The shell
+// (bottom_screen.c) follows BuildNormalStartMenu() (src/start_menu.c).
 //
 // Six tabs is the maximum. The bar divides 320px between the visible tabs, and
 // 53px is about the minimum for a finger (SECOND_SCREEN_CHEATSHEET.md, "Adding
