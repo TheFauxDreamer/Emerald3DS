@@ -191,10 +191,11 @@ function gbaColor(value) {
 }
 
 // Window bounds do not wrap. GBATEK: X2>240 or X1>X2 is interpreted as X2=240,
-// Y2>160 or Y1>Y2 as Y2=160 -- an inverted range runs to the screen edge and is
-// empty once the start passes it. `limit` is which edge, since this is used for
-// both axes below. Kept in step with inWindowRange/winrowFill in rp2350/ppu.c;
-// both wrapped, and ppu_validate.sh compares the two.
+// and Y2>160 or Y1>Y2 as Y2=160. Thus an inverted range goes to the edge of the
+// screen, and is empty when the start is past it. The `limit` argument is that
+// edge, because both axes below use this function. Keep this in step with
+// inWindowRange and winrowFill in rp2350/ppu.c, because ppu_validate.sh
+// compares the two.
 function inWindowRange(value, range, limit) {
   const start = range >> 8;
   let end = range & 0xff;
@@ -226,11 +227,11 @@ function windowMask(x, y) {
   return u16[(REG + 0x4a) >> 1] & 0x3f;
 }
 
-// The OBJ window's region for the frame: set wherever a sprite in OBJ mode 2
-// has an opaque texel. Such sprites are never drawn (renderSprites skips them
-// outside this pass), and windowMask gives the region WINOUT's high byte,
-// below WIN0 and WIN1 and above the outside. Kept in step with objWinFill in
-// rp2350/ppu.c; both used to draw these sprites and give the window no region.
+// The region of the OBJ window for the frame: set where a sprite in OBJ mode 2
+// has an opaque texel. These sprites are never drawn (renderSprites skips them
+// outside this pass). In the region, windowMask gives the high byte of WINOUT,
+// below WIN0 and WIN1 and above the outside. Keep this in step with objWinFill
+// in rp2350/ppu.c.
 const objWindow = new Uint8Array(WIDTH * HEIGHT);
 
 function stampObjWindow(x, y) {
@@ -443,10 +444,11 @@ function renderBgLayer(bg, type) {
   }
 }
 
-// Back to front, last write wins. A priority tie goes to the LOWER-numbered BG
-// on the GBA, so it must be drawn last: hence the bg tie-break. The sort is
-// stable, so without it ties kept ascending order and BG1 landed on top of BG0.
-// Kept in step with renderFrame in rp2350/ppu.c.
+// Back to front, and the last write wins. On the GBA, the lower-numbered BG
+// wins a priority tie, so it must be drawn last. That is why the sort has a bg
+// tie-break. The sort is stable, so without the tie-break, ties would keep
+// ascending order and BG1 would be on top of BG0. Keep this in step with
+// renderFrame in rp2350/ppu.c.
 function renderBgs(dispcnt) {
   clearScreen();
   for (const { bg, type } of bgLayersForMode(dispcnt).sort((a, b) => b.priority - a.priority || b.bg - a.bg)) {
@@ -454,8 +456,9 @@ function renderBgs(dispcnt) {
   }
 }
 
-// `objWindowPass` walks only the OBJ-window sprites (mode 2) and stamps them
-// into objWindow instead of drawing; the normal pass skips them.
+// With `objWindowPass` set, this walks only the OBJ-window sprites (mode 2),
+// and stamps them into objWindow. It does not draw them. The normal pass skips
+// them.
 function renderSprites(dispcnt, priority = null, objWindowPass = false) {
   if (!(dispcnt & 0x1000)) return;
   const mapping1d = dispcnt & 0x40;
@@ -531,9 +534,10 @@ function renderSprites(dispcnt, priority = null, objWindowPass = false) {
 
 function renderTiled(dispcnt) {
   clearScreen();
-  // Highest BG number first within a priority, so the lower-numbered BG -- the
-  // one the GBA puts in front on a tie -- is painted last. bgLayersForMode
-  // returns 0..3, hence the reverse. Same order as renderFrame in rp2350/ppu.c.
+  // Highest BG number first at one priority, so the lower-numbered BG is
+  // painted last. On a tie, the GBA puts that BG in front. The bgLayersForMode
+  // function returns 0..3, so this reverses it. This is the same order as
+  // renderFrame in rp2350/ppu.c.
   const layers = bgLayersForMode(dispcnt).reverse();
   for (let priority = 3; priority >= 0; priority--) {
     for (const { bg, type } of layers) {
@@ -627,10 +631,11 @@ function writeS32(ptr, value) {
 }
 
 function affineTerms(xScale, yScale, rotation) {
-  // 65536 = one full turn, not 256: the BIOS takes a u16 and uses alpha >> 8 to
-  // index a 256-entry table. Callers pass multiples of 256, so the old divisor
-  // made every angle a whole number of turns -- identity matrix, no rotation
-  // ever, and no visible garbage to give it away. See rp2350/bios.c.
+  // The divisor is 65536, one full turn, not 256. The BIOS takes a u16, and
+  // uses the value alpha >> 8 as an index into a 256-entry table. Callers give
+  // multiples of 256, so with 256 each angle would be a whole number of turns.
+  // That gives an identity matrix, no rotation, and no visible error. See
+  // rp2350/bios.c.
   const angle = rotation * Math.PI * 2 / 65536;
   const sin = Math.sin(angle) * 256;
   const cos = Math.cos(angle) * 256;
