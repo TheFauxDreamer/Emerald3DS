@@ -1,24 +1,27 @@
-@ The four event items, 3DS build only (3ds/EVENT_ISLANDS_PLAN.md): the Eon
-@ Ticket for Southern Island, the Aurora Ticket for Birth Island, the Old Sea
-@ Map for Faraway Island and the Mystic Ticket for Navel Rock. Emerald only ever
-@ handed these out through distributions that ended long ago: Record Mixing for
-@ the Eon Ticket (ReceiveGiftItem in src/record_mixing.c), Mystery Gift for the
-@ other three (gift_*.inc).
+@ The four event items, only in the 3DS build (3ds/EVENT_ISLANDS_PLAN.md):
+@ - the Eon Ticket, for Southern Island
+@ - the Aurora Ticket, for Birth Island
+@ - the Old Sea Map, for Faraway Island
+@ - the Mystic Ticket, for Navel Rock
 @
-@ The Lilycove ferry sails to an island only after the Hall of Fame, and only
-@ with both the item in the bag and its FLAG_ENABLE_SHIP_* flag
-@ (LilycoveCity_Harbor_EventScript_Get*State). The distributions set exactly
-@ that, plus FLAG_RECEIVED_* for the three Mystery Gift items, and so does this
-@ file.
+@ Emerald gave these only through distributions that ended long ago. Record
+@ Mixing gave the Eon Ticket (ReceiveGiftItem in src/record_mixing.c), and
+@ Mystery Gift gave the other three (gift_*.inc).
+@
+@ The Lilycove ferry sails to an island only after the Hall of Fame. It also
+@ needs the item in the bag and its FLAG_ENABLE_SHIP_* flag
+@ (LilycoveCity_Harbor_EventScript_Get*State). The distributions set these, and
+@ also FLAG_RECEIVED_* for the three Mystery Gift items. This file does the
+@ same.
 @
 @ Four callers, each behind #if PLATFORM_3DS:
-@   Dad, in the post-Hall-of-Fame scene at home (players_house.inc).
-@   The Lilycove ferry attendant, for saves already past that scene.
-@   The Slateport and Battle Frontier ferry attendants too, because a Battle
-@   Frontier player may never talk to the Lilycove one.
+@ - Dad, in the scene at home after the Hall of Fame (players_house.inc).
+@ - The Lilycove ferry attendant, for saves that are already past that scene.
+@ - The Slateport and Battle Frontier ferry attendants also, because a player
+@   at the Battle Frontier may never talk to the Lilycove attendant.
 
-@ Each entry point gives whichever items are still needed, and says nothing at
-@ all when none are.
+@ Each entry point gives the items that are still necessary, and says nothing
+@ when none are.
 Ctr3ds_EventScript_EventTicketsFromDad::
 	call Ctr3ds_EventScript_AnyEventTicketNeeded
 	goto_if_eq VAR_RESULT, FALSE, Common_EventScript_NopReturn
@@ -27,14 +30,14 @@ Ctr3ds_EventScript_EventTicketsFromDad::
 	msgbox Ctr3ds_Text_DadForUseAtLilycove, MSGBOX_DEFAULT
 	return
 
-@ Lilycove's own first-time ticket dialogue follows this one.
+@ The first-time ticket dialogue of Lilycove comes after this one.
 Ctr3ds_EventScript_EventTicketsAtLilycove::
 	call Ctr3ds_EventScript_AnyEventTicketNeeded
 	goto_if_eq VAR_RESULT, FALSE, Common_EventScript_NopReturn
 	call Ctr3ds_EventScript_EventTicketsAtPort
 	return
 
-@ Slateport and the Battle Frontier, which don't sail to the islands.
+@ Slateport and the Battle Frontier, which do not sail to the islands.
 Ctr3ds_EventScript_EventTicketsAtOtherPort::
 	call Ctr3ds_EventScript_AnyEventTicketNeeded
 	goto_if_eq VAR_RESULT, FALSE, Common_EventScript_NopReturn
@@ -47,8 +50,8 @@ Ctr3ds_EventScript_EventTicketsAtPort::
 	call Ctr3ds_EventScript_GiveEventItems
 	return
 
-@ VAR_RESULT: TRUE if any of the four still needs handing over. Never before
-@ the Hall of Fame, whatever the caller.
+@ VAR_RESULT: TRUE if the player still needs any of the four. Never before the
+@ Hall of Fame, for all callers.
 Ctr3ds_EventScript_AnyEventTicketNeeded::
 	setvar VAR_RESULT, FALSE
 	goto_if_unset FLAG_SYS_GAME_CLEAR, Common_EventScript_NopReturn
@@ -61,11 +64,13 @@ Ctr3ds_EventScript_AnyEventTicketNeeded::
 	call Ctr3ds_EventScript_MysticTicketNeeded
 	return
 
-@ VAR_RESULT: TRUE if the item is needed. It is, unless the player already has
-@ both it and its enable flag. What the player has caught is not consulted,
-@ unlike the gift scripts: a catch on an island leaves its item in the bag,
-@ since nothing removes key items, so a catch check could only ever strand a
-@ save whose flags and bag disagree, and New Adventures Await counts the items.
+@ VAR_RESULT: TRUE if the player needs the item. The player needs it, unless
+@ the player has both the item and its enable flag.
+@
+@ Different from the gift scripts, this does not check what the player caught.
+@ After a catch on an island, the item stays in the bag, because nothing
+@ removes key items. Thus a catch check could only block a save whose flags and
+@ bag do not agree. Also, New Adventures Await counts the items.
 Ctr3ds_EventScript_EonTicketNeeded::
 	goto_if_unset FLAG_ENABLE_SHIP_SOUTHERN_ISLAND, Ctr3ds_EventScript_EventItemIsNeeded
 	checkitem ITEM_EON_TICKET
@@ -100,8 +105,8 @@ Ctr3ds_EventScript_EventItemIsNeeded::
 	setvar VAR_RESULT, TRUE
 	return
 
-@ Stops at a full bag, which then says so once rather than once for each item
-@ left.
+@ Stops at a full bag. Then the message shows once, not once for each item that
+@ is left.
 Ctr3ds_EventScript_GiveEventItems::
 	call Ctr3ds_EventScript_TryGiveEonTicket
 	goto_if_eq VAR_RESULT, FALSE, Ctr3ds_EventScript_EventItemsBagFull
@@ -113,15 +118,15 @@ Ctr3ds_EventScript_GiveEventItems::
 	goto_if_eq VAR_RESULT, FALSE, Ctr3ds_EventScript_EventItemsBagFull
 	return
 
-@ Not Common_EventScript_ShowBagIsFull, which ends the script: every caller
-@ carries on afterwards.
+@ Not Common_EventScript_ShowBagIsFull, which ends the script. Each caller
+@ continues after this.
 Ctr3ds_EventScript_EventItemsBagFull::
 	msgbox gText_TooBadBagIsFull, MSGBOX_DEFAULT
 	return
 
-@ One item each. VAR_RESULT comes back FALSE only if the bag was full, and then
-@ no flags are set, so a ferry attendant can hand the item over later. An item
-@ already in the bag only gets its flags.
+@ One item each. VAR_RESULT is FALSE only if the bag was full. Then no flags are
+@ set, so a ferry attendant can give the item later. For an item that is
+@ already in the bag, this sets only its flags.
 Ctr3ds_EventScript_TryGiveEonTicket::
 	call Ctr3ds_EventScript_EonTicketNeeded
 	goto_if_eq VAR_RESULT, FALSE, Ctr3ds_EventScript_EventItemNotNeeded
@@ -166,10 +171,10 @@ Ctr3ds_EventScript_EventItemNotNeeded::
 	setvar VAR_RESULT, TRUE
 	return
 
-@ VAR_0x8000: the item, which giveitem overwrites with itself, so callers see
-@ nothing a plain giveitem would not do. VAR_RESULT: TRUE if it is in the bag
-@ now. giveitem plays the obtain message and fanfare, and shows nothing when
-@ the bag is full.
+@ VAR_0x8000: the item. The giveitem command writes the same item back to it,
+@ so callers see nothing that a plain giveitem would not do. VAR_RESULT: TRUE
+@ if the item is in the bag now. The giveitem command plays the obtain message
+@ and fanfare, and shows nothing when the bag is full.
 Ctr3ds_EventScript_GiveEventItemIfMissing::
 	checkitem VAR_0x8000
 	goto_if_eq VAR_RESULT, TRUE, Common_EventScript_NopReturn

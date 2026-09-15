@@ -91,9 +91,10 @@ void GetNumMovesSelectedMonHas(void);
 void MoveDeleterChooseMoveToForget(void);
 
 #if PLATFORM_3DS
-// TRUE while the in-battle party menu (or the summary screen opened from it)
-// has gPlayerParty in battle order; see src/party_menu.c. The bottom screen
-// reads the party through 3ds/ui/ui_team.c, which undoes the shuffle.
+// TRUE while the in-battle party menu (or the summary screen that opens from
+// it) keeps gPlayerParty in battle order. See src/party_menu.c. The bottom
+// screen reads the party through 3ds/ui/ui_team.c, which undoes the change of
+// order.
 bool8 Ctr3dsPartyInBattleOrder(void);
 #endif
 

@@ -25,7 +25,8 @@
 #include "constants/battle_frontier.h"
 
 #if PLATFORM_3DS
-// Species randomiser, toggled from the bottom screen's EXTRA tab.
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -151,8 +152,8 @@ void CreateScriptedWildMon(u16 species, u8 level, u16 item)
     u8 heldItem[2];
 
 #if PLATFORM_3DS
-    // Every legendary and every static overworld battle arrives through here,
-    // via the setwildbattle script command.
+    // All legendary battles and static overworld battles come through here,
+    // from the setwildbattle script command.
     species = Ctr3dsMapSpecies(species);
 #endif
 

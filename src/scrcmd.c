@@ -51,7 +51,8 @@
 #include "constants/event_objects.h"
 
 #if PLATFORM_3DS
-// Species randomiser, toggled from the bottom screen's EXTRA tab.
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -1693,9 +1694,9 @@ bool8 ScrCmd_givemon(struct ScriptContext *ctx)
     u8 unkParam3 = ScriptReadByte(ctx);
 
 #if PLATFORM_3DS
-    // The randomiser hooks the script command rather than ScriptGiveMon itself,
-    // because the other caller (CB2_GiveStarter) passes a species that
-    // GetStarterPokemon has already mapped. See the comment there.
+    // The randomizer hooks the script command, not ScriptGiveMon, because the
+    // other caller (CB2_GiveStarter) gives a species that GetStarterPokemon
+    // already mapped. See the comment there.
     species = Ctr3dsMapSpecies(species);
 #endif
 

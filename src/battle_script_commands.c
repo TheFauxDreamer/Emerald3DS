@@ -53,14 +53,14 @@
 #include "constants/trainers.h"
 
 #if PLATFORM_3DS
-// EXP All and the level cap, both toggled from the bottom screen's EXTRA tab.
-// The behaviour lives in 3ds/tweaks.c, so each of the five hooks below is
-// either one extra clause on a condition the game already evaluates or one
-// extra statement. None of them changes the vanilla path, which is why every
-// one is fenced rather than folded in.
+// EXP All and the level cap. The EXTRA tab of the bottom screen turns them on
+// and off. The behavior is in 3ds/tweaks.c. Thus each of the five hooks below
+// is one more clause on a condition that the game already evaluates, or one
+// more statement. None of them changes the vanilla path, so each one is in its
+// own #if block.
 #include "../3ds/tweaks.h"
-// The shiny-catch achievement, the one achievement that is an event rather
-// than a state and so needs a hook (Cmd_givecaughtmon). See 3ds/achievements.c.
+// The shiny-catch achievement. It is the only achievement that is an event, not
+// a state, so it needs a hook (Cmd_givecaughtmon). See 3ds/achievements.c.
 #include "../3ds/achievements.h"
 #endif
 
@@ -3429,10 +3429,9 @@ static void Cmd_getexp(void)
                     }
 
 #if PLATFORM_3DS
-                    // A SOFT cap scales here, after Lucky Egg / trainer /
-                    // traded have all applied and before the message is built
-                    // below, so the number the player is shown is the number
-                    // the mon actually receives.
+                    // A soft cap scales the value here, after the Lucky Egg,
+                    // trainer and traded bonuses, and before the message below.
+                    // Thus the player sees the number that the Pokemon gets.
                     gBattleMoveDamage = (s32)Ctr3dsSoftCapExp(
                         GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL),
                         (u32)gBattleMoveDamage);

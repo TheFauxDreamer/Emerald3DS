@@ -25,7 +25,8 @@
 #include "constants/rgb.h"
 
 #if PLATFORM_3DS
-// Species randomiser, toggled from the bottom screen's EXTRA tab.
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -358,10 +359,10 @@ u16 GetStarterPokemon(u16 chosenStarterId)
     if (chosenStarterId > STARTER_MON_COUNT)
         chosenStarterId = 0;
 #if PLATFORM_3DS
-    // Remapping the RETURN VALUE rather than the table keeps every consumer in
-    // agreement: the sprite and cry on the selection screen, the mon actually
-    // given by CB2_GiveStarter, IsStarterInParty() in src/field_specials.c, and
-    // the credits sequence all call this one function.
+    // This remaps the return value, not the table, so all users get the same
+    // species. The sprite and cry on the selection screen, the Pokemon that
+    // CB2_GiveStarter gives, IsStarterInParty() in src/field_specials.c and the
+    // credits all call this function.
     return Ctr3dsMapSpecies(sStarterMon[chosenStarterId]);
 #else
     return sStarterMon[chosenStarterId];

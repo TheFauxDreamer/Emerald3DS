@@ -403,18 +403,17 @@ extern const struct PokemonCrySong gPokemonCrySongTemplate;
 
 extern const struct ToneData voicegroup_dummy;
 
-// These two are not variables: the m4a engine encodes each value in the
-// *address* of an absolute symbol, and reads it by casting the array to an
-// integer. rp2350/sound_symbols.s supplies them that way for the RP2350 build.
+// These two are not variables. The m4a engine puts each value in the address of
+// an absolute symbol, and reads it with a cast of the array to an integer. For
+// the RP2350 build, rp2350/sound_symbols.s supplies them in that way.
 //
-// A 3DSX can only express relocations that point inside the loaded image, so
-// &gNumMusicPlayers == 4 makes 3dsxtool abort with
+// A 3DSX can only have relocations that point inside the loaded image. Thus
+// &gNumMusicPlayers == 4 makes 3dsxtool stop with this error:
 //   absolute @ relSrc=00000004 / Relocation to invalid address!
-// The values are compile-time constants anyway, so on the 3DS use them
-// directly and emit no relocation at all. sound_symbols.s is correspondingly
-// left out of the 3DS archive (3ds/build_objs.sh), which turns any future
-// re-introduction of the address trick into an immediate link error rather
-// than another 3dsxtool failure.
+// The values are compile-time constants, so on the 3DS this uses them directly,
+// with no relocation. Also, the 3DS archive does not contain sound_symbols.s
+// (3ds/build_objs.sh). Thus, if the address trick comes back, the result is a
+// link error, not a 3dsxtool failure.
 #if PLATFORM_3DS
 #define NUM_MUSIC_PLAYERS 4   // BGM, SE1, SE2, SE3
 #define MAX_LINES 0

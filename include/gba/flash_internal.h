@@ -2,10 +2,10 @@
 #define GUARD_GBA_FLASH_INTERNAL_H
 
 #if PLATFORM_3DS
-// The 3DS backs the cart's 128 KB save flash with a plain RAM array
-// (3ds/gba_mem.c). Reads go straight through it; the write hooks below mirror
-// the region out to the SD card (3ds/host/save.c). Same hook names as RP2350
-// so agb_flash.c needs no further seams.
+// The 3DS keeps the 128 KB save flash of the cartridge in a plain RAM array
+// (3ds/gba_mem.c). Reads go directly to it. The write hooks below copy the
+// region to the SD card (3ds/host/save.c). The hook names are the same as on
+// RP2350, so agb_flash.c needs no more changes.
 extern u8 gCtrSaveFlash[];
 #define FLASH_BASE (gCtrSaveFlash)
 u16 Rp2350SaveEraseChip(void);
@@ -13,8 +13,8 @@ u16 Rp2350SaveEraseSector(u16 sectorNum);
 u16 Rp2350SaveProgramSector(u16 sectorNum, u8 *src);
 u16 Rp2350SaveProgramByte(u16 sectorNum, u32 offset, u8 data);
 void Rp2350SaveSync(void);
-// Forced flush, for the end of a save. Rp2350SaveSync above is deferred and is
-// called per sector during one; this is called once, when the save is done.
+// Forced flush, for the end of a save. Rp2350SaveSync above is deferred, and a
+// save calls it for each sector. A save calls this once, at its end.
 void CtrSaveCommit(void);
 #elif RP2350
 // The GBA cart's 128 KB save flash is emulated in the LAST 128 KB of the

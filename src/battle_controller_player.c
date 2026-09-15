@@ -123,27 +123,25 @@ static void EndDrawPartyStatusSummary(void);
 #if PLATFORM_3DS
 // ---- second-screen battle items --------------------------------------------
 //
-// The touch screen is an ALTERNATIVE route to the same battle action, never a
-// replacement. Every hook below is a pure early return, so with nothing queued
-// the d-pad path through the bag and party menus behaves exactly as it always
-// did.
+// The touch screen is a second way to the same battle action. It never replaces
+// the usual way. Each hook below is only an early return. Thus, with nothing in
+// the queue, the d-pad path through the bag and party menus does not change.
 //
-// Using an item asks the engine only TWO questions, which is the whole reason
-// this block is shaped the way it is: choose an action, then choose an item.
-// The engine never asks the player which mon an item targets -- look at
-// B_ACTION_USE_ITEM in HandleTurnActionSelectionState (src/battle_main.c) and
-// the only thing it emits is BtlController_EmitChooseItem. The target is a
-// client-side matter, and the healing itself is applied by the party menu
-// through ItemUseCB_Medicine (src/party_menu.c) before the item id is ever
-// returned. The engine's own script for a player item is a no-op:
+// To use an item, the engine asks only two questions: choose an action, then
+// choose an item. The engine never asks the player which Pokemon an item is
+// for. In HandleTurnActionSelectionState (src/battle_main.c), B_ACTION_USE_ITEM
+// only sends BtlController_EmitChooseItem. The target is a client-side matter.
+// The party menu applies the heal through ItemUseCB_Medicine (src/party_menu.c)
+// before it returns the item id. The engine's own script for a player item does
+// nothing:
 //
 //     BattleScript_PlayerUsesItem::      @ data/battle_scripts_2.s
 //         moveendcase MOVEEND_MIRROR_MOVE
 //         end
 //
-// So answering the two questions is not enough. Ctr3dsQueueBattleItem has to do
-// what the bag and party menu would have done -- apply the effect and consume
-// the item -- or the turn passes and nothing happens.
+// Thus the two answers are not sufficient. Ctr3dsQueueBattleItem must also do
+// what the bag and party menu do: apply the effect and remove the item. If not,
+// the turn passes and nothing occurs.
 static void HandleInputChooseAction(void);
 static void PlayerBufferExecCompleted(void);
 
@@ -154,27 +152,26 @@ static void Ctr3dsClearPending(void)
     sCtr3dsPendingItem = ITEM_NONE;
 }
 
-// Which battler is the player. Deliberately NOT gActiveBattler.
+// Which battler is the player. This is not gActiveBattler, on purpose.
 //
-// gActiveBattler is the loop variable of the controller dispatch in
+// The global gActiveBattler is the loop variable of the controller dispatch in
 // BattleMainCB1 (src/battle_main.c):
 //
-//     for (gActiveBattler = 0; gActiveBattler < gBattlersCount; gActiveBattler++)
-//         gBattlerControllerFuncs[gActiveBattler]();
+//   for (gActiveBattler = 0; gActiveBattler < gBattlersCount; gActiveBattler++)
+//       gBattlerControllerFuncs[gActiveBattler]();
 //
-// so once that loop returns it holds gBattlersCount, which is not a battler at
-// all. Everything in this block runs from the second screen's per-frame hook,
-// which fires AFTER BattleMainCB1 has returned, so gActiveBattler is never
-// valid here. Reading it was why the touch bag could never heal, and in a
-// double battle gBattlersCount is 4 against a MAX_BATTLERS_COUNT array, which
-// is out of bounds outright.
+// When that loop returns, it holds gBattlersCount, which is not a battler. All
+// of this block runs from the per-frame hook of the second screen, after
+// BattleMainCB1 returns. Thus gActiveBattler is never valid here. In a double
+// battle, gBattlersCount is 4, which is out of bounds for a MAX_BATTLERS_COUNT
+// array.
 static u8 Ctr3dsPlayerBattler(void)
 {
     return GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
 }
 
-// "Only at certain times" means exactly this: the player's controller is
-// sitting in action selection, which is when the d-pad could pick BAG too.
+// "Only at certain times" means this: the player's controller is in action
+// selection. At that time, the d-pad can also choose BAG.
 bool8 Ctr3dsPlayerIsChoosingAction(void)
 {
     u8 battler;
@@ -189,11 +186,11 @@ bool8 Ctr3dsPlayerIsChoosingAction(void)
     return gBattlerControllerFuncs[battler] == HandleInputChooseAction;
 }
 
-// PokemonUseItemEffects already writes gBattleMons[].hp and syncs status
-// through HealStatusConditions, but nothing redraws the sprite: the d-pad route
-// gets that from the battle screen being reshown after the party menu closes,
-// and there is no reshow here. Without this the top-screen bar keeps the old
-// value until something else happens to damage the mon.
+// PokemonUseItemEffects writes gBattleMons[].hp, and HealStatusConditions
+// updates the status. But nothing draws the sprite again. The d-pad path gets
+// this when the battle screen shows again after the party menu closes, and this
+// path has no such step. Without this function, the bar on the top screen keeps
+// the old value until the next damage.
 static void Ctr3dsRefreshHealthbox(u8 partySlot)
 {
     u32 i;
@@ -204,23 +201,25 @@ static void Ctr3dsRefreshHealthbox(u8 partySlot)
                                      &gPlayerParty[partySlot], HEALTHBOX_ALL);
 }
 
-// The state each ItemUseInBattle_* handler in src/item_use.c mutates, with none
-// of its top-screen UI. Returns one of the CTR3DS_ITEM_* codes; only QUEUED
-// means the caller should go on to spend the turn.
+// Changes the state that each ItemUseInBattle_* handler in src/item_use.c
+// changes, with none of its top-screen UI. Returns one of the CTR3DS_ITEM_*
+// codes. Only QUEUED means that the caller must continue and use the turn.
 //
-// partySlot indexes gPlayerParty directly and needs no translation. Outside the
-// party menu gPlayerParty is in FIELD order and gBattlerPartyIndexes holds field
-// ids; ExecuteTableBasedItemEffect_ (src/party_menu.c) only calls
-// GetPartyIdFromBattleSlot because UpdatePartyToBattleOrder has temporarily
-// permuted the array under it. The second screen never does that.
+// The partySlot value is an index into gPlayerParty, with no translation.
+// Outside the party menu, gPlayerParty is in field order and
+// gBattlerPartyIndexes holds field ids. ExecuteTableBasedItemEffect_
+// (src/party_menu.c) calls GetPartyIdFromBattleSlot only because
+// UpdatePartyToBattleOrder changed the order of the array for a short time. The
+// second screen never does that.
 static u8 Ctr3dsApplyBattleItem(u16 item, u8 partySlot)
 {
     switch (GetItemBattleUsage(item))
     {
     case ITEM_B_USE_MEDICINE:
-        // Inverted return: TRUE means it would do nothing. The vanilla bag
-        // bounces back to the item list here rather than spending the turn
-        // (ItemUseCB_Medicine clears gPartyMenuUseExitCallback), so neither do we.
+        // Inverted return: TRUE means that it would do nothing. Here the
+        // vanilla bag goes back to the item list, and does not use the turn
+        // (ItemUseCB_Medicine clears gPartyMenuUseExitCallback). This code does
+        // the same.
         if (PokemonUseItemEffects(&gPlayerParty[partySlot], item, partySlot, 0, FALSE))
             return CTR3DS_ITEM_NO_EFFECT;
 
@@ -229,9 +228,9 @@ static u8 Ctr3dsApplyBattleItem(u16 item, u8 partySlot)
         return CTR3DS_ITEM_QUEUED;
 
     case ITEM_B_USE_OTHER:
-        // A ball applies nothing; gBattlescriptsForBallThrow does the throw.
-        // ItemUseInBattle_PokeBall still removes it from the bag itself, and
-        // refuses when there is nowhere to put the catch.
+        // A ball applies nothing, because gBattlescriptsForBallThrow does the
+        // throw. As ItemUseInBattle_PokeBall does, this removes the ball from
+        // the bag, and refuses when there is no space for the catch.
         if (item <= LAST_BALL)
         {
             if (IsPlayerPartyAndPokemonStorageFull())
@@ -241,8 +240,9 @@ static u8 Ctr3dsApplyBattleItem(u16 item, u8 partySlot)
             return CTR3DS_ITEM_QUEUED;
         }
 
-        // Poke Doll and Fluffy Tail: the escape is gBattlescriptsForRunningByItem,
-        // and ItemUseInBattle_Escape refuses them against a trainer.
+        // Poke Doll and Fluffy Tail: gBattlescriptsForRunningByItem does the
+        // escape. As ItemUseInBattle_Escape does, this refuses them in a
+        // trainer battle.
         if (item == ITEM_POKE_DOLL || item == ITEM_FLUFFY_TAIL)
         {
             if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)
@@ -252,8 +252,8 @@ static u8 Ctr3dsApplyBattleItem(u16 item, u8 partySlot)
             return CTR3DS_ITEM_QUEUED;
         }
 
-        // X items, Dire Hit, Guard Spec. These ignore partySlot and act on
-        // whichever mon is out, exactly as ItemUseInBattle_StatIncrease does.
+        // X items, Dire Hit and Guard Spec. These ignore partySlot and act on
+        // the Pokemon that is out, as ItemUseInBattle_StatIncrease does.
         {
             u8 outSlot = gBattlerPartyIndexes[gBattlerInMenuId];
 
@@ -276,25 +276,27 @@ u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
     if (!Ctr3dsPlayerIsChoosingAction())
         return CTR3DS_ITEM_NOT_NOW;
 
-    // The same battle types HandleTurnActionSelectionState rejects the action
-    // in (src/battle_main.c, B_ACTION_USE_ITEM -> BattleScript_ActionSelectionItemsCantBeUsed).
-    // Checking it here and not there would spend the item on an action the
-    // engine then throws away.
+    // The same battle types in which HandleTurnActionSelectionState refuses the
+    // action (src/battle_main.c, B_ACTION_USE_ITEM,
+    // BattleScript_ActionSelectionItemsCantBeUsed). A check there and not here
+    // would use the item for an action that the engine then discards.
     if (gBattleTypeFlags & (BATTLE_TYPE_LINK
                             | BATTLE_TYPE_FRONTIER_NO_PYRAMID
                             | BATTLE_TYPE_EREADER_TRAINER
                             | BATTLE_TYPE_RECORDED_LINK))
         return CTR3DS_ITEM_NOT_NOW;
 
-    // Everything below addresses gBattlerControllerFuncs, gBattleBufferB and
-    // gBitTable through gActiveBattler, and none of it has a variant that takes
-    // a battler. Pointing it at the player for the duration is therefore the
-    // only way to use them from outside the dispatch loop -- and restoring it is
-    // not optional, because the engine resumes iterating with whatever it finds.
+    // All code below uses gBattlerControllerFuncs, gBattleBufferB and gBitTable
+    // through gActiveBattler, and none of it has a version that takes a
+    // battler. Thus the only way to use them from outside the dispatch loop is
+    // to set gActiveBattler to the player while they run. The restore is
+    // necessary, because the engine continues its loop with the value that it
+    // finds.
     //
-    // gBattlerInMenuId comes along for the same reason: PokemonUseItemEffects
-    // reads it and assigns gActiveBattler from it (src/pokemon.c), so out here
-    // it is the only thing telling the effect who is using the item.
+    // The gBattlerInMenuId value changes for the same reason.
+    // PokemonUseItemEffects reads it and sets gActiveBattler from it
+    // (src/pokemon.c). Thus, here, it is the only thing that tells the effect
+    // which battler uses the item.
     savedBattler = gActiveBattler;
     savedInMenu = gBattlerInMenuId;
     gActiveBattler = gBattlerInMenuId = Ctr3dsPlayerBattler();
@@ -305,7 +307,8 @@ u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
     {
         sCtr3dsPendingItem = item;
 
-        // Identical to picking BAG with the d-pad; see HandleInputChooseAction.
+        // The same as when the player chooses BAG with the d-pad. See
+        // HandleInputChooseAction.
         BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_ITEM, 0);
         PlayerBufferExecCompleted();
     }
@@ -2774,8 +2777,8 @@ static void PlayerHandleChooseAction(void)
     s32 i;
 
 #if PLATFORM_3DS
-    // Bounds the lifetime of a touch-screen queue to a single selection: a
-    // queue that was never consumed must not fire on a later turn.
+    // A touch-screen queue lasts for only one selection. A queue that the
+    // engine did not use must not fire on a later turn.
     Ctr3dsClearPending();
 #endif
 
@@ -2858,8 +2861,8 @@ static void PlayerHandleChooseItem(void)
     s32 i;
 
 #if PLATFORM_3DS
-    // Already chosen on the touch screen: answer and skip opening the bag. The
-    // target stays queued for PlayerHandleChoosePokemon below.
+    // The player already chose and used the item on the touch screen. Give the
+    // engine its id, and do not open the bag.
     if (sCtr3dsPendingItem != ITEM_NONE)
     {
         gSpecialVar_ItemId = sCtr3dsPendingItem;

@@ -703,41 +703,43 @@ static bool8 MainState_Exit(void)
         DestroyTask(FindTaskIdByFunc(Task_NamingScreen));
         FreeAllWindowBuffers();
 #if PLATFORM_3DS
-        // Tear down what this screen created BEFORE freeing the struct they all
-        // point at.
+        // Remove what this screen created before the struct that they all point
+        // at is freed.
         //
-        // Vanilla frees sNamingScreen here and leaves its sprites and helper
-        // tasks alive: only Task_NamingScreen is destroyed, so the cursor, the
-        // underscore, the input arrow, the page-swap trio, Task_HandleInput,
-        // Task_UpdateButtonFlash and (mid-swap) Task_HandlePageSwapAnim all
-        // survive into the return callback and keep running until whatever
-        // comes next happens to call ResetSpriteData()/ResetTasks(). Several of
-        // them dereference sNamingScreen, which is now NULL.
+        // Vanilla frees sNamingScreen here, but its sprites and helper tasks
+        // stay. Only Task_NamingScreen is destroyed. Thus these continue in the
+        // return callback until some later code calls ResetSpriteData() and
+        // ResetTasks():
+        // - the cursor, the underscore and the input arrow
+        // - the three page-swap sprites
+        // - Task_HandleInput and Task_UpdateButtonFlash
+        // - Task_HandlePageSwapAnim, during a page swap
         //
-        // On a GBA that is free -- no MMU, address 0 is the BIOS, and the junk
-        // it returns only feeds sprite gfx that is about to be wiped anyway. On
-        // the ARM11 address 0 is unmapped and it is a data abort.
+        // Some of them read through sNamingScreen, which is now NULL.
         //
-        // Observed as: catch a Pokemon, leave the nickname blank, confirm.
-        // AnimateSprites() runs the leftover page-swap sprite, whose state-0
-        // handler PageSwapSprite_Init reads sNamingScreen->currentPage. That
-        // field sits at offset 0x1E22 -- after three 0x800 tilemap buffers, a
-        // 16-byte text buffer and a 0x600 tile buffer -- which is exactly the
-        // FAR the crash reported.
+        // On a GBA, this has no effect. There is no MMU, and address 0 is the
+        // BIOS. The junk from it goes only to sprite graphics that are cleared
+        // soon. On the ARM11, address 0 is not mapped, and the read is a data
+        // abort.
         //
-        // Guarding each reader was the other option and it is the wrong one:
-        // the readers are reached through the sPageSwapSpriteFuncs[] table and
-        // through helpers like GetTextEntryPosition(), so enumerating them by
-        // hand is exactly the kind of list that ends up one short. Destroying
-        // the leftovers removes the window for all of them at once.
+        // For example: catch a Pokemon, leave the nickname blank, and confirm.
+        // AnimateSprites() runs the page-swap sprite that stays. Its state-0
+        // handler, PageSwapSprite_Init, reads sNamingScreen->currentPage. That
+        // field is at offset 0x1E22: after three 0x800 tilemap buffers, a
+        // 16-byte text buffer and a 0x600 tile buffer.
         //
-        // Safe for all five naming-screen flows because this screen OWNS the
-        // sprite and task sets by the time it gets here: its own init runs
+        // A guard in each reader is the wrong fix. The code gets to the readers
+        // through the sPageSwapSpriteFuncs[] table and helpers such as
+        // GetTextEntryPosition(). A list of them by hand could easily miss one.
+        // When this code removes the sprites and tasks, none of them can run.
+        //
+        // This is safe for all five naming-screen flows, because this screen
+        // owns the sprite and task sets at this point. Its own init always runs
         // ResetSpriteData(), FreeAllSpritePalettes() and ResetTasks()
-        // unconditionally (CB2_LoadNamingScreen cases 3 and 4). So nothing
-        // alive here belongs to the caller, and every return callback already
-        // has to rebuild its graphics from nothing. The callback has been set
-        // but has not run yet, so it has no tasks of its own to lose either.
+        // (CB2_LoadNamingScreen cases 3 and 4). Thus nothing here belongs to
+        // the caller, and each return callback must build its graphics again
+        // from nothing. The callback is set but has not run yet, so it has no
+        // tasks that this can remove.
         ResetSpriteData();
         ResetTasks();
 #endif

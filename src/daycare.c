@@ -24,7 +24,8 @@
 #include "constants/region_map_sections.h"
 
 #if PLATFORM_3DS
-// The badge-based level cap, toggled from the bottom screen's EXTRA tab.
+// The level cap from the badges, which the EXTRA tab of the bottom screen turns
+// on and off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -259,9 +260,9 @@ static u16 TakeSelectedPokemonFromDaycare(struct DaycareMon *daycareMon)
     {
         experience = GetMonData(&pokemon, MON_DATA_EXP) + daycareMon->steps;
 #if PLATFORM_3DS
-        // The level cap applies flatly here under SOFT as well as HARD: day
-        // care exp is a step-count trickle, and a "reduced trickle" would be a
-        // distinction without a difference.
+        // Here the level cap applies fully, for SOFT and for HARD. Day-care EXP
+        // comes in small steps, and a smaller step would make no real
+        // difference.
         experience = Ctr3dsClampCappedExp(species, experience);
 #endif
         SetMonData(&pokemon, MON_DATA_EXP, &experience);
@@ -300,8 +301,8 @@ static u8 GetLevelAfterDaycareSteps(struct BoxPokemon *mon, u32 steps)
 
     u32 experience = GetBoxMonData(mon, MON_DATA_EXP) + steps;
 #if PLATFORM_3DS
-    // The preview must clamp too, or the day care man advertises levels the
-    // write path above will refuse to deliver.
+    // The preview must clamp also. If not, the day-care man shows levels that
+    // the write path above does not give.
     experience = Ctr3dsClampCappedExp(GetBoxMonData(mon, MON_DATA_SPECIES), experience);
 #endif
     SetBoxMonData(&tempMon, MON_DATA_EXP,  &experience);

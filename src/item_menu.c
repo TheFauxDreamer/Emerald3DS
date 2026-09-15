@@ -52,7 +52,8 @@
 #include "constants/songs.h"
 
 #if PLATFORM_3DS
-// Persistent bag sort order, chosen on the bottom screen's EXTRA tab.
+// Persistent bag sort order, which the player chooses on the EXTRA tab of the
+// bottom screen.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -1120,9 +1121,9 @@ void UpdatePocketItemList(u8 pocketId)
     }
 
 #if PLATFORM_3DS
-    // Applied after the game's own pass, so the player's chosen order wins.
-    // This rewrites the real pocket array, which is what makes the order stick
-    // in the save and show up on the bottom screen's BAG tab as well.
+    // Applied after the game's own sort, so the order of the player wins. This
+    // changes the real pocket array. Thus the order stays in the save, and the
+    // BAG tab of the bottom screen shows it too.
     Ctr3dsSortBagPocket(pocketId);
 #endif
 

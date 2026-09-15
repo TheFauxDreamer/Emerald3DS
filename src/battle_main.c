@@ -534,7 +534,8 @@ const struct TrainerMoney gTrainerMoneyTable[] =
 #include "data/text/abilities.h"
 
 #if PLATFORM_3DS
-// Species randomiser, toggled from the bottom screen's EXTRA tab.
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
 #include "../3ds/tweaks.h"
 #endif
 
@@ -2017,14 +2018,13 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
 #if PLATFORM_3DS
-                // The four TRAINER_MON_* party flavours are distinct structs,
-                // so this is the same edit four times over. Hooking the call
-                // rather than the nameHash loop above is deliberate: the hash
-                // seeds personalityValue, and leaving it on the original name
-                // keeps a trainer's mon at a stable nature and gender whether
-                // the randomiser is on or off. CreateMon is passed a FIXED
-                // personality, so there is no gender rejection loop here to
-                // trip over a genderless result.
+                // The four TRAINER_MON_* party types are different structs, so
+                // each case has the same change. The change is on the call, not
+                // on the nameHash loop above. The hash sets personalityValue,
+                // and it stays on the original name. Thus a trainer's Pokemon
+                // keeps its nature and gender with the randomizer on or off.
+                // CreateMon gets a fixed personality, so no gender loop can
+                // fail on a genderless species.
                 CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
 #else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
@@ -2041,14 +2041,7 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
 #if PLATFORM_3DS
-                // The four TRAINER_MON_* party flavours are distinct structs,
-                // so this is the same edit four times over. Hooking the call
-                // rather than the nameHash loop above is deliberate: the hash
-                // seeds personalityValue, and leaving it on the original name
-                // keeps a trainer's mon at a stable nature and gender whether
-                // the randomiser is on or off. CreateMon is passed a FIXED
-                // personality, so there is no gender rejection loop here to
-                // trip over a genderless result.
+                // The same change as in the first case above.
                 CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
 #else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
@@ -2071,14 +2064,7 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
 #if PLATFORM_3DS
-                // The four TRAINER_MON_* party flavours are distinct structs,
-                // so this is the same edit four times over. Hooking the call
-                // rather than the nameHash loop above is deliberate: the hash
-                // seeds personalityValue, and leaving it on the original name
-                // keeps a trainer's mon at a stable nature and gender whether
-                // the randomiser is on or off. CreateMon is passed a FIXED
-                // personality, so there is no gender rejection loop here to
-                // trip over a genderless result.
+                // The same change as in the first case above.
                 CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
 #else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
@@ -2097,14 +2083,7 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
 #if PLATFORM_3DS
-                // The four TRAINER_MON_* party flavours are distinct structs,
-                // so this is the same edit four times over. Hooking the call
-                // rather than the nameHash loop above is deliberate: the hash
-                // seeds personalityValue, and leaving it on the original name
-                // keeps a trainer's mon at a stable nature and gender whether
-                // the randomiser is on or off. CreateMon is passed a FIXED
-                // personality, so there is no gender rejection loop here to
-                // trip over a genderless result.
+                // The same change as in the first case above.
                 CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
 #else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
@@ -5208,56 +5187,38 @@ static void HandleEndTurn_FinishBattle(void)
 static void FreeResetData_ReturnToOvOrDoEvolutions(void)
 {
 #if PLATFORM_3DS
-    // Reordered: nothing is freed until the sprites that read it are gone.
+    // Changed order: nothing is freed until the sprites that read it are gone.
     //
-    // The vanilla version below runs the frees on EVERY frame the end-of-battle
-    // fade is still going, and only calls ResetSpriteData() once it has
-    // finished. So for the length of the fade the battle sprites are alive and
-    // animating over data that has already been freed, with
-    // gBattleSpritesDataPtr set to NULL by FreeBattleSpritesData().
+    // The vanilla version below runs the frees on each frame of the
+    // end-of-battle fade, and calls ResetSpriteData() only when the fade ends.
+    // Thus, during the fade, the battle sprites run on freed data, and
+    // FreeBattleSpritesData() has set gBattleSpritesDataPtr to NULL.
     //
-    // On a GBA that is harmless. There is no MMU, address 0 is the BIOS, and a
-    // read through a null pointer quietly returns junk that nothing looks at
-    // again. On the ARM11 address 0 is simply not mapped, so the same read is a
-    // data abort -- "Translation - Section", FAR 00000000 -- and takes the
-    // process out. It is the same class of bug as the gSaveBlock1Ptr null read
-    // in the bottom screen's SaveDataLive(), and it bites for the same reason.
+    // On a GBA, address 0 is the BIOS, and a read through a NULL pointer gives
+    // junk that nothing uses. On the ARM11, address 0 is not mapped, so the
+    // same read is a data abort that stops the process.
     //
-    // SpriteCB_EnemyShadow (src/battle_gfx_sfx_util.c) is the one that found
-    // this. It ends with an UNGUARDED
+    // For example, SpriteCB_EnemyShadow (src/battle_gfx_sfx_util.c) ends with
+    // this read, with no guard:
     //
     //     gBattleSpritesDataPtr->battlerData[battler].behindSubstitute
     //
-    // and battlerData is the FIRST member of struct BattleSpriteData, so with
-    // the pointer NULL that load addresses exactly 0.
+    // The battlerData field is the first member of struct BattleSpriteData, so
+    // with a NULL pointer the load is at address 0. This callback runs only for
+    // the 61 species that hover (gEnemyMonElevation). It reads the pointer only
+    // when the opponent stays on the field, for example after the player runs.
     //
-    // Why it presented as "running from a wild battle sometimes crashes":
+    // The fix is here, not in that one callback. Sixteen sprite and task
+    // callbacks read a pointer that this function sets to NULL, and a guard in
+    // each could miss one. When the frees come after ResetSpriteData(), no
+    // callback can run on freed data.
     //
-    //   - Only the outcomes that leave the opponent STANDING are affected. A
-    //     faint (HideBattlerShadowSprite from the faint animation) and a catch
-    //     (the same call when the mon is drawn into the ball) both put the
-    //     shadow back on SpriteCB_SetInvisible, which touches nothing.
-    //     BattleScript_GotAwaySafely is a printstring and a waitmessage, so the
-    //     run path clears nothing -- and neither do B_OUTCOME_MON_FLED,
-    //     Teleport, or being Roared out of a wild battle.
-    //   - Only 61 species have a shadow callback at all.
-    //     SetBattlerShadowSpriteCallback only installs SpriteCB_EnemyShadow
-    //     when gEnemyMonElevation[species] is non-zero, i.e. for the ones that
-    //     hover. Run from a Zubat, Wingull, Beautifly, Skiploom or Duskull and
-    //     it aborts; run from a Zigzagoon or a Poochyena and it does not.
-    //
-    // Fixing it here rather than by guarding that one callback is deliberate:
-    // sixteen sprite and task callbacks dereference a pointer this function
-    // nulls, and a guard in each is sixteen chances to miss one. Freeing after
-    // ResetSpriteData() removes the window they all share.
-    //
-    // Net behavioural difference on this platform: the four frees happen once,
-    // on the frame the fade completes, instead of repeatedly during it. They
-    // are all idempotent and null-guarded, and nothing runs in between, so the
-    // only observable change is that the memory stays allocated for the few
-    // frames of the fade. Everything downstream still sees it freed --
-    // TryEvolvePokemon included, since the frees land before gBattleMainFunc is
-    // next called.
+    // The only difference on this platform: the four frees occur once, on the
+    // frame when the fade ends, not on each frame of it. They are all
+    // idempotent and check for NULL, and nothing runs between them. Thus the
+    // only change is that the memory stays allocated during the fade. All later
+    // code still sees it freed. This includes TryEvolvePokemon, because the
+    // frees occur before the next gBattleMainFunc call.
     if (gPaletteFade.active)
         return;
 
