@@ -1,34 +1,29 @@
-// Achievements: what they are, when they unlock, and the built-in provider the
-// bottom screen reads them through (achievements.h).
+// Achievements: what they are, when they unlock, and the built-in provider that
+// the bottom screen reads (achievements.h).
 //
-// Every condition is read through the game's own accessors -- FlagGet,
-// GetGameStat, CheckBagHasItem, the Pokedex counts -- for the reason
-// SECOND_SCREEN_CHEATSHEET.md gives for the whole bottom screen: stats and bag
-// quantities are XOR-encrypted and flags live behind gSaveBlock1Ptr, so a raw
-// read could disagree with the game's own screens. Nothing here writes game
-// state.
+// Every condition goes through the game's own accessors: FlagGet, GetGameStat,
+// CheckBagHasItem and the Pokedex counts. Stats and bag quantities are
+// XOR-encrypted, and flags are behind gSaveBlock1Ptr, so a raw read could
+// disagree with the game's screens (SECOND_SCREEN_CHEATSHEET.md). Nothing here
+// writes game state.
 //
-// This is a GAME-SIDE translation unit under the two-worlds rule in bridge.h:
-// game headers plus bridge.h, never <3ds.h>. The unlocked bits are handed to
-// the host through CtrAchStoreLoad/CtrAchStoreSave, which is where they are
-// persisted per playthrough.
+// This is a game-side file under the two-worlds rule in bridge.h: game headers
+// and bridge.h, never <3ds.h>. The unlocked bits go to the host through
+// CtrAchStoreLoad and CtrAchStoreSave, which store them for each playthrough.
 //
-// Almost every achievement is a STATE -- a badge flag, a count that has passed
-// a goal -- so it is polled rather than hooked. Three things leave no lasting
-// state behind, and are watched as they happen instead:
-//
-//   The shiny catch, the one hook: src/ gains exactly one fenced line for it.
-//
-//   Where the player has been, read on every overworld frame (NotePlace) and
-//   needing no hook at all. The save keeps the towns, and of the routes only
-//   what was found or fought on them, so the store keeps every map section
-//   the player has stood in.
-//
-//   A White or Black Flute, whose flag lasts only until the next map load, so
-//   it is read on every frame (NoteFlute) rather than on the round-robin.
+// Almost every achievement is a state (a badge flag, or a count above a goal),
+// so this file polls it. Three things leave no state, so this file watches them
+// when they occur:
+// - The shiny catch: the only hook, one line in src/.
+// - The places where the player stood, read on each overworld frame
+//   (NotePlace). The save keeps the towns, but only the routes where the player
+//   found or fought something. Thus the store keeps every map section that the
+//   player stood in.
+// - A White or Black Flute. Its flag lasts only until the next map load, so
+//   this file reads it on each frame (NoteFlute).
 //
 // 3ds/ACHIEVEMENTS.md lists every achievement. Change it in the same commit as
-// the tables below; CI (check_achievements_md.py) fails when the two disagree.
+// the tables below. CI (check_achievements_md.py) fails when the two disagree.
 
 #include "global.h"
 #include "battle_setup.h"             // GetTrainerFlagFromScriptPointer
@@ -36,8 +31,8 @@
 #include "item.h"                     // CheckBagHasItem, CheckPCHasItem
 #include "mail.h"                     // ItemIsMail
 #include "main.h"                     // gMain
-#include "overworld.h"                // CB2_Overworld, GetGameStat, Overworld_GetMapHeaderByGroupAndId
-#include "pokedex.h"                  // GetHoennPokedexCount, GetSetPokedexFlag, HasAllMons
+#include "overworld.h"                // CB2_Overworld, GetGameStat, map headers
+#include "pokedex.h"                  // Pokedex counts and flags, HasAllMons
 #include "pokemon.h"                  // GetMonData, IsMonShiny
 #include "region_map.h"               // Ctr3dsGetMapSecType
 #include "constants/event_bg.h"
@@ -59,7 +54,7 @@
 enum
 {
     ACH_FLAG,          // FlagGet(arg)
-    ACH_FLAG_COUNT,    // how many of `count` flags from `arg`, `step` apart, are set
+    ACH_FLAG_COUNT,    // set flags among `count` from `arg`, `step` apart
     ACH_FLAG_LIST,     // how many of the `count` flags in `list` are set
     ACH_ITEM_LIST,     // how many of the `count` items in `list` are in the bag
     ACH_STAT,          // GetGameStat(arg)
@@ -70,33 +65,33 @@ enum
     ACH_MAIL,          // any Mail, in the bag, the PC or the mail slots
     ACH_PARTY_COUNT,   // Pokemon in the party, eggs not counted
     ACH_PARTY_LEVEL,   // the highest level in the party
-    ACH_PLACES,        // how many of the `count` map sections from `arg` the player has stood in
-    ACH_EVENT,         // unlocked only as it happens; `arg` says which
+    ACH_PLACES,        // map sections stood in, of the `count` from `arg`
+    ACH_EVENT,         // unlocked only at the event, which `arg` names
 };
 
-// ACH_EVENT ids, for whatever sees the moment to find their entry by.
+// ACH_EVENT ids, so the code that sees the event can find its entry.
 #define ACH_EVENT_SHINY    1          // Ctr3dsAchOnCaught
 #define ACH_EVENT_LOW_TIDE 2          // NotePlace
 #define ACH_EVENT_FLUTE    3          // NoteFlute
 
 struct AchDef
 {
-    // The achievement's bit in achievements.bin. PERMANENT: an id is never
-    // changed and never reused, because a saved unlock is nothing but this bit.
-    // Row order is free -- it is only the display order -- but the id is not.
+    // The achievement's bit in achievements.bin. It is permanent: never change
+    // an id and never use it again, because a saved unlock is only this bit.
+    // The row order is free, because it is only the display order.
     u8  id;
     u8  kind;
     u8  step;          // ACH_FLAG_COUNT only
     const char *title;
     const char *desc;
     // Shown in place of desc until the row is earned (a hidden row shows
-    // neither), to say how to finish it. NULL for none.
+    // neither). It tells how to complete the row. NULL for none.
     const char *hint;
     const u16 *list;   // ACH_FLAG_LIST and ACH_ITEM_LIST
     u16 arg;
     u16 arg2;          // ACH_CAUGHT only: a second species that also counts
     u16 count;         // ACH_FLAG_COUNT, ACH_FLAG_LIST and ACH_ITEM_LIST
-    u32 goal;          // unlocked once the value reaches this
+    u32 goal;          // unlocked when the value reaches this
 };
 
 #define FLAG(i, t, d, f) \
@@ -129,15 +124,15 @@ struct AchDef
     { .id = i, .title = t, .desc = d, .kind = ACH_EVENT, .arg = e, .goal = 1 }
 
 // The game spells these with an e-acute. UiAscii() turns the UTF-8 pair into
-// the game's own glyph; octal rather than \x so a following hex letter ("d" in
-// dex, "b" in blocks) cannot be swallowed into the escape.
+// the game's own glyph. The escape is octal, not \x, so a following hex letter
+// ("d" in dex, "b" in blocks) does not become part of the escape.
 #define POKEMON     "Pok\303\251mon"
 #define POKEDEX     "Pok\303\251dex"
 #define POKEBLOCKS  "Pok\303\251blocks"
 #define POKENAV     "Pok\303\251Nav"
 
-// All eight HMs. Their flags were numbered as the games were written, so they
-// are scattered through the flag space, not a run FLAGS() could step along.
+// All eight HMs. Their flags are spread through the flag space, not in a run
+// that FLAGS() could step along.
 static const u16 sHmFlags[] =
 {
     FLAG_RECEIVED_HM_CUT,      FLAG_RECEIVED_HM_FLY,
@@ -146,10 +141,11 @@ static const u16 sHmFlags[] =
     FLAG_RECEIVED_HM_WATERFALL, FLAG_RECEIVED_HM_DIVE,
 };
 
-// The three Braille puzzles that open the Regis' chambers: Rock Smash in the
-// Desert Ruins, Flash in the Ancient Tomb and a lap around the Island Cave's
-// walls (src/braille_puzzles.c, IslandCave/scripts.inc). Each flag is set once
-// and never cleared, since the chamber stays open.
+// The three Braille puzzles that open the chambers of the Regis. They are Rock
+// Smash in the Desert Ruins, Flash in the Ancient Tomb, and a walk around the
+// walls of the Island Cave. See src/braille_puzzles.c and
+// IslandCave/scripts.inc. Each flag is set once and never cleared, because the
+// chamber stays open.
 static const u16 sRegiPuzzleFlags[] =
 {
     FLAG_SYS_REGIROCK_PUZZLE_COMPLETED,
@@ -157,42 +153,43 @@ static const u16 sRegiPuzzleFlags[] =
     FLAG_SYS_REGISTEEL_PUZZLE_COMPLETED,
 };
 
-// The four event items, in the order they are handed over: Dad gives them after
-// the Hall of Fame, or any S.S. Tidal ferry attendant does for a save already
-// past that scene (data/scripts/ctr3ds_event_tickets.inc). They are key items,
-// which cannot be deposited, tossed or sold, so the count only goes up. Inside
-// the Battle Pyramid, CheckBagHasItem answers for the Pyramid bag instead
-// (src/item.c), so a locked row reads low there; that cannot unlock anything
-// falsely, and an unlock is never taken back.
+// The four event items, in the order that the game gives them. Dad gives them
+// after the Hall of Fame. For a save that is already past that scene, any S.S.
+// Tidal ferry attendant gives them (data/scripts/ctr3ds_event_tickets.inc).
+// They are key items, which cannot be deposited, tossed or sold, so the count
+// only goes up.
+//
+// In the Battle Pyramid, CheckBagHasItem reads the Pyramid bag (src/item.c), so
+// a locked row shows a low count there. That cannot unlock anything by mistake,
+// and an unlock is never removed.
 static const u16 sEventItems[] =
 {
     ITEM_EON_TICKET, ITEM_AURORA_TICKET, ITEM_OLD_SEA_MAP, ITEM_MYSTIC_TICKET,
 };
 
-// The groups. Each is one page of the TROPHY tab and one colour, and a row's
-// page and colour are nothing but which group it is in, so neither can be
-// filed wrong. sGroups below lists them MAIN first, and within a page they
-// read as colour blocks in that order.
+// The groups. Each is one page of the TROPHY tab and one color. A row's page
+// and color come only from its group, so neither can be wrong. The sGroups
+// table below lists them MAIN first. Each page shows its color blocks in that
+// order.
 //
-// IDS ARE PERMANENT. The next new achievement takes the next unused id (83 at
-// the time of writing); a retired one leaves its id unused forever. Rows move
-// between groups freely, because only the id is stored. The debug page counts
-// duplicate or out-of-range ids, since C cannot check that at compile time.
+// Ids are permanent. A new achievement takes the next unused id (83 now). A
+// removed one leaves its id unused forever. Rows can move between groups,
+// because only the id is stored. C cannot check the ids at compile time, so the
+// debug page counts duplicate or out-of-range ids.
 //
-// Titles must fit the TROPHY tab's title line and descriptions its second line
-// (TROPHY_TITLE_MAX_W, TROPHY_DESC_MAX_W in 3ds/ui/tab_trophy.c). There is no
-// clipping on this screen, so the debug page counts any that do not fit.
+// Titles must fit the TROPHY tab's title line, and descriptions its second line
+// (TROPHY_TITLE_MAX_W and TROPHY_DESC_MAX_W in 3ds/ui/tab_trophy.c). Nothing on
+// this screen clips, so the debug page counts the rows that do not fit.
 //
-// Everything here can be earned in this port as it stands, with one deliberate
-// exception: An Impossible Task, which its title owns up to. That rules out the
-// complete Hoenn Pokedex and anything past about 200 in the National one: both
-// need trade evolutions, and trading waits on the Cable Club
-// (local-wireless branch).
+// The player can earn everything here in this port, with one exception: An
+// Impossible Task, as its title says. Thus there is no row for the complete
+// Hoenn Pokedex or for more than about 200 in the National one. Both need trade
+// evolutions, and trading needs the Cable Club (the local-wireless branch).
 //
-// Every row is also listed in 3ds/ACHIEVEMENTS.md, in the same order.
+// 3ds/ACHIEVEMENTS.md also lists every row, in the same order.
 
-// MAIN, Story (gold): the journey in the order Emerald hands it out, with each
-// badge where it falls in it.
+// MAIN, Story (gold): the journey, in the game's order, with each badge in its
+// place.
 static const struct AchDef sMainStory[] =
 {
     FLAG(48, "A Journey Begins",   "Choose your first " POKEMON,      FLAG_SYS_POKEMON_GET),
@@ -213,7 +210,7 @@ static const struct AchDef sMainStory[] =
     FLAG(60, "Surf's Up",          "Get HM03 Surf from Wally's father", FLAG_RECEIVED_HM_SURF),
     FLAG(61, "Take Flight",        "Get HM02 Fly on Route 119",       FLAG_RECEIVED_HM_FLY),
     FLAG(5,  "Feather Badge",      "Beat Winona in Fortree City",     FLAG_BADGE06_GET),
-    // Emerald's one Master Ball is the item ball in Aqua Hideout B1F.
+    // The game's one Master Ball is the item ball in Aqua Hideout B1F.
     FLAG(63, "The Best Ball",      "Find the Master Ball in the Aqua Hideout", FLAG_ITEM_AQUA_HIDEOUT_B1F_MASTER_BALL),
     FLAG(6,  "Mind Badge",         "Beat Tate and Liza in Mossdeep",  FLAG_BADGE07_GET),
     FLAG(7,  "Rain Badge",         "Beat Juan in Sootopolis City",    FLAG_BADGE08_GET),
@@ -222,13 +219,12 @@ static const struct AchDef sMainStory[] =
     FLAG(9,  "Champion",           "Enter the Hall of Fame",          FLAG_SYS_GAME_CLEAR),
 };
 
-// MAIN, Legendary (green): the legends that can be faced before the Hall of
-// Fame. The FLAG_DEFEATED_* flags are set whether the encounter ends in a
-// catch or a knockout (the scripts set them on both branches), so these are
-// about facing the legend, and they still work with the randomiser on.
-// Rayquaza is catchable once the Sootopolis crisis is over
-// (VAR_SKY_PILLAR_STATE reaches 2), and the Regis once the Sealed Chamber is
-// open, which needs only Dive.
+// MAIN, Legendary (green): the legends that the player can meet before the Hall
+// of Fame. The scripts set the FLAG_DEFEATED_* flags after a catch and after a
+// knockout. Thus these rows are about meeting the legend, and they still work
+// with the randomizer on. Rayquaza is catchable after the Sootopolis crisis
+// (VAR_SKY_PILLAR_STATE reaches 2). The Regis are catchable when the Sealed
+// Chamber is open, which needs only Dive.
 static const struct AchDef sMainLegends[] =
 {
     FLAG(11, "Sky High",           "Face Rayquaza atop Sky Pillar",   FLAG_DEFEATED_RAYQUAZA),
@@ -238,23 +234,23 @@ static const struct AchDef sMainLegends[] =
     FLAG(16, "Iron Will",          "Face Registeel in the Ancient Tomb", FLAG_DEFEATED_REGISTEEL),
 };
 
-// MAIN, Pokemon (red): catching, raising and the Pokedex, roughly easiest first.
+// MAIN, Pokemon (red): catching, training and the Pokedex, about easiest first.
 static const struct AchDef sMainPokemon[] =
 {
     STAT(23, "Gotcha!",            "Catch your first wild " POKEMON,  GAME_STAT_POKEMON_CAPTURES, 1),
     STAT(57, "It's Evolving!",     "Evolve a " POKEMON " for the first time", GAME_STAT_EVOLVED_POKEMON, 1),
-    // Hoenn's ten one-time tutors, the first in Slateport's Fan Club, whose
-    // FLAG_MOVE_TUTOR_TAUGHT_* flags are one run, each set only once a move is
-    // taught (data/scripts/move_tutors.inc). The Battle Frontier's two tutors
-    // charge Battle Points and set no flag, so they leave nothing to read.
+    // Hoenn's ten one-time tutors. The first is in Slateport's Fan Club. Their
+    // FLAG_MOVE_TUTOR_TAUGHT_* flags are one run, and each is set only after a
+    // move is taught (data/scripts/move_tutors.inc). The Battle Frontier's two
+    // tutors use Battle Points and set no flag, so there is nothing to read.
     FLAGS(78, "Teaching an Old Dog New Tricks", "Use any move tutor",
           FLAG_MOVE_TUTOR_TAUGHT_SWAGGER,
           FLAG_MOVE_TUTOR_TAUGHT_EXPLOSION - FLAG_MOVE_TUTOR_TAUGHT_SWAGGER + 1, 1, 1),
     STAT(66, "In Good Hands",      "Leave a " POKEMON " at the Day Care", GAME_STAT_USED_DAYCARE, 1),
     PARTY_COUNT(56, "Full House",  "Have six " POKEMON " in your party", 6),
     STAT(26, "Hatchling",          "Hatch an Egg",                    GAME_STAT_HATCHED_EGGS, 1),
-    // A flag rather than the Pokedex, so it still counts when the randomiser
-    // has turned the revived Lileep or Anorith into something else.
+    // A flag, not the Pokedex, so it still counts when the randomizer changed
+    // the revived Lileep or Anorith into another species.
     FLAG(65, "Ancient History",    "Revive a fossil at Devon Corp.",  FLAG_RECEIVED_REVIVED_FOSSIL_MON),
     DEX_HOENN(19, "Researcher",     "Own 25 kinds in the Hoenn " POKEDEX,  25),
     DEX_HOENN(20, "Field Worker",   "Own 50 kinds in the Hoenn " POKEDEX,  50),
@@ -275,26 +271,26 @@ static const struct AchDef sMainBattle[] =
     STAT(30, "Battle Hardened",    "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
 };
 
-// MAIN, Extras (blue): the things to do around Hoenn besides the story,
-// roughly in the order the game opens them up.
+// MAIN, Extras (blue): the activities around Hoenn outside the story, about in
+// the order that the game makes them available.
 static const struct AchDef sMainExtras[] =
 {
-    // Any flag in the hidden items' run, the last named one ending it. Nothing
-    // sets one but the pickup (see MapShowsVisit). Route 104 alone hides five.
+    // Any flag in the run of hidden items, up to the last named one. Only the
+    // pickup sets these flags (see MapShowsVisit). Route 104 alone hides five.
     FLAGS(80, "What Do We Have Here!", "Find any hidden item",
           FLAG_HIDDEN_ITEMS_START,
           FLAG_HIDDEN_ITEM_ROUTE_105_BIG_PEARL - FLAG_HIDDEN_ITEMS_START + 1, 1, 1),
-    // Petalburg's Mart is the first to sell it, and three of the in-game
-    // trades come with a letter from their old trainer.
+    // Petalburg's Mart sells it first, and three of the in-game trades come
+    // with a letter from the old trainer.
     MAIL(79, "You've Got Mail!",   "Receive any mail"),
-    // The questionnaire on any Mart's counter, once the player has a Pokedex
+    // The questionnaire on any Mart's counter, after the player has a Pokedex
     // (data/scripts/questionnaire.inc).
     FLAG(81, "Mystery Communication", "Enable Mystery Gift",          FLAG_SYS_MYSTERY_GIFT_ENABLE),
     STAT(33, "Cable Car",          "Ride the cable car up Mt. Chimney", GAME_STAT_RODE_CABLE_CAR, 1),
     STAT(34, "Hot Springs",        "Soak in the Lavaridge hot springs", GAME_STAT_ENTERED_HOT_SPRINGS, 1),
     SECRET_BASE(38, "Home Base",   "Set up a Secret Base"),
     STAT(36, "Green Thumb",        "Plant 25 berries",                GAME_STAT_PLANTED_BERRIES, 25),
-    // The Glass Workshop on Route 113 blows both, for volcanic ash.
+    // The Glass Workshop on Route 113 makes both, for volcanic ash.
     EVENT(77, "Play Me a Tune",    "Use the White or Black Flute",    ACH_EVENT_FLUTE),
     STAT(40, "Jackpot!",           "Hit a jackpot at the Game Corner", GAME_STAT_SLOT_JACKPOTS, 1),
     STAT(35, "On Safari",          "Enter the Safari Zone",           GAME_STAT_ENTERED_SAFARI_ZONE, 1),
@@ -317,58 +313,60 @@ static const struct AchDef sMainContests[] =
     STAT(42, "Ribbon Collector",   "Earn 10 ribbons",                 GAME_STAT_RECEIVED_RIBBONS, 10),
 };
 
-// POST-GAME: everything that only opens up after the Hall of Fame, hidden
-// until then (see sRevealed). The National Pokedex is Birch's reward for it;
-// the abnormal weather that opens Terra Cave and Marine Cave only starts once
-// FLAG_SYS_GAME_CLEAR is set (Route119_WeatherInstitute_2F/scripts.inc); the
-// roaming Lati is released by it; the S.S. Tidal to the Battle Frontier only
-// sails after it; and the four event items only come after it.
+// POST-GAME: everything that becomes available only after the Hall of Fame,
+// hidden until then (see sRevealed):
+// - The National Pokedex is Birch's reward for it.
+// - The abnormal weather that opens Terra Cave and Marine Cave starts only
+//   after FLAG_SYS_GAME_CLEAR (Route119_WeatherInstitute_2F/scripts.inc).
+// - The roaming Lati starts after it.
+// - The S.S. Tidal to the Battle Frontier sails only after it.
+// - The four event items come only after it.
 static const struct AchDef sPostStory[] =
 {
     FLAG(10, "A Bigger Journey Begins", "Get the National " POKEDEX, FLAG_SYS_NATIONAL_DEX),
-    // Mostly for saves already past Dad's scene, which have none of the four
-    // until they talk to a ferry attendant: the hint says so.
+    // Mostly for saves that are already past Dad's scene. They have none of the
+    // four until the player talks to a ferry attendant, and the hint says so.
     ITEM_LIST(74, "New Adventures Await", "Get all three tickets and the Old Sea Map",
               "Ask any ferry attendant for the rest", sEventItems, 4),
-    // The Frontier Pass, handed over in the reception gate on the first visit
-    // (BattleFrontier_ReceptionGate/scripts.inc) and never taken back.
+    // The Frontier Pass. The player gets it in the reception gate on the first
+    // visit (BattleFrontier_ReceptionGate/scripts.inc), and never loses it.
     FLAG(75, "A New Frontier",     "Unlock the Battle Frontier",      FLAG_SYS_FRONTIER_PASS),
 };
 
-// Sudowoodo is a special encounter rather than a legendary, but it is faced
-// the same way and belongs with them more than anywhere else.
+// Sudowoodo is a special encounter, not a legendary. The player meets it the
+// same way, so it belongs with them.
 static const struct AchDef sPostLegends[] =
 {
     FLAG(12, "Terra Firma",        "Face Groudon in the Terra Cave",  FLAG_DEFEATED_GROUDON),
     FLAG(13, "Deep Blue",          "Face Kyogre in the Marine Cave",  FLAG_DEFEATED_KYOGRE),
     // The roaming one sets no flag when caught (only the Southern Island one
-    // does, below), so this asks the Pokedex instead.
+    // does, below), so this reads the Pokedex.
     CAUGHT(17, "Eon Chaser",       "Catch the roaming Latias or Latios", SPECIES_LATIAS, SPECIES_LATIOS),
-    // The four event islands, opened by the items New Adventures Await counts.
-    // Each flag is set only on a catch, so these are about catching rather than
-    // facing, and they still work with the randomiser on.
+    // The four event islands, opened by the items that New Adventures Await
+    // counts. Each flag is set only after a catch. Thus these rows are about
+    // the catch, and they still work with the randomizer on.
     FLAG(69, "Southern Secret",    "Catch the Lati on Southern Island", FLAG_CAUGHT_LATIAS_OR_LATIOS),
     FLAG(70, "Faraway Friend",     "Catch Mew on Faraway Island",     FLAG_CAUGHT_MEW),
     // Deoxys has no FLAG_CAUGHT_*. FLAG_BATTLED_DEOXYS, despite its name, is
-    // set only on the catch branch (BirthIsland_Exterior/scripts.inc).
+    // set only after a catch (BirthIsland_Exterior/scripts.inc).
     FLAG(71, "Out of This World",  "Catch Deoxys on Birth Island",    FLAG_BATTLED_DEOXYS),
     FLAG(72, "Rainbow Wing",       "Catch Ho-Oh atop Navel Rock",     FLAG_CAUGHT_HO_OH),
     FLAG(73, "Silver Wing",        "Catch Lugia deep in Navel Rock",  FLAG_CAUGHT_LUGIA),
     FLAG(18, "Odd Tree",           "Deal with the tree by the Frontier", FLAG_DEFEATED_SUDOWOODO),
 };
 
-// The one row that cannot be earned yet, and says so in its title. "Complete"
-// is the game's own test, the one the Pokedex diploma uses: every kind except
+// The one row that the player cannot earn yet, as its title says. "Complete" is
+// the game's own test, which the Pokedex diploma uses: every species except
 // Mew, Lugia, Ho-Oh, Celebi, Jirachi and Deoxys (HasAllMons, src/pokedex.c).
-// The rest still includes the Kanto and Johto starters and legends, which only
-// a trade can bring.
+// The rest includes the Kanto and Johto starters and legends, which only a
+// trade can give.
 static const struct AchDef sPostPokemon[] =
 {
     DEX_COMPLETE(82, "An Impossible Task", "Complete the National " POKEDEX),
 };
 
-// The Battle Frontier. The seven Silver flags run from FLAG_SYS_TOWER_SILVER
-// two apart, each facility's Gold straight after its Silver.
+// The Battle Frontier. The seven Silver flags start at FLAG_SYS_TOWER_SILVER,
+// two apart, and each facility's Gold flag comes just after its Silver flag.
 static const struct AchDef sPostBattle[] =
 {
     STAT(43, "Tower Climber",      "Win 7 in a row at the Battle Tower", GAME_STAT_BATTLE_TOWER_SINGLES_STREAK, 7),
@@ -388,8 +386,8 @@ struct AchGroup
 
 #define GROUP(s, c, r) { .section = s, .category = c, .count = ARRAY_COUNT(r), .rows = r }
 
-// MAIN before POST-GAME, which is what lets "the first unseen achievement"
-// prefer the main page.
+// MAIN before POST-GAME. Thus "the first unseen achievement" prefers the main
+// page.
 static const struct AchGroup sGroups[] =
 {
     GROUP(ACH_SECTION_MAIN,     ACH_CAT_STORY,   sMainStory),
@@ -404,30 +402,30 @@ static const struct AchGroup sGroups[] =
     GROUP(ACH_SECTION_POSTGAME, ACH_CAT_BATTLE,  sPostBattle),
 };
 
-// The largest id the store has a bit for. Unique ids below it also bound the
-// number of rows, so the id check is the capacity check.
+// The largest id that the store has a bit for. Unique ids below it also limit
+// the number of rows, so the id check is also the capacity check.
 #define ACH_ID_LIMIT (CTR_ACH_BYTES * 8)
 
-// One bit per map section. BitGet and BitSet guard with ACH_ID_LIMIT, which is
-// only right for the place bits too while the two arrays are the same size.
+// One bit for each map section. BitGet and BitSet check against ACH_ID_LIMIT,
+// which is correct for the place bits only while the two arrays have the same
+// size.
 #define PLACE_LIMIT (CTR_ACH_PLACE_BYTES * 8)
 STATIC_ASSERT(PLACE_LIMIT == ACH_ID_LIMIT, PlaceBitsMatchIdBits);
 
-// What a post-game row says until it is revealed.
+// The text of a post-game row until the reveal.
 #define HIDDEN_TITLE "Hidden Achievement"
 #define HIDDEN_DESC  "Progress to discover"
 
-// With this many places left or fewer, an ACH_PLACES row names them in place
-// of its description: the last few are the hard ones to find, and the counter already
-// says what the goal is. Three is what fits. The widest three, "Still to
-// visit: Ever Grande, Verdanturf, Sootopolis", measure 261px of the 268 the
-// description line has (TROPHY_DESC_MAX_W), and the debug page measures the
-// line whenever it is showing.
+// With this many places left or fewer, an ACH_PLACES row names them in place of
+// its description. The last places are the hard ones to find, and the counter
+// already shows the goal. Three names fit. The widest three ("Still to visit:
+// Ever Grande, Verdanturf, Sootopolis") are 261px of the 268px description line
+// (TROPHY_DESC_MAX_W). The debug page measures the line when it shows.
 #define PLACES_NAMED 3
 
-// The towns' names for that line, in map-section order. Without "Town" and
-// "City", which is what lets three fit. The game's own names are no use here:
-// they are upper case and in its own character set.
+// The names of the towns for that line, in map-section order, without "Town"
+// and "City", so three fit. The game's own names do not work here: they are
+// upper case and in the game's character set.
 static const char *const sTownNames[] =
 {
     "Littleroot", "Oldale",     "Dewford",   "Lavaridge",
@@ -436,15 +434,15 @@ static const char *const sTownNames[] =
     "Lilycove",   "Mossdeep",   "Sootopolis", "Ever Grande",
 };
 
-// AppendPlaceName relies on the towns coming first and the routes straight
-// after, in number order.
+// AppendPlaceName needs the towns first and the routes just after them, in
+// number order.
 STATIC_ASSERT(ARRAY_COUNT(sTownNames) == MAPSEC_EVER_GRANDE_CITY + 1, TownNamesCoverTowns);
 STATIC_ASSERT(MAPSEC_ROUTE_101 == MAPSEC_EVER_GRANDE_CITY + 1, RoutesFollowTowns);
 STATIC_ASSERT(MAPSEC_ROUTE_134 == MAPSEC_ROUTE_101 + 33, RoutesInOrder);
 
-// The groups flattened into provider order once, on first use, so that every
-// per-frame question about achievement i is an array index rather than a walk.
-// The provider index runs through the groups in sGroups order.
+// The groups, flattened into provider order once, on first use. Thus each
+// per-frame question about achievement i is an array index, not a walk. The
+// provider index goes through the groups in sGroups order.
 static const struct AchDef *sFlat[ACH_ID_LIMIT];
 static u8  sFlatSection[ACH_ID_LIMIT];
 static u8  sFlatCategory[ACH_ID_LIMIT];
@@ -485,8 +483,8 @@ static u16 Count(void)
 
 #define ACH_COUNT Count()
 
-// Callers only ever pass i < ACH_COUNT; anything else gets the first row
-// rather than a wild read.
+// Callers always give i < ACH_COUNT. Any other value gets the first row, not a
+// wild read.
 static const struct AchDef *DefAt(u16 i)
 {
     BuildFlat();
@@ -509,26 +507,26 @@ static u8 CategoryAt(u16 i)
 
 static u8    sUnlocked[CTR_ACH_BYTES];
 static u8    sUnseen[CTR_ACH_BYTES];
-static u8    sPlaces[CTR_ACH_PLACE_BYTES];   // map sections stood in (NotePlace)
+static u8    sPlaces[CTR_ACH_PLACE_BYTES];   // sections stood in (NotePlace)
 static u32   sPlayerId;
-static bool8 sLive;        // a playthrough has been adopted
-static u16   sCursor;      // the next definition AchTick evaluates
+static bool8 sLive;        // a playthrough is adopted
+static u16   sCursor;      // the next definition that AchTick checks
 
-// Whether the post-game page shows its real names: FLAG_SYS_GAME_CLEAR, set on
-// entering the Hall of Fame, the same moment "Champion" unlocks. Cached while
-// the save is Current() so the provider never reads a flag on the UI's behalf.
+// TRUE when the post-game page shows its real names: FLAG_SYS_GAME_CLEAR, set
+// at the Hall of Fame, when "Champion" unlocks. It is cached while the save is
+// Current(), so the provider never reads a flag for the UI.
 static bool8 sRevealed;
 
-// Notifications waiting for the toast. Small, because it only has to hold what
-// can unlock between two toasts; when it is full the newest entry grows into a
-// batch instead of anything being dropped.
+// Notifications that wait for the toast. Small, because it only holds the
+// unlocks between two toasts. When it is full, the newest entry becomes a
+// batch, so nothing drops.
 #define TOAST_QUEUE 8
 
 static struct { u16 index, batch; } sToasts[TOAST_QUEUE];
 static u8 sToastHead, sToastLen;
 
-// Keyed on an achievement's id. An id past the store's end is refused rather
-// than trusted: a typo in a table must not write past these arrays.
+// The key is the achievement's id. An id past the end of the store is refused.
+// A typo in a table must not write past these arrays.
 static bool8 BitGet(const u8 *bits, u8 id)
 {
     return id < ACH_ID_LIMIT && ((bits[id / 8] >> (id % 8)) & 1);
@@ -541,7 +539,7 @@ static void BitSet(u8 *bits, u8 id)
 }
 
 // The bottom screen's SaveDataLive(), for the same reason: both pointers start
-// NULL and every FlagGet goes through gSaveBlock1Ptr.
+// as NULL, and every FlagGet goes through gSaveBlock1Ptr.
 static bool8 SaveLive(void)
 {
     return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
@@ -552,19 +550,17 @@ static u32 PlayerId(void)
     return T1_READ_32(gSaveBlock2Ptr->playerTrainerId);
 }
 
-// TRUE while the save in memory is the playthrough being scored. Everything
-// that reads a condition asks this first, and it is not the same question as
-// sLive: the save block changes owner without passing through the overworld.
+// TRUE while the save in memory is the scored playthrough. Everything that
+// reads a condition asks this first. It is not the same as sLive, because the
+// save block can change owner without the overworld:
+// - New Game: the trainer ID changes in Birch's speech, while the old save's
+//   flags stay until NewGameInitData() clears them.
+// - Soft reset: the intro loads the save on the card, which can be a different
+//   playthrough. For example: start a new game, do not save, reset. The old
+//   save is then in memory under the new game's record.
 //
-//   New Game: the trainer ID changes in Birch's speech, over the old save's
-//   flags, until NewGameInitData() clears them.
-//
-//   Soft reset: the intro reloads the save on the card, which need not be the
-//   playthrough just being played. Start a new game, never save it, reset, and
-//   the old save is back in memory under the new game's record.
-//
-// In both, the ID in the save block stops matching the adopted one, so nothing
-// is evaluated until the next overworld frame adopts whoever it now is.
+// In both cases, the ID in the save block no longer matches the adopted ID.
+// Thus nothing is checked until the next overworld frame adopts the new owner.
 static bool8 Current(void)
 {
     return sLive && SaveLive() && PlayerId() == sPlayerId;
@@ -596,11 +592,11 @@ static bool8 Owns(u16 species)
         && GetSetPokedexFlag(SpeciesToNationalPokedexNum(species), FLAG_GET_CAUGHT);
 }
 
-// The Battle Factory lends its challengers rental Pokemon, and puts them in
-// gPlayerParty under the player's own OT ID -- at level 100 in Open Level. So
-// the party is not the player's own anywhere in the Factory, and the two party
-// conditions wait until they are out of it. All three rooms, not just the
-// battle one, because a challenge can be saved and resumed from the others.
+// The Battle Factory lends rental Pokemon and puts them in gPlayerParty under
+// the player's own OT ID, at level 100 in Open Level. Thus the party is not the
+// player's in the Factory, and the two party conditions wait until the player
+// leaves. All three rooms count, because a challenge can be saved and continued
+// from each.
 static bool8 InBattleFactory(void)
 {
     s8 group = gSaveBlock1Ptr->location.mapGroup;
@@ -614,16 +610,16 @@ static bool8 InBattleFactory(void)
         || num == MAP_NUM(MAP_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM);
 }
 
-// A party slot holding a Pokemon rather than nothing or an egg. Both fields sit
-// before MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h), so nothing decrypts.
+// A party slot with a Pokemon, not empty and not an egg. Both fields are before
+// MON_DATA_ENCRYPT_SEPARATOR (include/pokemon.h), so nothing decrypts.
 static bool8 PartySlotIsMon(struct Pokemon *mon)
 {
     return GetMonData(mon, MON_DATA_SANITY_HAS_SPECIES)
         && !GetMonData(mon, MON_DATA_SANITY_IS_EGG);
 }
 
-// How far along a definition is right now. Only ever called while Current():
-// there is save data to read, and it belongs to the adopted playthrough.
+// The current progress of a definition. Call only while Current(): there is
+// save data to read, and it belongs to the adopted playthrough.
 static u32 Value(const struct AchDef *d)
 {
     u32 n = 0;
@@ -657,8 +653,8 @@ static u32 Value(const struct AchDef *d)
     case ACH_DEX_HOENN:
         return GetHoennPokedexCount(FLAG_GET_CAUGHT);
 
-    // Cheap while it is out of reach: HasAllMons stops at the first kind
-    // missing, and Bulbasaur, the first it asks about, needs a trade.
+    // Cheap while the goal is out of reach: HasAllMons stops at the first
+    // missing species, and Bulbasaur, the first that it checks, needs a trade.
     case ACH_DEX_COMPLETE:
         return HasAllMons() ? 1 : 0;
 
@@ -668,10 +664,11 @@ static u32 Value(const struct AchDef *d)
     case ACH_SECRET_BASE:
         return gSaveBlock1Ptr->secretBases[0].secretBaseId != 0 ? 1 : 0;
 
-    // A blank Mail in the bag or the PC's item storage, or a written one: held
-    // by a party Pokemon or filed in the PC mailbox, both of which live in the
-    // save's mail slots. ClearMail empties a slot to ITEM_NONE, and a New Game
-    // clears them all. The Mail items are one run, so ItemIsMail ends the loop.
+    // A blank Mail in the bag or the PC's item storage, or a written Mail. A
+    // party Pokemon can hold a written Mail, or the PC mailbox can keep it.
+    // Both are in the save's mail slots. ClearMail sets a slot to ITEM_NONE,
+    // and a New Game clears all of them. The Mail items are one run, so
+    // ItemIsMail ends the loop.
     case ACH_MAIL:
         for (u16 item = FIRST_MAIL_INDEX; ItemIsMail(item); item++)
             if (CheckBagHasItem(item, 1) || CheckPCHasItem(item, 1))
@@ -689,8 +686,8 @@ static u32 Value(const struct AchDef *d)
                 n++;
         return n;
 
-    // MON_DATA_LEVEL is the party struct's own plain field, so this decrypts
-    // nothing either.
+    // MON_DATA_LEVEL is a plain field of the party struct, so this does not
+    // decrypt either.
     case ACH_PARTY_LEVEL:
         if (InBattleFactory())
             return 0;
@@ -731,8 +728,7 @@ static void Unlock(u16 i)
     Store();
 }
 
-// Every EVENT row for `event` that is still locked. Only ever called while
-// Current().
+// Every locked EVENT row for `event`. Call only while Current().
 static void UnlockEvent(u16 event)
 {
     for (u16 i = 0; i < ACH_COUNT; i++)
@@ -744,14 +740,13 @@ static void UnlockEvent(u16 event)
     }
 }
 
-// Where the player is standing, on every overworld frame rather than on the
-// round-robin: a map can be crossed in less than one lap of the rows. The tide
-// cannot be read back out of the save afterwards, and nor can a route crossed
-// without finding or fighting anything on it.
+// The player's position, on each overworld frame, not on the round-robin. The
+// player can cross a map in less than one lap of the rows. The save does not
+// keep the tide, or a route where the player found and fought nothing.
 //
-// Overworld frames only, so never partway through a map load. By the first one
-// on a new map its ON_TRANSITION script has run, and in Shoal Cave that is the
-// script that picks the tide.
+// Overworld frames only, so never during a map load. By the first frame on a
+// new map, its ON_TRANSITION script has run. In Shoal Cave, that script sets
+// the tide.
 static void NotePlace(void)
 {
     u8 mapsec = gMapHeader.regionMapSectionId;
@@ -762,33 +757,33 @@ static void NotePlace(void)
         Store();
     }
 
-    // One map, two layouts: the entrance room's ON_TRANSITION swaps in the
-    // high-tide one with setmaplayoutindex. That changes the save's
-    // mapLayoutId (SetCurrentMapLayout, src/overworld.c) and not gMapHeader's,
-    // so the save's is the one that says which tide the player walked in on.
+    // One map, two layouts: the entrance room's ON_TRANSITION puts in the
+    // high-tide layout with setmaplayoutindex. That changes the save's
+    // mapLayoutId (SetCurrentMapLayout, src/overworld.c), not gMapHeader's.
+    // Thus the save's value tells which tide the player met.
     if (gSaveBlock1Ptr->location.mapGroup == MAP_GROUP(MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
         && gSaveBlock1Ptr->location.mapNum == MAP_NUM(MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
         && gSaveBlock1Ptr->mapLayoutId == LAYOUT_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM)
         UnlockEvent(ACH_EVENT_LOW_TIDE);
 }
 
-// Playing the White or Black Flute sets one of these two flags and clears the
-// other, and nothing else sets either (ItemUseOutOfBattle_BlackWhiteFlute,
-// src/item_use.c). The next map load clears both (ClearTempFieldEventData,
-// src/event_data.c), which under fast-forward can come sooner than one lap of
-// the rows, so they are read on every frame. Any frame, not just overworld
-// ones: the flute is played from the bag.
+// The White or Black Flute sets one of these two flags and clears the other.
+// Nothing else sets them (ItemUseOutOfBattle_BlackWhiteFlute, src/item_use.c).
+// The next map load clears both (ClearTempFieldEventData, src/event_data.c).
+// Under fast-forward, that can occur within one lap of the rows, so read them
+// on every frame. Any frame, not only overworld frames: the player uses the
+// flute from the bag.
 static void NoteFlute(void)
 {
     if (FlagGet(FLAG_SYS_ENC_UP_ITEM) || FlagGet(FLAG_SYS_ENC_DOWN_ITEM))
         UnlockEvent(ACH_EVENT_FLUTE);
 }
 
-// The towns the save already knows about, for a playthrough older than the
-// place bits. The game sets FLAG_VISITED_* on arriving in each, and asking
-// through the fly map's own question keeps this from carrying a copy of that
-// list. Routes have no such flag; SeedRoutes finds what it can of them.
-// Returns whether anything was new.
+// The towns that the save already knows, for a playthrough from before the
+// place bits. The game sets FLAG_VISITED_* when the player arrives in each
+// town. This uses the fly map's own question, so it keeps no copy of that list.
+// Routes have no such flag. SeedRoutes finds what it can of them. Returns TRUE
+// if anything was new.
 static bool8 SeedTowns(void)
 {
     bool8 changed = FALSE;
@@ -805,26 +800,26 @@ static bool8 SeedTowns(void)
     return changed;
 }
 
-// The two routes with nothing on them to find or fight. Each has a story flag
-// that is only ever set there, or somewhere reached only through there.
+// The two routes with nothing to find or fight. Each has a story flag that is
+// set only there, or only in a place that the player reaches through there.
 static const struct { u16 flag; u8 mapsec; } sRouteStoryFlags[] =
 {
     // Birch's bag is on Route 101 (Route101/scripts.inc).
     { FLAG_SYS_POKEMON_GET,          MAPSEC_ROUTE_101 },
-    // Set on Mt. Pyre's summit (MtPyre_Summit/scripts.inc), a story step
-    // before the eighth badge. Mt. Pyre's only way in is from Route 122.
+    // Set on Mt. Pyre's summit (MtPyre_Summit/scripts.inc), a story step before
+    // the eighth badge. The only way into Mt. Pyre is from Route 122.
     { FLAG_RECEIVED_RED_OR_BLUE_ORB, MAPSEC_ROUTE_122 },
 };
 
-// Whether the save shows the player was on this map: an item ball picked up, a
-// trainer beaten or a hidden item found. These are the game's own tests for
-// which to show and who still wants a battle (src/trainer_see.c,
-// src/item_use.c). No script sets an item flag without the pickup, and none
-// sets a route trainer's flag without the battle.
+// TRUE if the save shows that the player was on this map: an item ball picked
+// up, a trainer beaten or a hidden item found. These are the game's own tests
+// for what to show and which trainers still want a battle (src/trainer_see.c,
+// src/item_use.c). No script sets an item flag without the pickup, and no
+// script sets a route trainer's flag without the battle.
 //
-// Item balls only among the objects with flags: every other object's flag is a
-// FLAG_HIDE_* that scripts set from anywhere. A trainer object's script starts
-// with its trainerbattle, which is what GetTrainerFlagFromScriptPointer reads.
+// Only item balls among the objects with flags. Every other object's flag is a
+// FLAG_HIDE_* that scripts can set from anywhere. A trainer object's script
+// starts with its trainerbattle, which GetTrainerFlagFromScriptPointer reads.
 static bool8 MapShowsVisit(const struct MapEvents *events)
 {
     for (u32 i = 0; i < events->objectEventCount; i++)
@@ -851,18 +846,19 @@ static bool8 MapShowsVisit(const struct MapEvents *events)
     return FALSE;
 }
 
-// The route maps are one run in one group (data/maps/map_groups.json). Each
-// counts towards its own header's section, the one NotePlace would have noted,
-// so nothing here assumes which route a map is.
+// The route maps are one run in one group (data/maps/map_groups.json). Each map
+// counts toward the section of its own header, the same one that NotePlace
+// notes. Thus nothing here assumes which route a map is.
 STATIC_ASSERT(MAP_GROUP(MAP_ROUTE134) == MAP_GROUP(MAP_ROUTE101), RouteMapsShareGroup);
 STATIC_ASSERT(MAP_NUM(MAP_ROUTE134) == MAP_NUM(MAP_ROUTE101) + 33, RouteMapsInOrder);
 
-// The routes the save already knows about, for a playthrough older than the
-// place bits: the same backfill as SeedTowns, from what the player found or
-// fought on each route map, and from sRouteStoryFlags. A route crossed without
-// either leaves nothing to find, and counts from the first frame this code
-// sees the player on it. A few hundred flag reads, once per adoption. Returns
-// whether anything was new.
+// The routes that the save already knows, for a playthrough from before the
+// place bits. This is the same backfill as SeedTowns. It uses what the player
+// found or fought on each route map, and sRouteStoryFlags.
+//
+// A route where the player found and fought nothing leaves no trace. It counts
+// from the first frame where this code sees the player on it. This reads a few
+// hundred flags, once for each adoption. Returns TRUE if anything was new.
 static bool8 SeedRoutes(void)
 {
     bool8 changed = FALSE;
@@ -893,13 +889,12 @@ static bool8 SeedRoutes(void)
     return changed;
 }
 
-// Every definition at once, unlocking whatever is already true without a
-// notification each, then one for the lot. Returns how many.
+// Check every definition at once. Unlock everything that is already true, with
+// no notification for each, then one notification for all. Returns how many.
 //
-// This is what makes a first load fair: a save that already has five badges
-// gets them straight away, as one "5 achievements unlocked", rather than five
-// toasts in a row or nothing at all. It is also how a build that adds
-// achievements catches an older playthrough up with them.
+// This makes a first load fair. A save that already has five badges gets them
+// at once, as one "5 achievements unlocked". A new build with new achievements
+// also catches up an older playthrough this way.
 static u16 CatchUp(void)
 {
     u16 n = 0, first = 0;
@@ -925,14 +920,13 @@ static u16 CatchUp(void)
     return n;
 }
 
-// Start keeping score for the playthrough whose save is loaded.
+// Start to score the playthrough whose save is loaded.
 //
-// Only ever called on a CB2_Overworld frame, and that is load bearing. A New
-// Game gets its trainer ID in the middle of Birch's speech, while the previous
-// save's flags are still in the save block until NewGameInitData() clears them
-// at the end of it. Adopting the new ID then would credit the new playthrough
-// with everything the old one had done. By the first overworld frame the save
-// block is the new game's, whichever way it was reached.
+// Call this only on a CB2_Overworld frame. A New Game gets its trainer ID
+// during Birch's speech, while the previous save's flags are still in the save
+// block. NewGameInitData() clears them at the end. An adoption at that time
+// would give the new playthrough all the old one's progress. By the first
+// overworld frame, the save block belongs to the new game.
 static void Adopt(u32 id)
 {
     bool8 known, seeded;
@@ -942,19 +936,19 @@ static void Adopt(u32 id)
     sCursor = 0;
     sRevealed = FlagGet(FLAG_SYS_GAME_CLEAR) != 0;
 
-    // Anything still waiting belonged to the playthrough before.
+    // Anything still in the queue belongs to the previous playthrough.
     sToastHead = 0;
     sToastLen = 0;
 
     known = CtrAchStoreLoad(id, sUnlocked, sUnseen, sPlaces) != 0;
 
-    // Before the catch-up, so it counts what they find.
+    // Before the catch-up, so that the catch-up counts what they find.
     seeded = SeedTowns();
     seeded |= SeedRoutes();
 
-    // A record that is missing, or older than the save (a write lost to a
-    // closed lid, say), is caught up the same way. CatchUp() first: it has to
-    // run whatever the rest says.
+    // A record that is missing, or older than the save (for example, a write
+    // lost when the lid closed), catches up the same way. Call CatchUp() first:
+    // it must run in all cases.
     if (CatchUp() > 0 || !known || seeded)
         Store();
 }
@@ -972,8 +966,8 @@ void AchTick(void)
     if (!Current())
         return;
 
-    // One flag read a frame. The shell folds this into its hash through
-    // stateKey, so the post-game page repaints the frame it is revealed.
+    // One flag read on each frame. The shell puts this into its hash through
+    // stateKey, so the post-game page repaints on the frame of the reveal.
     sRevealed = FlagGet(FLAG_SYS_GAME_CLEAR) != 0;
 
     if (gMain.callback2 == CB2_Overworld)
@@ -981,8 +975,8 @@ void AchTick(void)
 
     NoteFlute();
 
-    // One definition a frame: about eighty frames for every row, and a
-    // constant cost per frame however many there are.
+    // One definition on each frame: about eighty frames for all rows, and a
+    // constant cost for each frame, for any number of rows.
     if (sCursor >= ACH_COUNT)
         sCursor = 0;
 
@@ -1054,8 +1048,8 @@ static void AppendPlaceName(char *buf, u32 size, u32 *len, u8 mapsec)
     Append(buf, size, len, num);
 }
 
-// "Still to visit: Route 105, Route 134". The buffer is rewritten on every
-// call, which AchView.desc allows for: the caller uses it before asking again.
+// "Still to visit: Route 105, Route 134". Each call writes the buffer again, as
+// AchView.desc allows: the caller uses it before it asks again.
 static const char *PlacesLeftText(const struct AchDef *d)
 {
     static char sText[64];
@@ -1093,8 +1087,8 @@ static void LocalGet(u16 i, struct AchView *out)
     out->unseen = LocalUnseen(i);
     out->category = CategoryAt(i);
 
-    // A post-game row keeps its secret until the Hall of Fame, unless it has
-    // already been earned: an unlocked row is always shown for what it is.
+    // A post-game row stays hidden until the Hall of Fame, unless the player
+    // already earned it. An unlocked row always shows what it is.
     out->hidden = SectionAt(i) == ACH_SECTION_POSTGAME && !out->unlocked && !sRevealed;
 
     if (out->hidden)
@@ -1113,21 +1107,20 @@ static void LocalGet(u16 i, struct AchView *out)
 
     out->progress = value > d->goal ? d->goal : value;
 
-    // Until it is earned, a row with a hint says how to finish it.
+    // Until the player earns it, a row with a hint tells how to complete it.
     if (!out->unlocked && d->hint != NULL)
         out->desc = d->hint;
 
-    // The last few places are the hard ones to find. Only rows inside the
-    // towns and routes, the places AppendPlaceName can name.
+    // The last places are the hard ones to find. Only rows in the towns and
+    // routes, the places that AppendPlaceName can name.
     if (d->kind == ACH_PLACES && !out->unlocked && Current()
         && value < d->goal && d->goal - value <= PLACES_NAMED
         && d->arg + d->count - 1 <= MAPSEC_ROUTE_134)
         out->desc = PlacesLeftText(d);
 }
 
-// Both of these walk the tables rather than the raw bytes, so a bit with no
-// row behind it -- an id since retired -- can never be counted or light the
-// tab bar's dot.
+// Both walk the tables, not the raw bytes. Thus a bit with no row (a removed
+// id) is never counted and never lights the tab bar dot.
 static u16 LocalUnlockedCount(void)
 {
     u16 n = 0;
@@ -1199,16 +1192,16 @@ const struct AchProvider *AchActive(void)
 
 // ---- debug ----------------------------------------------------------------
 
-// The first row of each MAIN group in turn. MAIN only, because it has all six
-// categories and nothing hidden: a post-game row would announce itself as
-// "Hidden Achievement" before the Hall of Fame.
+// The first row of each MAIN group, in turn. MAIN only, because it has all six
+// categories and nothing hidden. A post-game row would show as "Hidden
+// Achievement" before the Hall of Fame.
 void AchDebugTestToast(void)
 {
     static u8 sNext;
     u32 mainGroups = 0;
     u16 index = 0;
 
-    // sGroups lists every MAIN group first, so they are its leading run.
+    // sGroups lists every MAIN group first, so they are its first run.
     while (mainGroups < ARRAY_COUNT(sGroups)
            && sGroups[mainGroups].section == ACH_SECTION_MAIN)
         mainGroups++;
@@ -1225,9 +1218,9 @@ void AchDebugTestToast(void)
     sNext = (u8)((sNext + 1) % mainGroups);
 }
 
-// sPlaces is kept. SeedTowns and SeedRoutes can only work some of the places
-// out again (a route crossed without finding or fighting anything leaves no
-// trace in the save), and CatchUp() re-derives Seasoned Traveller from them.
+// Keep sPlaces. SeedTowns and SeedRoutes can find only some places again (a
+// route where the player found and fought nothing leaves no trace in the save).
+// CatchUp() finds Seasoned Traveller again from them.
 void AchDebugResync(void)
 {
     if (!Current())
@@ -1255,7 +1248,7 @@ void AchDebugRealText(u16 index, const char **title, const char **desc)
 u16 AchDebugBadIds(void)
 {
     u8  seen[CTR_ACH_BYTES] = {0};
-    // Rows that did not fit the flattened table at all are bad by definition.
+    // Rows that did not fit the flattened table are bad.
     u16 bad = (BuildFlat(), sFlatDropped);
 
     for (u16 i = 0; i < ACH_COUNT; i++)

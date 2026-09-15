@@ -1,90 +1,85 @@
 #ifndef CTR_TWEAKS_H
 #define CTR_TWEAKS_H
 
-// Gameplay tweaks: the behaviour behind page 2 of the EXTRA tab.
+// Gameplay tweaks: the behavior of page 2 of the EXTRA tab.
 //
-// The toggles themselves live host-side (3ds/host/main.c, persisted by
-// settings.c) and are read through 3ds/bridge.h. This header is the game-side
-// half: everything that needs game headers to mean anything, kept out of src/
-// so the hooks scattered through the original sources stay one line each.
+// The toggles are host side (3ds/host/main.c, stored by settings.c), and the
+// game reads them through 3ds/bridge.h. This header is the game-side half: all
+// code that needs game headers. It is not in src/, so each hook in the original
+// sources stays one line.
 //
-// Every caller in src/ includes this inside an #if PLATFORM_3DS fence, so no
-// other target ever sees it and `make compare` is unaffected.
+// Every caller in src/ includes this inside #if PLATFORM_3DS, so no other
+// target sees it, and `make compare` does not change.
 
 #include "global.h"
 
-// EXP All. TRUE means treat every living party member as though it holds an
-// Exp. Share, which reuses the game's own participant/share split.
+// EXP All. TRUE means: treat every living party member as if it holds an Exp.
+// Share. This uses the game's own split between participants and holders.
 bool8 Ctr3dsExpAllOn(void);
 
-// The current badge-based level cap, or MAX_LEVEL when the cap is switched off.
+// The current level cap from the badges, or MAX_LEVEL when the cap is off.
 u8 Ctr3dsCurrentLevelCap(void);
 
-// HARD only: this mon is at or past the cap and must gain nothing at all.
+// HARD only: this mon is at or above the cap and gets no exp.
 bool8 Ctr3dsHardCapBlocks(u8 level);
 
-// SOFT only: exp reduced by how far past the cap the mon is. Returns exp
-// unchanged in every other mode, so callers need no mode test of their own.
+// SOFT only: less exp, by how far the mon is above the cap. In the other modes
+// it returns exp as it is, so callers need no mode test.
 u32 Ctr3dsSoftCapExp(u8 level, u32 exp);
 
-// Clamp an absolute exp total to the cap, for the paths that add exp outside
-// battle. Returns exp unchanged when the cap is off.
+// Clamp a total exp value to the cap, for the paths that add exp outside
+// battle. Returns exp as it is when the cap is off.
 u32 Ctr3dsClampCappedExp(u16 species, u32 exp);
 
-// The randomiser's species mapping. Deterministic for a given save, and the
-// identity when the randomiser is off or the species is not a real one.
+// The randomizer's species mapping. It is the same for a given save. It returns
+// the species as it is when the randomizer is off or the species is not real.
 u16 Ctr3dsMapSpecies(u16 species);
 
-// As above, but for wild encounters, where the Battle Pike and Battle Pyramid
-// have to be excluded. See the comment on the definition.
+// The same, for wild encounters, where the Battle Pike and the Battle Pyramid
+// are excluded. See the comment on the definition.
 u16 Ctr3dsMapWildSpecies(u16 species);
 
 // The shiny test switch, from the EXTRA tab's debug page.
 //
-// Returns TRUE when it has created a guaranteed-shiny `mon` and disarmed
-// itself, in which case the caller must NOT create one of its own. FALSE, and
-// NOTHING touched, in every other case.
+// Returns TRUE when it created a shiny `mon` and disarmed itself. The caller
+// must then not create a mon. In all other cases it returns FALSE and changes
+// nothing.
 //
-// The contract, because it is the whole point of the feature:
+// The rules:
+// - It affects only the next Pokemon met in the wild. It creates that mon in
+//   gEnemyParty[0], a slot that it names itself. There is no parameter, so it
+//   cannot reach the player's team. It never edits, replaces or reads back an
+//   existing Pokemon (party, box, roamer, gift or egg). It refuses if its slot
+//   is not empty.
+// - It never touches a trainer battle. The only caller is CreateWildMon, which
+//   is static to src/wild_encounter.c. The game builds trainer parties with
+//   OT_ID_RANDOM_NO_SHINY, which rerolls until the mon is not shiny. It also
+//   refuses during a battle, because the game makes every wild encounter in the
+//   overworld before the battle starts.
 //
-//   It only ever affects the next Pokemon ENCOUNTERED IN THE WILD, and it does
-//   that by CREATING one into gEnemyParty[0], which it names itself rather
-//   than taking as an argument: THE PLAYER'S TEAM IS NOT REACHABLE FROM HERE,
-//   there being no parameter that could aim it there. It never edits, replaces
-//   or reads back a Pokemon that already exists -- not one in the party, not
-//   one in a box, not the roamer, not a gift, not an egg -- and it refuses
-//   outright if the slot it is about to fill is not empty.
+// It must create the mon, because the personality sets the substructure order
+// and is half the encryption key. A new personality in a finished Pokemon makes
+// a Bad Egg. See the comment on the definition.
 //
-//   It can never touch a TRAINER battle. The only caller is CreateWildMon,
-//   which is static to src/wild_encounter.c with no callers outside it, so no
-//   trainer path reaches this code; and Emerald builds trainer parties with
-//   OT_ID_RANDOM_NO_SHINY, which rerolls until the mon is not shiny anyway.
-//   Being in a battle at all is refused as well, since every wild encounter is
-//   generated from the overworld before the battle begins.
-//
-// Creating rather than editing is also forced by the save format: personality
-// is the substructure order and half the encryption key, so writing one into a
-// finished Pokemon makes a Bad Egg. See the comment on the definition.
-//
-// Wild encounters only, and not the Battle Pike or Battle Pyramid, whose wild
-// tables do not hold species ids at all. The switch stays armed when it
-// declines, so it fires on the next encounter that does qualify.
+// Wild encounters only, and not the Battle Pike or the Battle Pyramid, whose
+// wild tables do not hold species ids. The switch stays armed when it refuses,
+// so it fires on the next valid encounter.
 bool8 Ctr3dsTryCreateShinyTestMon(u16 species, u8 level);
 
-// Reorder one bag pocket in place. A no-op when the sort is set to OFF.
+// Sort one bag pocket in place. Does nothing when the sort is OFF.
 void Ctr3dsSortBagPocket(u8 pocketId);
 
-// Reorder every pocket now, for callers on the bottom screen. Carries an
-// overworld safety gate that Ctr3dsSortBagPocket deliberately does not.
+// Sort every pocket now, for callers on the bottom screen. It has an overworld
+// safety gate that Ctr3dsSortBagPocket does not need.
 void Ctr3dsSortBagNow(void);
 
-// TRUE when Emerald's unsolicited Match Call should not fire -- the trainer who
-// rings you mid-route, freezes you and makes small talk.
+// TRUE when the game's unrequested Match Call must not start: the trainer who
+// calls during a route, stops the player and talks.
 //
-// ONLY that one. The seven scripted story calls reach the same window through
-// StartMatchCallFromScript, and the PokeNav's own Match Call screen never
-// creates the task at all, so neither is reachable from here and nothing that
-// gates story progress can be switched off by this.
+// Only that call. The seven scripted story calls use StartMatchCallFromScript,
+// and the PokeNav's Match Call screen never makes the task. Neither goes
+// through this function, so nothing that the story needs can be turned off
+// here.
 bool8 Ctr3dsMatchCallSuppressed(void);
 
 #endif // CTR_TWEAKS_H
