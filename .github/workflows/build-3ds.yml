@@ -1,12 +1,12 @@
-# Builds the 3DS port end-to-end in devkitPro's official container, so the
-# .3dsx is reproducible without a local toolchain.
+# Builds the 3DS port from start to end in the official devkitPro container.
+# Thus the build is reproducible without a local toolchain.
 #
-# Mirrors the manual sequence in README.md exactly:
+# This is the same sequence as the manual steps in README.md:
 #   make tools && make generated
-#   tools/generate_wasm_assets.py    -> build/assets
-#   rp2350/gen_sound_assets.sh       -> sample .bin + song .s
-#   3ds/build_objs.sh                -> 3ds/build/libpokeemerald.a
-#   make -C 3ds                      -> 3ds/emerald3ds.3dsx
+#   tools/generate_wasm_assets.py    makes build/assets
+#   rp2350/gen_sound_assets.sh       makes the sample .bin and song .s files
+#   3ds/build_objs.sh                makes 3ds/build/libpokeemerald.a
+#   make -C 3ds                      makes 3ds/emerald3ds.{cia,3ds}
 name: Build 3DS
 
 on:
@@ -14,15 +14,15 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch makes an in-flight build irrelevant.
+# A newer push to the same branch cancels a build that is in progress.
 concurrency:
   group: build-3ds-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # 3ds/ACHIEVEMENTS.md lists every achievement, and this fails when it no
-  # longer matches the tables in 3ds/achievements.c. A job of its own, so a
-  # stale list shows as its own red check and never holds up the build.
+  # The file 3ds/ACHIEVEMENTS.md lists every achievement. This job fails when
+  # the list does not match the tables in 3ds/achievements.c. It is a separate
+  # job, so an old list shows as its own red check and does not stop the build.
   achievements-list:
     runs-on: ubuntu-latest
     steps:
@@ -35,36 +35,36 @@ jobs:
     timeout-minutes: 60
     container: devkitpro/devkitarm:latest
 
-    # One build, not two. This was a matrix over CTR_M4A_ASM while it was an
-    # open question whether the ARM11 could run the original src/m4a_1.s and
-    # whether it sounded right. It can and it does, so the C reimplementation
-    # (rp2350/m4a_engine.c) is no longer built for this target -- it stays in
-    # the tree for the RP2350 port, whose Cortex-M33 cannot execute ARM code.
+    # One build. The ARM11 runs the original src/m4a_1.s, so this target does
+    # not build the C engine (rp2350/m4a_engine.c). The C engine stays in the
+    # tree for the RP2350 port, because its Cortex-M33 cannot execute ARM code.
     steps:
       - uses: actions/checkout@v4
 
-      # The decomp tools are host binaries: gbagfx/rsfont need libpng, the rest
-      # need a plain g++. The devkitARM image ships the cross toolchain only.
+      # The decomp tools are host binaries: gbagfx and rsfont need libpng, and
+      # the other tools need only g++. The devkitARM image has only the cross
+      # toolchain.
       - name: Install host build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential pkg-config libpng-dev zlib1g-dev python3 \
             curl unzip ca-certificates
-          # checkout leaves the tree owned by a different uid than the container
-          # user; without this git calls inside the build refuse to run.
+          # The checkout gives the tree a different uid from the container user.
+          # Without this line, git commands in the build do not run.
           git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
 
-      # 3ds/build_objs.sh looks up arm-none-eabi-gcc on PATH and hard-errors if
-      # it is absent; 3ds/Makefile calls smdhtool/3dsxtool out of tools/bin.
-      # Set both explicitly rather than trusting the image's PATH.
+      # The script 3ds/build_objs.sh finds arm-none-eabi-gcc on PATH, and stops
+      # with an error if it is not there. The file 3ds/Makefile runs smdhtool
+      # and 3dsxtool from tools/bin. Set both paths here, and do not rely on the
+      # PATH of the image.
       - name: Put devkitARM on PATH
         run: |
           echo "/opt/devkitpro/devkitARM/bin" >> "$GITHUB_PATH"
           echo "/opt/devkitpro/tools/bin" >> "$GITHUB_PATH"
 
-      # The link needs citro2d/citro3d alongside libctru. Present in the image
-      # today, installed here if a future tag drops them.
+      # The link needs citro2d and citro3d with libctru. The image has them now.
+      # This step installs them if a future tag does not have them.
       - name: Ensure 3DS libraries are present
         run: |
           if [ ! -f /opt/devkitpro/libctru/lib/libcitro2d.a ]; then
@@ -78,8 +78,9 @@ jobs:
       - name: Generate map/JSON sources
         run: make generated
 
-      # Root Makefile's wasm-assets target wraps this in `uv run`; the script is
-      # pure stdlib, so call it directly instead of installing uv.
+      # The wasm-assets target of the root Makefile runs this through `uv run`.
+      # The script uses only the standard library, so this step runs it directly
+      # and does not install uv.
       - name: Generate graphics assets
         run: python3 tools/generate_wasm_assets.py
 
@@ -92,10 +93,10 @@ jobs:
       - name: Link emerald3ds.elf
         run: make -C 3ds emerald3ds.elf
 
-      # Also published on its own: Azahar/Citra can boot a raw ELF, and it is
-      # what you want for symbol-level debugging.
-      # The .map goes with it: a crash log only ever gives a raw PC, and these
-      # two are the only way to turn one back into a function name.
+      # The ELF is also published alone, because Azahar and Citra can boot a raw
+      # ELF, and it gives symbol-level debugging. The .map goes with it. A crash
+      # log gives only a raw PC, and these two files are the only way to find
+      # its function name.
       - name: Upload ELF + link map
         uses: actions/upload-artifact@v4
         with:
@@ -105,14 +106,15 @@ jobs:
             3ds/build/emerald3ds.map
           if-no-files-found: error
 
-      # makerom is not a devkitPro package, so it is fetched from upstream and
-      # pinned by hash -- this is a third-party binary entering the build.
+      # The makerom tool is not a devkitPro package. Thus this step gets it from
+      # upstream and pins it by hash, because it is a third-party binary in the
+      # build.
       #
-      # Deliberately v0.18.3, not the newest. Upstream's Linux builds link
-      # against whatever glibc their CI ran: v0.19.0 needs GLIBC_2.38 and
-      # v0.18.4 needs 2.34, both newer than the devkitARM image provides
-      # ("version `GLIBC_2.38' not found"). v0.18.3 needs only GLIBC_2.14 and
-      # produces byte-identical output for this RSF.
+      # This uses v0.18.3 on purpose, not the newest. Upstream links its Linux
+      # builds against the glibc of its own CI. Thus v0.19.0 needs GLIBC_2.38
+      # and v0.18.4 needs 2.34. Both are newer than the devkitARM image has
+      # ("version `GLIBC_2.38' not found"). The v0.18.3 build needs only
+      # GLIBC_2.14 and makes byte-identical output for this RSF.
       - name: Install makerom
         env:
           MAKEROM_URL: https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.3/makerom-v0.18.3-ubuntu_x86_64.zip
@@ -122,25 +124,25 @@ jobs:
           echo "$MAKEROM_SHA256  /tmp/makerom.zip" | sha256sum -c -
           unzip -o /tmp/makerom.zip -d /usr/local/bin
           chmod +x /usr/local/bin/makerom
-          # Fail here, with a clear message, rather than mid-package.
+          # Fail here with a clear message, not during packaging.
           makerom -? >/dev/null 2>&1 || makerom 2>&1 | head -2
 
-      # bannertool builds the .bnr from 3ds/meta/. Like makerom it is not a
-      # devkitPro package, so it is fetched from upstream and pinned by hash --
-      # another third-party binary entering the build.
+      # The bannertool program makes the .bnr from 3ds/meta/. As with makerom,
+      # it is not a devkitPro package. Thus this step gets it from upstream and
+      # pins it by hash, because it is also a third-party binary in the build.
       #
-      # Deliberately Epicpkmn11's 2022 mirror, and the reasoning matters because
-      # the obvious choices both fail. Upstream Steveice10/bannertool has been
-      # DELETED from GitHub, so its releases cannot be pinned at all. The
-      # maintained fork (carstene1ns/3ds-bannertool) publishes Linux builds
-      # needing glibc 2.39+, which is the same wall documented on makerom above
-      # ("GLIBC_2.38 not found"); building it from source instead wants cmake
-      # 3.28+, which this container also predates. This build needs only
-      # GLIBC_2.14, the same bar as makerom v0.18.3, and runs here as-is.
+      # This uses the 2022 mirror from Epicpkmn11 on purpose, because the two
+      # usual choices fail. The upstream Steveice10/bannertool is deleted from
+      # GitHub, so its releases cannot be pinned. The maintained fork
+      # (carstene1ns/3ds-bannertool) publishes Linux builds that need glibc 2.39
+      # or newer. That is the same problem as with makerom above ("GLIBC_2.38
+      # not found"). A build from source needs cmake 3.28 or newer, which is
+      # also newer than this container. This build needs only GLIBC_2.14, the
+      # same as makerom v0.18.3, and runs here with no changes.
       #
-      # Installed unconditionally, even before any art exists, so that the
-      # pinned URL and hash are exercised on every build. A download that only
-      # runs the day someone adds banner art is a download that rots unnoticed.
+      # This step always installs it, also before there is banner art. Thus each
+      # build tests the pinned URL and hash. If the download runs only when
+      # someone adds banner art, it can stop working and nobody knows.
       - name: Install bannertool
         env:
           BANNERTOOL_URL: https://github.com/Epicpkmn11/bannertool/releases/download/v1.2.2/bannertool.zip
@@ -148,21 +150,21 @@ jobs:
         run: |
           curl -sSL -o /tmp/bannertool.zip "$BANNERTOOL_URL"
           echo "$BANNERTOOL_SHA256  /tmp/bannertool.zip" | sha256sum -c -
-          # -j with an explicit member: this zip nests one directory per
-          # platform, unlike makerom's flat one. Copying that step verbatim
-          # would drop four platform dirs into /usr/local/bin and leave
+          # Use -j and name the member. This zip has one directory for each
+          # platform, but the makerom zip is flat. The makerom command here
+          # would put four platform directories into /usr/local/bin, with
           # nothing on PATH.
           unzip -oj /tmp/bannertool.zip 'linux-x86_64/bannertool' -d /usr/local/bin
           chmod +x /usr/local/bin/bannertool
-          # Prove it actually loaded, rather than trusting the unzip. A glibc
-          # mismatch fails right here with a clear message instead of midway
-          # through packaging. Note this build has no --version flag: it would
-          # be read as an invalid command, so the usage banner is the check.
+          # Make sure that the tool runs. Do not trust the unzip. A glibc
+          # mismatch then fails here with a clear message, not during packaging.
+          # This build has no --version flag, and reads it as an invalid
+          # command. Thus the check uses the usage text.
           bannertool 2>&1 | head -3
           bannertool 2>&1 | grep -q makebanner || { echo "bannertool failed to run"; exit 1; }
 
-      # Produces emerald3ds.cia (install to a console) and emerald3ds.3ds
-      # (CCI -- boots directly in an emulator, no install step).
+      # Makes emerald3ds.cia (to install on a console) and emerald3ds.3ds (a CCI
+      # that boots directly in an emulator, with no install).
       - name: Package .cia and .3ds
         run: make -C 3ds
 

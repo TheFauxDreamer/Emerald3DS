@@ -1,18 +1,20 @@
-# Host half of the 3DS port: links the ARM11 game archive against libctru.
+# Host half of the 3DS port. This Makefile links the ARM11 game archive with
+# libctru.
 #
-# Build order from the repo root:
-#   make tools && make generated              # decomp tools + generated headers
-#   python3 tools/generate_wasm_assets.py     # -> build/assets
-#   rp2350/gen_sound_assets.sh                # one-time: wav->bin, mid->song .s
-#   3ds/build_objs.sh                         # -> 3ds/build/libpokeemerald.a
-#   make -C 3ds                               # -> 3ds/emerald3ds.{cia,3ds}
+# Build order, from the repo root:
+#   make tools && make generated              # decomp tools, generated headers
+#   python3 tools/generate_wasm_assets.py     # makes build/assets
+#   rp2350/gen_sound_assets.sh                # once: wav to bin, mid to song .s
+#   3ds/build_objs.sh                         # makes 3ds/build/libpokeemerald.a
+#   make -C 3ds                               # makes 3ds/emerald3ds.{cia,3ds}
 #
-# Only host-side sources are compiled here. They must never see the game's
-# headers (see 3ds/bridge.h): u8/u16/u32 and string.h collide with libctru's.
+# This Makefile compiles only host-side sources. They must never see the game's
+# headers (see 3ds/bridge.h), because u8/u16/u32 and string.h collide with the
+# libctru ones.
 #
-# Toolchain paths are spelled out rather than pulled from $(DEVKITARM)/3ds_rules,
-# which expects the stock template's build-dir/VPATH layout and would fight the
-# explicit rules below.
+# The toolchain paths are written here, not taken from $(DEVKITARM)/3ds_rules.
+# That file expects the build-dir and VPATH layout of the stock template, which
+# conflicts with the explicit rules below.
 
 DEVKITPRO ?= /opt/devkitpro
 DEVKITARM ?= $(DEVKITPRO)/devkitARM
@@ -35,61 +37,63 @@ APP_TITLE       := Pokemon Emerald 3DS
 APP_DESCRIPTION := Experience Pokemon Emerald with second-screen features!
 APP_AUTHOR      := TheFauxDreamer
 
-# Home-menu identity. All three assets live in meta/; see meta/README.md for the
-# specs, which the tools enforce exactly rather than rounding off.
+# Home Menu identity. All three assets are in meta/. See meta/README.md for
+# their specifications. The tools apply them exactly and do not round.
 #
-# The icon falls back to devkitPro's default, so the build behaves as it always
-# has until meta/icon.png exists and then switches over on its own. Dropping the
-# file in is the whole action; no edit here is needed.
+# If meta/icon.png does not exist, the build uses the devkitPro default icon.
+# When the file exists, the build uses it. No change to this file is necessary.
 APP_ICON        := $(firstword $(wildcard meta/icon.png) $(CTRULIB)/default_icon.png)
 
-# Banner inputs. BOTH are required for a banner to be built at all, because
-# bannertool refuses to make one without audio.
+# Banner inputs. The build makes a banner only when both exist, because
+# bannertool does not make a banner without audio.
 APP_BANNER_IMG  := meta/banner.png
 APP_BANNER_WAV  := meta/banner.wav
 
-# rp2350/ppu.c is host-side: it includes only <stdint.h> and its own header, and
-# takes the GBA region pointers at runtime via ppu_set_memory(). That is what
-# lets the same byte-exact rasteriser serve both this port and the RP2350 one.
+# The file rp2350/ppu.c is host-side. It includes only <stdint.h> and its own
+# header, and gets the GBA region pointers at run time from ppu_set_memory().
+# Thus this port and the RP2350 port use the same byte-exact rasterizer.
 HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c \
              host/log.c host/io_thread.c host/achievements.c
 OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 
-# Must match 3ds/build_objs.sh's ARCH exactly, or the game archive and libctru
-# disagree about the ABI and the link is quietly wrong.
+# This must be the same as ARCH in 3ds/build_objs.sh. If not, the game archive
+# and libctru use different ABIs, and the link is wrong with no error.
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -mword-relocations
 
-# Boot diagnostics: svcOutputDebugString traces (visible in an emulator's log),
-# a blue/green splash before AgbMain, and a cycling pillarbox on the top screen
-# showing the frame loop is alive. Off by default now that the port boots --
-# rebuild with `make -C 3ds CTR_BOOT_DIAG=1` (and pass the same to
-# 3ds/build_objs.sh) to bring them back for the next bring-up problem.
-# See 3ds/host/trace.h.
+# Boot diagnostics:
+# - Traces through svcOutputDebugString, which show in the log of an emulator.
+# - A blue and green splash before AgbMain.
+# - Moving bars in the pillarbox of the top screen, which show that the frame
+#   loop runs.
+#
+# They are off by default. To turn them on, build with the command below, and
+# give the same value to 3ds/build_objs.sh. See 3ds/host/trace.h.
+#   make -C 3ds CTR_BOOT_DIAG=1
 CTR_BOOT_DIAG ?= 0
 
-# Run the rasteriser on a second CPU core (core 2 on a New 3DS, core 1
-# otherwise), in parallel with the bottom-screen paint. `make -C 3ds
-# CTR_PPU_THREAD=0` builds the old single-core path for an A/B comparison; the
-# port also falls back to it on its own if the thread cannot be created. See
-# 3ds/host/video.c. Host-only, so 3ds/build_objs.sh needs no matching flag.
+# Run the rasterizer on a second CPU core (core 2 on a New 3DS, else core 1), at
+# the same time as the bottom-screen paint. To build the single-core path for an
+# A/B comparison, use `make -C 3ds CTR_PPU_THREAD=0`. The port also uses that
+# path if it cannot create the thread. See 3ds/host/video.c. This flag is
+# host-only, so 3ds/build_objs.sh needs no matching flag.
 CTR_PPU_THREAD ?= 1
 
-# Regenerated on every make, so the boot log can never report a stale build.
-# The git description is what identifies WHICH build; the timestamp is what
-# distinguishes two builds of the same tree. The description on its own is
-# CTR_BUILD_ID, which the title screen shows in the bottom screen's corner
+# Each make run sets these again, so the boot log always shows the correct
+# build. The git description identifies the build. The timestamp shows the
+# difference between two builds of the same tree. The description alone is
+# CTR_BUILD_ID, which the title screen shows in the corner of the bottom screen
 # (Ctr3dsBuildId in ../bridge.h).
 BUILD_ID    := $(shell git describe --always --dirty 2>/dev/null || echo nogit)
 BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(BUILD_ID)
 
-# -MMD -MP is load bearing, not hygiene. Without it these objects depend only on
-# their own .c file, so an edit to ../bridge.h -- the whole seam between the two
-# halves of the port -- relinks STALE settings.o, video.o, audio.o, save.o,
-# log.o and ppu.o, and only main.o rebuilds (it has the FORCE prerequisite
-# below, for the build stamp). A macro or enum whose value changed in bridge.h
-# would then be compiled two different ways into one binary, with no error at
-# any stage. -MP adds phony targets for the headers, so deleting or renaming one
-# does not wedge the build with "no rule to make target".
+# The build needs -MMD -MP. Without -MMD, each object depends only on its own .c
+# file. Then a change to ../bridge.h, the interface between the two halves of
+# the port, rebuilds only main.o (see FORCE below). The link uses the old
+# settings.o, video.o, audio.o, save.o, log.o and ppu.o. A changed macro or enum
+# value then has two values in one binary, with no error.
+#
+# The -MP option adds phony targets for the headers. Thus a deleted or renamed
+# header does not stop the build with "no rule to make target".
 CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections -MMD -MP \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
@@ -99,22 +103,22 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 
-# Point the original mixer's tail jump at itself.
+# Point the tail jump of the original mixer at itself.
 #
-# SoundMain (src/m4a_1.s) ends with `ldr r3, lt_SoundMainRAM_Buffer / bx r3`,
-# where that literal is `.word SoundMainRAM_Buffer + 1`. On a GBA the buffer is
-# an IWRAM copy m4aSoundInit makes, because IWRAM is zero-wait-state.
+# SoundMain (src/m4a_1.s) ends with `ldr r3, lt_SoundMainRAM_Buffer / bx r3`.
+# That literal is `.word SoundMainRAM_Buffer + 1`. On a GBA, the buffer is an
+# IWRAM copy that m4aSoundInit makes, because IWRAM has zero wait states.
 #
-# Here it cannot be: IWRAM is an offset into gGbaMem (3ds/gba_mem.c), an
-# ordinary .bss array, and a CXI has no read/write/execute segment to put code
-# in. There is also nothing to gain, since the ARM11 runs .text at full speed.
-# So the buffer symbol simply IS the routine and src/m4a.c skips the copy.
+# That is not possible here. IWRAM is an offset into gGbaMem (3ds/gba_mem.c), a
+# usual .bss array. A CXI has no read/write/execute segment for code. Also, a
+# copy gives no speed, because the ARM11 runs .text at full speed. Thus the
+# buffer symbol is the routine, and src/m4a.c does not make the copy.
 #
-# The symbol is supplied by 3ds/asm/m4a_arm11.s, assembled into the game
-# archive. Neither `.set` nor `ld --defsym` can do it: `as` cannot resolve .set
-# to a symbol in another object, and --defsym is evaluated before symbol
-# resolution, so it produced 0 and the tail jump faulted at address 0. See the
-# comment in that file.
+# The file 3ds/asm/m4a_arm11.s, in the game archive, supplies the symbol.
+# Neither `.set` nor `ld --defsym` can do this. The assembler cannot resolve
+# .set to a symbol in a different object. The linker evaluates --defsym before
+# symbol resolution, so it gives 0 and the tail jump faults at address 0. See
+# the comment in that file.
 LIBS     := -lcitro2d -lcitro3d -lctru -lm
 LIBDIRS  := -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
 
@@ -124,23 +128,24 @@ RSF      := emerald3ds.rsf
 
 .PHONY: all clean cia cci 3dsx
 
-# CIA (install to a console) and CCI/.3ds (boots directly in an emulator).
+# CIA (to install on a console) and CCI/.3ds (to boot directly in an emulator).
 #
-# Deliberately NOT 3dsx. A .3dsx is loaded at a variable address, so every
-# absolute pointer needs a load-time relocation, and the 3DSX relocation table
-# is indexed in whole 4-byte words. Emerald's script bytecode packs a 4-byte
-# pointer straight after a 1-byte opcode (.macro goto, asm/macros/event.inc),
-# so thousands of those relocations are unaligned and cannot be encoded at all;
-# 3dsxtool aborts with "Unaligned relocation!". A CXI is loaded at a fixed
-# address and never relocated, so the same pointers are simply correct.
+# Not 3dsx, on purpose. A .3dsx loads at a variable address, so each absolute
+# pointer needs a relocation at load time. The 3DSX relocation table uses whole
+# 4-byte words. The script bytecode of Emerald puts a 4-byte pointer directly
+# after a 1-byte opcode (.macro goto, asm/macros/event.inc). Thus thousands of
+# these relocations are unaligned, and 3dsxtool stops with "Unaligned
+# relocation!". A CXI loads at a fixed address with no relocation, so the same
+# pointers are correct.
+#
 # See the header comment in emerald3ds.rsf.
 all: $(TARGET).cia $(TARGET).3ds
 
 cia: $(TARGET).cia
 cci: $(TARGET).3ds
 
-# The SMDH carries the Home-menu title/icon. Optional: if devkitPro's default
-# icon is missing, build without one rather than failing.
+# The SMDH holds the Home Menu title and icon. It is optional. If the devkitPro
+# default icon is missing, the build continues without an icon.
 ifneq ($(wildcard $(APP_ICON)),)
 SMDH_DEP  := $(TARGET).smdh
 ICON_FLAG := -icon $(TARGET).smdh
@@ -152,31 +157,32 @@ SMDH_DEP  :=
 ICON_FLAG :=
 endif
 
-# The banner is the top-screen visual and jingle shown while the title is
-# highlighted. Same optional-asset treatment as the icon above: no art, no
-# banner, but still a build.
+# The banner is the top-screen image and jingle that show while the title is
+# selected in the Home Menu. It is optional, as the icon is: with no art there
+# is no banner, but the build continues.
 #
-# Both inputs are required together. bannertool errors out when given an image
-# and no audio, so guarding on only one of them would turn a missing wav into a
-# hard build failure instead of a degrade.
+# The build needs both inputs. The bannertool program fails when it gets an
+# image and no audio. Thus a check on only one input would make a missing wav
+# stop the build.
 ifneq ($(and $(wildcard $(APP_BANNER_IMG)),$(wildcard $(APP_BANNER_WAV))),)
 BANNER_DEP  := $(TARGET).bnr
 BANNER_FLAG := -banner $(TARGET).bnr
 
-# Two steps rather than one, purely to get the tune to loop.
+# Two steps, not one, only to make the tune loop.
 #
-# `makebanner -a file.wav` converts the audio itself, and hardcodes looping OFF
-# while doing it -- convert_to_cwav(audio, false, 0, 0) in the tool's source,
-# with no flag to change it. The jingle would play once and stop, where a retail
-# banner loops for as long as the title stays highlighted.
+# The command `makebanner -a file.wav` converts the audio itself, with looping
+# always off. The source of the tool calls convert_to_cwav(audio, false, 0, 0),
+# and no flag changes it. Thus the jingle plays once and stops. A retail banner
+# loops while the title stays selected.
 #
-# `makecwav` is the same conversion with the loop flag exposed, and
-# `makebanner -ca` takes the finished CWAV instead of a wav. So: convert with
-# -l true, then hand the result over. Same output size, loop flag set.
+# The command `makecwav` does the same conversion, with a loop flag. The command
+# `makebanner -ca` accepts the finished CWAV in place of a wav. Thus this
+# converts with -l true, then gives the result to makebanner. The output size is
+# the same, with the loop flag set.
 #
-# Loop points are left at the default, which is the whole file (start frame 0,
-# end frame = the last one). A shorter loop would need the frame numbers, and
-# they are a property of the music rather than of the build.
+# The loop points are the default: the whole file, from frame 0 to the last
+# frame. A shorter loop needs the frame numbers, which come from the music, not
+# from the build.
 $(BUILD)/$(TARGET).cwav: $(APP_BANNER_WAV) | $(BUILD)
 	$(BANNERTOOL) makecwav -i $(APP_BANNER_WAV) -o $@ -l true
 
@@ -195,7 +201,7 @@ $(TARGET).3ds: $(TARGET).elf $(SMDH_DEP) $(BANNER_DEP) $(RSF)
 	$(MAKEROM) -f cci -target t -exefslogo -o $@ -elf $(TARGET).elf -rsf $(RSF) $(ICON_FLAG) $(BANNER_FLAG)
 	@echo "built ... $@"
 
-# Kept only so the failure stays reproducible; see the comment on `all`.
+# This target is here only to reproduce the failure. See the comment on `all`.
 3dsx: $(TARGET).elf $(SMDH_DEP)
 	$(TOOLS)/3dsxtool $(TARGET).elf $(TARGET).3dsx $(if $(SMDH_DEP),--smdh=$(TARGET).smdh)
 
@@ -206,14 +212,14 @@ $(TARGET).elf: $(OBJS) $(GAME_LIB)
 $(GAME_LIB):
 	@echo "error: $@ missing. Run 3ds/build_objs.sh first." >&2; exit 1
 
-# main.o carries the build stamp, which changes on every invocation, so it has
-# to be rebuilt every time. Rebuilding one small file is cheaper than a log line
-# that lies about which binary is running.
+# The file main.o holds the build stamp, which changes on each run. Thus make
+# must build it each time. One small rebuild costs less than a log line that
+# shows the wrong binary.
 #
-# Done with an always-out-of-date prerequisite, NOT with .PHONY. Marking a real
-# file .PHONY tells make it is not a file at all, so make never builds it and
-# the link then fails with "cannot find build/main.o". The recipe still comes
-# from the pattern rule below; this only adds a prerequisite to it.
+# This uses a prerequisite that is always out of date, not .PHONY. If a real
+# file is .PHONY, make does not think it is a file, and never builds it. The
+# link then fails with "cannot find build/main.o". The recipe still comes from
+# the pattern rule below. This adds only a prerequisite.
 .PHONY: FORCE
 FORCE:
 
@@ -230,8 +236,8 @@ $(BUILD)/ppu.o: ../rp2350/ppu.c | $(BUILD)
 $(BUILD):
 	@mkdir -p $@
 
-# The dependency files -MMD wrote on the last build. Missing on the first one,
-# which is why this is -include rather than include.
+# The dependency files that -MMD wrote on the last build. They do not exist on
+# the first build, so this is -include, not include.
 -include $(OBJS:.o=.d)
 
 clean:
