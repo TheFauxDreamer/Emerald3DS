@@ -26,6 +26,14 @@
 
 #define SKIP_OBJECT_EVENT_LOAD  1
 
+#if PLATFORM_3DS
+// The follower messages use these, as the lighting branch of aarant's fork.
+#define TIME_OF_DAY_NIGHT    0
+#define TIME_OF_DAY_TWILIGHT 1
+#define TIME_OF_DAY_DAY      2
+#define TIME_OF_DAY_MAX      TIME_OF_DAY_DAY
+#endif
+
 struct InitialPlayerAvatarState
 {
     u8 transitionFlags;
@@ -154,5 +162,9 @@ bool32 Overworld_RecvKeysFromLinkIsRunning(void);
 bool32 Overworld_SendKeysToLinkIsRunning(void);
 bool32 IsSendingKeysOverCable(void);
 void ClearLinkPlayerObjectEvents(void);
+#if PLATFORM_3DS
+u8 GetTimeOfDay(void);
+bool8 MapHasNaturalLight(u8 mapType);
+#endif
 
 #endif // GUARD_OVERWORLD_H
