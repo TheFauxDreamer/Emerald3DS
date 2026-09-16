@@ -390,16 +390,10 @@ Working documents live beside the code they describe, all under `3ds/`:
   layer and a catalogue of new views. Not started.
 - [UI_SKIN_PLAN.md](3ds/UI_SKIN_PLAN.md), a bottom screen drawn from image
   assets. Not started.
-- [SECOND_SCREEN_ANIMATION_PLAN.md](3ds/SECOND_SCREEN_ANIMATION_PLAN.md), giving
-  the bottom screen back the animation it gave up for frame rate, now that the
-  rasteriser has its own core. Implemented, and measured on a New 3DS XL.
-- [ACHIEVEMENTS_PLAN.md](3ds/ACHIEVEMENTS_PLAN.md), built-in achievements on a
-  sixth bottom-screen tab with an unlock toast over any tab, plus why real
-  RetroAchievements is not the first step. Implemented, and tested on a New 3DS
-  XL. [ACHIEVEMENTS.md](3ds/ACHIEVEMENTS.md) lists every achievement and how it
-  unlocks, and has to change with the tables (CI checks).
-- [EVENT_ISLANDS_PLAN.md](3ds/EVENT_ISLANDS_PLAN.md), the four event items
-  after the Hall of Fame. Implemented, and tested on a New 3DS XL.
+- [ACHIEVEMENTS.md](3ds/ACHIEVEMENTS.md), every achievement and how it
+  unlocks. It has to change with the tables (CI checks).
+
+Implemented plans are removed from the tree. Git history keeps them.
 
 The RP2350 and WASM targets still build (`make wasm`, and see
 [docs/BUILD.md](docs/BUILD.md)). The WASM build is deliberately kept:

@@ -1,4 +1,4 @@
-@ The four event items, only in the 3DS build (3ds/EVENT_ISLANDS_PLAN.md):
+@ The four event items, only in the 3DS build:
 @ - the Eon Ticket, for Southern Island
 @ - the Aurora Ticket, for Birth Island
 @ - the Old Sea Map, for Faraway Island
