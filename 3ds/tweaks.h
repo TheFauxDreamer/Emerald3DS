@@ -82,4 +82,11 @@ void Ctr3dsSortBagNow(void);
 // here.
 bool8 Ctr3dsMatchCallSuppressed(void);
 
+// TRUE when the first Pokemon of the party walks behind the player.
+bool8 Ctr3dsFollowerOn(void);
+
+// Show, change or remove the follower now, for callers on the bottom screen.
+// It has the overworld gate of Ctr3dsSortBagNow.
+void Ctr3dsRefreshFollowerNow(void);
+
 #endif // CTR_TWEAKS_H

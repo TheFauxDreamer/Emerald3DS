@@ -65,9 +65,9 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // on page 1.
 #define TOP_LINE_Y    8
 
-// Page 2's grid: four rows. They fit only because the fourth row has its label
-// next to its buttons, not above them. There is no space left: y 8 to 183, with
-// gaps of 7 and 6.
+// Page 2's grid, which page 3 also uses: four rows. They fit only because the
+// fourth row has its label next to its buttons, not above them. There is no
+// space left: y 8 to 183, with gaps of 7 and 6.
 #define ROW1_LABEL_Y  TOP_LINE_Y
 #define ROW2_LABEL_Y  58
 #define ROW3_LABEL_Y  108
@@ -112,14 +112,14 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
 
-// The fourth row, with its label next to its buttons. Only page 2's BAG SORT
-// uses it.
+// The fourth row, with its label next to its buttons: BAG SORT on page 2 and
+// FOLLOWER on page 3.
 #define ROW4_Y        157
 #define ROW4_LABEL_X  16
 
 // The pager, right-aligned to the interior edge at x 311, on the top line of
-// each page. It is 17px tall at y 8 and ends at y 24. On page 2, it touches the
-// row-1 buttons at y 25. Pages 1, 3 and 4 start their rows below it.
+// each page. It is 17px tall at y 8 and ends at y 24. On pages 2 and 3, it
+// touches the row-1 buttons at y 25. Pages 1 and 4 start their rows below it.
 //
 // It uses TOP_LINE_Y, not a page's first row. Thus the pager does not move on a
 // page turn.
@@ -139,7 +139,8 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // Right-aligned to the interior edge. The pager grows to the left when there
 // are more pages, so the last button stays in the same place. The first button
 // is at x 226 with three pages and at x 196 with four. Page 2's top line has
-// only "EXP ALL" at x 16, so it is clear.
+// only "EXP ALL" at x 16. Page 3's top line has "PHONE CALLS" and its hint,
+// which ends at x 178. Both are clear.
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
@@ -329,9 +330,8 @@ static void DrawPage2(void)
 
 // ---- PAGE 3: quality of life -----------------------------------------------
 //
-// The rows start below the pager, as on page 1 and the debug page. They use
-// page 1's grid and page 2's button columns, so the three pages align. All
-// three rows of the grid are used.
+// Page 2's grid: three labelled rows and a fourth row with its label next to
+// its buttons. Thus the two pages align. All four rows are used.
 static void DrawPage3(void)
 {
     u8 label[40];
@@ -339,7 +339,7 @@ static void DrawPage3(void)
     int qb;
     int anim;
 
-    UiText(16, P1_ROW_Y(0), UiAscii(label, "PHONE CALLS", sizeof(label)),
+    UiText(16, ROW1_LABEL_Y, UiAscii(label, "PHONE CALLS", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     // This stops only the trainers who call without a reason during a route.
@@ -349,13 +349,16 @@ static void DrawPage3(void)
     //
     // A stopped call also does not offer a rematch. Rematches still occur on
     // map load, and the PokeNav still shows who is ready.
-    UiText(P2_HINT_X, P1_ROW_Y(0),
-           UiAscii(label, "story calls still ring", sizeof(label)),
+    //
+    // This hint shares the top line with the pager. It is 82px, from x 96, and
+    // the pager starts at x 196 with the debug page.
+    UiText(P2_HINT_X, ROW1_LABEL_Y,
+           UiAscii(label, "story calls ring", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
-    DrawButton(WIDE_X(0), P1_BTN_Y(0), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+    DrawButton(WIDE_X(0), ROW1_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
                !off);
-    DrawButton(WIDE_X(1), P1_BTN_Y(0), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(WIDE_X(1), ROW1_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                off);
 
     // The quick-throw strip (3ds/ui/ui_quickball.c). It covers a tab while the
@@ -365,41 +368,53 @@ static void DrawPage3(void)
     // The label must be less than 80px: it starts at x 16 and P2_HINT_X is 96.
     qb = Ctr3dsGetQuickBallOff();
 
-    UiText(16, P1_ROW_Y(1), UiAscii(label, "QUICK BALL", sizeof(label)),
+    UiText(16, ROW2_LABEL_Y, UiAscii(label, "QUICK BALL", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     // What the switch does, in the space available. The setting persists across
     // launches. It is stored for each console, not for each save, because it is
     // in settings.bin.
-    UiText(P2_HINT_X, P1_ROW_Y(1),
+    UiText(P2_HINT_X, ROW2_LABEL_Y,
            UiAscii(label, "last ball, one tap", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
-    DrawButton(WIDE_X(0), P1_BTN_Y(1), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+    DrawButton(WIDE_X(0), ROW2_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
                !qb);
-    DrawButton(WIDE_X(1), P1_BTN_Y(1), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(WIDE_X(1), ROW2_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                qb);
 
-    // The third and last row of this grid: the bottom-screen animation in
-    // battle (sliding HP bars and cycling icons). The values stay correct
-    // either way. The hint says what OFF gives, which depends on the path. On
-    // one core, OFF gives frames to the top screen, because each repaint costs
-    // a VBlank. With a second core, OFF only gives a still screen.
+    // The third row: the bottom-screen animation in battle (sliding HP bars and
+    // cycling icons). The values stay correct either way. The hint says what
+    // OFF gives, which depends on the path. On one core, OFF gives frames to
+    // the top screen, because each repaint costs a VBlank. With a second core,
+    // OFF only gives a still screen.
     anim = Ctr3dsGetBattleAnimOff();
 
-    UiText(16, P1_ROW_Y(2), UiAscii(label, "BATTLE ANIM", sizeof(label)),
+    UiText(16, ROW3_LABEL_Y, UiAscii(label, "BATTLE ANIM", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
-    UiText(P2_HINT_X, P1_ROW_Y(2),
+    UiText(P2_HINT_X, ROW3_LABEL_Y,
            UiAscii(label, Ctr3dsRasteriserOnOwnCore() ? "off = still in battle"
                                                       : "off = smoother battles",
                    sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
-    DrawButton(WIDE_X(0), P1_BTN_Y(2), WIDE_W, UiAscii(label, "ON", sizeof(label)),
+    DrawButton(WIDE_X(0), ROW3_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
                !anim);
-    DrawButton(WIDE_X(1), P1_BTN_Y(2), WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(WIDE_X(1), ROW3_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                anim);
+
+    // The fourth row: the first Pokemon of the party walks behind the player.
+    // OFF is the original game, so OFF comes first, as on page 2. The label is
+    // 48px, so it ends before the buttons at x 70.
+    UiText(ROW4_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, "FOLLOWER", sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+
+    DrawButton(SORT_X(0), ROW4_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
+               !Ctr3dsGetFollowerOn());
+    DrawButton(SORT_X(1), ROW4_Y, SORT_W, UiAscii(label, "ON", sizeof(label)),
+               Ctr3dsGetFollowerOn());
 }
 
 // PAGE 4: the debug menu.
@@ -810,13 +825,13 @@ static void TouchPage3(const CtrTouchState *t)
 {
     // ON is the original behavior, so it clears the stored flag; the flag
     // stores OFF. The draw uses the same coordinates.
-    if (UiHit(t, WIDE_X(0), P1_BTN_Y(0), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(0), ROW1_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetPhoneCallsOff(0);
         UiMarkDirty();
         return;
     }
-    if (UiHit(t, WIDE_X(1), P1_BTN_Y(0), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(1), ROW1_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetPhoneCallsOff(1);
         UiMarkDirty();
@@ -825,13 +840,13 @@ static void TouchPage3(const CtrTouchState *t)
 
     // The same shape on the second row. ON is the default, so it clears the
     // flag; the flag stores OFF.
-    if (UiHit(t, WIDE_X(0), P1_BTN_Y(1), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(0), ROW2_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetQuickBallOff(0);
         UiMarkDirty();
         return;
     }
-    if (UiHit(t, WIDE_X(1), P1_BTN_Y(1), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(1), ROW2_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetQuickBallOff(1);
         UiMarkDirty();
@@ -839,15 +854,32 @@ static void TouchPage3(const CtrTouchState *t)
     }
 
     // The third row, the same shape. ON is the default, so it clears the flag.
-    if (UiHit(t, WIDE_X(0), P1_BTN_Y(2), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(0), ROW3_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetBattleAnimOff(0);
         UiMarkDirty();
         return;
     }
-    if (UiHit(t, WIDE_X(1), P1_BTN_Y(2), WIDE_W, BTN_H))
+    if (UiHit(t, WIDE_X(1), ROW3_BTN_Y, WIDE_W, BTN_H))
     {
         Ctr3dsSetBattleAnimOff(1);
+        UiMarkDirty();
+        return;
+    }
+
+    // The fourth row. The follower appears or goes away now if the player is
+    // in the overworld with no script. Otherwise the next map load does it.
+    if (UiHit(t, SORT_X(0), ROW4_Y, SORT_W, BTN_H))
+    {
+        Ctr3dsSetFollowerOn(0);
+        Ctr3dsRefreshFollowerNow();
+        UiMarkDirty();
+        return;
+    }
+    if (UiHit(t, SORT_X(1), ROW4_Y, SORT_W, BTN_H))
+    {
+        Ctr3dsSetFollowerOn(1);
+        Ctr3dsRefreshFollowerNow();
         UiMarkDirty();
         return;
     }

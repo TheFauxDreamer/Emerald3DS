@@ -259,6 +259,12 @@ int  Ctr3dsGetBagSort(void);
 void Ctr3dsSetPhoneCallsOff(int on);
 int  Ctr3dsGetPhoneCallsOff(void);
 
+// The first Pokemon of the party walks behind the player (src/follower_helper.c
+// and UpdateFollowingPokemon). Zero means off, which is the original game. Each
+// save has its own value.
+void Ctr3dsSetFollowerOn(int on);
+int  Ctr3dsGetFollowerOn(void);
+
 // The last Poke Ball that the player threw. The bottom screen then offers it
 // again, and the player does not need to search the bag in each encounter.
 //
