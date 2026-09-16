@@ -27,6 +27,10 @@ The large pieces:
   layer, text clipping and a catalogue of new views. Not started.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
+- **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
+  come from aarant's pokeemerald fork and pokeemerald-expansion: follower
+  options, shiny-aware icons, day and night lighting, a key item wheel and
+  others, with the port rules from the follower work. Not started.
 - **Part C, the Cable Club over local wireless.** The branch is one commit
   (`feb3472`), 138 commits behind main, so the work starts with a rebase. Where
   its LINK screen goes is an open question (C.3).

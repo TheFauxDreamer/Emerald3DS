@@ -390,6 +390,9 @@ Working documents live beside the code they describe, all under `3ds/`:
   layer and a catalogue of new views. Not started.
 - [UI_SKIN_PLAN.md](3ds/UI_SKIN_PLAN.md), a bottom screen drawn from image
   assets. Not started.
+- [UPSTREAM_FEATURES_PLAN.md](3ds/UPSTREAM_FEATURES_PLAN.md), features to port
+  later from aarant's pokeemerald fork and pokeemerald-expansion, and how to
+  port them. Not started.
 - [ACHIEVEMENTS.md](3ds/ACHIEVEMENTS.md), every achievement and how it
   unlocks. It has to change with the tables (CI checks).
 
