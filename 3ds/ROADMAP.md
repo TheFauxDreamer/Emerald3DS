@@ -722,8 +722,7 @@ run (published as the `emerald3ds-elf` artifact alongside `emerald3ds.map`).
 
 The built-in set is done: 83 achievements on MAIN and POST-GAME pages (the
 post-game ones hidden until the Hall of Fame), the TROPHY tab and the unlock
-toast. [ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record and
-[ACHIEVEMENTS.md](ACHIEVEMENTS.md) the full list. What is left:
+toast. [ACHIEVEMENTS.md](ACHIEVEMENTS.md) is the full list. What is left:
 
 - **Trade-dependent goals.** The complete Hoenn Pokedex and anything much past
   200 in the National one need trade evolutions, so they were left out rather

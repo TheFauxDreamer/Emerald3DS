@@ -4,7 +4,7 @@ Every achievement on the TROPHY tab, in the order the tab shows them. The
 tables in [achievements.c](achievements.c) are the source, and CI checks that
 this list still matches them (see
 [Keeping this list current](#keeping-this-list-current)).
-[ACHIEVEMENTS_PLAN.md](ACHIEVEMENTS_PLAN.md) is the design record.
+Part E of [ROADMAP.md](ROADMAP.md) has what is left to do.
 
 **83 achievements**: 65 main, 18 post-game.
 

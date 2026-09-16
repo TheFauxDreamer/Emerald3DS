@@ -73,7 +73,7 @@ void Rp2350PresentFrame(void);
 // TRUE when the GBA rasterizer runs on its own core (core 2 on a New 3DS, core
 // 1 otherwise). Set at startup, before CtrBottomInit(). When FALSE, the bottom
 // screen keeps its single-core tuning: each repaint costs a VBlank on that path
-// (see 3ds/SECOND_SCREEN_ANIMATION_PLAN.md).
+// (see section 7 of 3ds/SECOND_SCREEN_CHEATSHEET.md).
 int Ctr3dsRasteriserOnOwnCore(void);
 
 // The build: the output of `git describe --always --dirty` at build time. For

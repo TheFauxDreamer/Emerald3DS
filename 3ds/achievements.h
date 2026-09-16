@@ -12,7 +12,7 @@
 // the provider below. Thus a second provider could replace the built-in one
 // with no change to the TROPHY tab or the toast. An example is
 // RetroAchievements, as a game-side adapter over a host-side rc_client. See
-// 3ds/ACHIEVEMENTS_PLAN.md.
+// Part E of 3ds/ROADMAP.md.
 //
 // The one caller in src/ includes this inside #if PLATFORM_3DS, like
 // 3ds/tweaks.h, so no other target sees it.

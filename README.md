@@ -106,7 +106,7 @@ of Fame, then show what they are. Every one is read from the game's own data,
 and counters show how far along the shorter goals are. Progress is kept per
 playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
-syncs to RetroAchievements; `3ds/ACHIEVEMENTS_PLAN.md` says why.
+syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
 **EXTRA.** Three pages of port settings.
 
