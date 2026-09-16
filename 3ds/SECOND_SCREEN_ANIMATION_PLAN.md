@@ -124,8 +124,7 @@ touches it in one place:
   full `paint.blank` (the `!sInGame` branch of `Redraw`). Halving
   `UI_ANIM_STEP_FRAMES` does not change its pace.
 - **Stage 1 improves it.** The prompt sits in the third 48-row slice, so today
-  it lights about 3 frames after PRESS START does on the top screen
-  ([TOUCH_TO_START_PLAN.md](TOUCH_TO_START_PLAN.md), "Cost"). With the
+  it lights about 3 frames after PRESS START does on the top screen. With the
   whole-screen upload the two light on the same frame.
 
 ## What it will cost
@@ -288,10 +287,9 @@ The single-core path keeps the step-based twinkle and the burst unchanged.
   it before.
 - **README-TECHNICAL.md:** one sentence that the bottom upload is whole-screen
   and overlapped on the second-core path.
-- **TOUCH_TO_START_PLAN.md:** its "Cost" paragraph says the bottom prompt trails
-  the top by about 3 frames. Add that the trail is gone on the second-core path.
-  Its "16-frame toggle" there predates the 32-frame blink, which the file's own
-  status note already records.
+- **The TOUCH TO START plan** (since deleted, as implemented): its "Cost"
+  paragraph said the bottom prompt trails the top by about 3 frames. Add that
+  the trail is gone on the second-core path.
 - **Comments that state a single-core rule as universal**, rewritten to say which
   path they describe:
   - the clock comment at [ui/bottom_screen.c:202](ui/bottom_screen.c#L202) and
