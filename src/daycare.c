@@ -1093,7 +1093,13 @@ static u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
 
 static u8 GetDaycareCompatibilityScoreFromSave(void)
 {
+#if PLATFORM_3DS
+    // The Day Care yard script on Route 117 reads the score from VAR_RESULT.
+    gSpecialVar_Result = GetDaycareCompatibilityScore(&gSaveBlock1Ptr->daycare);
+    return gSpecialVar_Result;
+#else
     return GetDaycareCompatibilityScore(&gSaveBlock1Ptr->daycare);
+#endif
 }
 
 void SetDaycareCompatibilityString(void)

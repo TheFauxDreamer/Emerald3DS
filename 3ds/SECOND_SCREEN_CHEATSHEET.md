@@ -90,7 +90,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:832](host/main.c#L832),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:853](host/main.c#L853),
   after audio init and before `AgbMain()`.
 
 ---
@@ -125,7 +125,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 67 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 822 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
+| [ui/tab_extra.c](ui/tab_extra.c) | 831 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 158 / 39 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
@@ -335,7 +335,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:790](ui/tab_extra.c#L790), which tests the
+(see `UiExtraTouch` at [tab_extra.c:799](ui/tab_extra.c#L799), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -1114,7 +1114,7 @@ value without writing the file back out during the load that produced it.
    must leave the default standing.
 3. **`3ds/host/settings.c`**: first decide if the value belongs to the console
    or to the save.
-   - **Per console:** use a byte of `pad[3]` in `struct CtrSettings`, and add
+   - **Per console:** use a byte of `pad[2]` in `struct CtrSettings`, and add
      the `extern` and the load/save lines.
    - **Per save:** use the `pad` byte in `struct CtrSaveSettings`, and add the
      value to `save_get()`, `save_apply()` and `save_is_default()`. It is the
@@ -1125,7 +1125,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:649](ui/tab_extra.c#L649)) in a bit range nothing else
+   `UiExtraStateKey()` ([:656](ui/tab_extra.c#L656)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1147,10 +1147,10 @@ A failed write is also not retried: one attempt per change, or a read-only card
 would turn one tap into an FS attempt on every frame for the rest of the
 session.
 
-The struct is **164 bytes at v11 and v12**:
+The struct is **164 bytes at v11, v12 and v13**:
 
-- Bytes 0 to 27 are the v10 layout. They hold the per-console values, and the
-  last three bytes are `pad`.
+- Bytes 0 to 27 are the v10 layout. They hold the per-console values. Byte 25 is
+  the DAY CARE switch (v13), and the last two bytes are `pad`.
 - Then comes the per-save table: a clock, a count, and `CTR_SETTINGS_SAVES` (8)
   records of 16 bytes. Each record has one byte of `pad`. Version 12 used the
   other byte for the follower switch, so a v11 file loads as it is.
@@ -1179,7 +1179,7 @@ store.
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:335](host/main.c#L335)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:336](host/main.c#L336)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
@@ -1275,7 +1275,7 @@ appears.
 | A battle partner's Pokemon look like the player's | A party view that does not ask `UiAllySlot` (section 10). In a partner battle slots 3-5 are the partner's. |
 | A battler is drawn in front of the textbox during a move's effect (top screen) | An OBJ-window sprite rendered as an ordinary one. `rp2350/ppu.c` implements the OBJ window now; see `docs/PORTING.md`, the reference-inherited defects. |
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
-| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:351](tweaks.c#L351). |
+| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:358](tweaks.c#L358). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | A playthrough gets another save's achievements | Conditions were read while the save in memory belonged to someone else. A New Game sets the trainer ID in Birch's speech while the old save's flags are still loaded, until `NewGameInitData()` clears them; a soft reset reloads the card's save under whatever was being played. So a playthrough is adopted only on a `CB2_Overworld` frame, and nothing is evaluated unless the save block's trainer ID matches it ([achievements.c](achievements.c), `Current` and `Adopt`). |
 | Saved achievements come back as the wrong ones | An achievement's id was changed or reused. The id is its bit in `achievements.bin`, so ids are permanent: a new achievement takes the next unused id, and a retired one's id is never handed out again. Row order is free. The EXTRA debug row counts duplicate ids, and so does `3ds/check_achievements_md.py`. |

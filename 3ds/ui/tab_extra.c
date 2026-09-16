@@ -353,6 +353,7 @@ enum {
     P3_QUICK_BALL,
     P3_BATTLE_ANIM,
     P3_FOLLOWER,
+    P3_DAY_CARE,
 };
 
 static void DrawPage3(void)
@@ -387,6 +388,12 @@ static void DrawPage3(void)
     // The first Pokemon of the party walks behind the player.
     DrawCheckRow(P3_ROW_Y(P3_FOLLOWER), CHK_ROW_H, "FOLLOWER",
                  "lead Pokemon walks behind", Ctr3dsGetFollowerOn());
+
+    // The Day Care Pokemon walk in the Route 117 yard. It is separate from
+    // FOLLOWER, and it is for the console. A change shows at the next load of
+    // Route 117, because the yard objects are made at map load.
+    DrawCheckRow(P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H, "DAY CARE",
+                 "Pokemon in the yard", Ctr3dsGetDayCareYard());
 }
 
 // PAGE 4: the debug menu.
@@ -781,6 +788,8 @@ static void TouchPage3(const CtrTouchState *t)
         Ctr3dsSetFollowerOn(!Ctr3dsGetFollowerOn());
         Ctr3dsRefreshFollowerNow();
     }
+    else if (HitCheckRow(t, P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H))
+        Ctr3dsSetDayCareYard(!Ctr3dsGetDayCareYard());
     else
         return;
 

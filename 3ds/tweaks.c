@@ -64,6 +64,13 @@ void Ctr3dsRefreshFollowerNow(void)
     UpdateFollowingPokemon();
 }
 
+// ---- Day Care yard ----------------------------------------------------------
+
+bool8 Ctr3dsDayCareYardOn(void)
+{
+    return Ctr3dsGetDayCareYard() ? TRUE : FALSE;
+}
+
 // ---- Phone calls -----------------------------------------------------------
 
 bool8 Ctr3dsMatchCallSuppressed(void)

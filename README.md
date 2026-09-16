@@ -148,11 +148,18 @@ forty rows of their party grid during a wild battle.
 **FOLLOWER** makes the first Pokémon in your party walk behind you, as in
 HeartGold and SoulSilver. It comes out of its own type of Poké Ball. It goes
 back into the ball for Surf, the bike, doors and cutscenes, and comes out again
-after. Talk to it and it shows an emote and says how it feels. It also takes
-part when you use Cut or Rock Smash. If your first Pokémon has fainted, the next
-one follows. The switch is off by default, and each save keeps its own setting.
-The feature is aarant's `followers` branch of pokeemerald, with its sprites for
-all 386 Pokémon.
+after. Talk to it and it shows an emote and says how it feels. Outdoors, it can
+also look up at the sky in the day or gaze at the stars at night, by the 3DS
+clock. It takes part when you use Cut or Rock Smash. If your first Pokémon has
+fainted, the next one follows. The switch is off by default, and each save keeps
+its own setting. The feature is aarant's `followers` branch of pokeemerald, with
+its sprites for all 386 Pokémon.
+
+**DAY CARE** lets the Pokémon you leave at the Route 117 Day Care walk in its
+yard. With two, they face away from each other, turn toward each other or walk
+toward each other, by how well they get along. It is separate from FOLLOWER, it
+is kept once for the console, and a change shows the next time you enter
+Route 117.
 
 **A fourth page exists in debug builds only.** It holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
@@ -321,8 +328,9 @@ them.
 - **[aarant/pokeemerald](https://github.com/aarant/pokeemerald)** by Ariel
   Antonitis. Its `followers` branch is the FOLLOWER option: the following
   Pokémon, their messages, emotes and field-move animations, the Poké Ball
-  sprites and the dynamic overworld palettes. The branch history credits these
-  contributors:
+  sprites and the dynamic overworld palettes. The day and night lines come from
+  its `lighting` branch, and the DAY CARE yard from its `followers-expanded-id`
+  branch. The branch history credits these contributors:
   - **Jaizu**: the Combusken, Chansey, Espeon, Gyarados, Magikarp, Skiploom and
     Shuppet sprites, the Lombre palette, and fixes.
   - **SonikkuA-DatH**: the Donphan, Taillow, Swellow, Silcoon and Cascoon

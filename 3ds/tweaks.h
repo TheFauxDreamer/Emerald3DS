@@ -89,4 +89,8 @@ bool8 Ctr3dsFollowerOn(void);
 // It has the overworld gate of Ctr3dsSortBagNow.
 void Ctr3dsRefreshFollowerNow(void);
 
+// TRUE when the Day Care Pokemon walk in the Route 117 yard. The templates are
+// made at map load (AddDayCareYardTemplates).
+bool8 Ctr3dsDayCareYardOn(void);
+
 #endif // CTR_TWEAKS_H

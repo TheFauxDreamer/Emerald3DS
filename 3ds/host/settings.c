@@ -55,7 +55,10 @@
 //   CtrSettingsAdopt() gets takes that set.
 // - v12 uses one padding byte of each record for the FOLLOWER switch. Same
 //   size. A v11 record has zero there, which means off.
-#define SETTINGS_VERSION 12
+// - v13 uses the first of the three padding bytes after battleAnimOff for the
+//   DAY CARE switch, for each console. Same size. Older files have zero there,
+//   which means off.
+#define SETTINGS_VERSION 13
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
@@ -119,7 +122,10 @@ struct CtrSettings {
     // of uninitialized stack to the card. Thus the padding is explicit again,
     // as in v5 and v7. It stores OFF, so zero means "animate".
     uint8_t  battleAnimOff;
-    uint8_t  pad[3];
+    // Added in v13, in the first padding byte of v10. Zero means off: the yard
+    // on Route 117 is as in the original game.
+    uint8_t  dayCareYard;
+    uint8_t  pad[2];
     // v11: the per-save table. The values of expAll, levelCap, randomizer,
     // bagSort, phoneCallsOff and lastBall are now in rec. Their bytes above
     // keep an older file's values until a save takes them. Otherwise they are
@@ -175,6 +181,8 @@ extern int  Ctr3dsGetFollowerOn(void);
 extern void Ctr3dsApplyFollowerOn(int on);
 extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
+extern int  Ctr3dsGetDayCareYard(void);
+extern void Ctr3dsApplyDayCareYard(int on);
 extern int  Ctr3dsGetBattleAnimOff(void);
 extern void Ctr3dsApplyBattleAnimOff(int on);
 extern int  Ctr3dsGetLastBall(void);
@@ -449,8 +457,9 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // A v11 file has the same size. Its records have zero in the v12 byte.
-    if (s.version == SETTINGS_VERSION || s.version == 11)
+    // Files v11 and v12 have the same size. Their bytes for the later values
+    // are zero.
+    if (s.version == SETTINGS_VERSION || s.version == 12 || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -459,8 +468,8 @@ void CtrSettingsLoad(void)
     {
         // At least 28 bytes, not exactly 28. The write never truncates, so a
         // v10 build that writes over a v11 file leaves the old table after its
-        // bytes. The table is read only from a v11 or v12 file, so the tail is
-        // ignored.
+        // bytes. The table is read only from a file of v11 or newer, so the
+        // tail is ignored.
         if (n < SETTINGS_V10_SIZE)
             return;
     }
@@ -519,13 +528,16 @@ void CtrSettingsLoad(void)
     // which means "animate".
     Ctr3dsApplyBattleAnimOff(s.battleAnimOff != 0);
 
+    // Zero for a file older than v13, which means "off".
+    Ctr3dsApplyDayCareYard(s.dayCareYard != 0);
+
     // Zero for a file older than v6, which means "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 12 || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
@@ -561,6 +573,7 @@ static void settings_build(struct CtrSettings *s)
     s->ffAudio    = (uint8_t)Ctr3dsGetFfAudio();
     s->quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
     s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
+    s->dayCareYard   = (uint8_t)(Ctr3dsGetDayCareYard() ? 1 : 0);
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s->audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);

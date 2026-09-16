@@ -265,6 +265,12 @@ int  Ctr3dsGetPhoneCallsOff(void);
 void Ctr3dsSetFollowerOn(int on);
 int  Ctr3dsGetFollowerOn(void);
 
+// The Day Care Pokemon walk in the yard on Route 117. Zero means off, which is
+// the original game. The value is for the console, not for each save. A change
+// shows at the next load of Route 117.
+void Ctr3dsSetDayCareYard(int on);
+int  Ctr3dsGetDayCareYard(void);
+
 // The last Poke Ball that the player threw. The bottom screen then offers it
 // again, and the player does not need to search the bag in each encounter.
 //
