@@ -91,6 +91,9 @@ TrainerHill_Entrance_EventScript_PlayerExitChallenge::
 	waitmovement 0
 	setvar VAR_TRAINER_HILL_IS_ACTIVE, 0
 	special HealPlayerParty
+#if PLATFORM_3DS
+	callnative UpdateFollowingPokemon
+#endif
 	releaseall
 TrainerHill_Entrance_EventScript_EndExitChallenge::
 	end
@@ -156,6 +159,9 @@ TrainerHill_Entrance_EventScript_ChooseChallenge::
 	setvar VAR_TRAINER_HILL_IS_ACTIVE, 1
 	setvar VAR_TEMP_5, 0
 	special HealPlayerParty
+#if PLATFORM_3DS
+	callnative UpdateFollowingPokemon
+#endif
 	msgbox TrainerHill_Entrance_Text_TimeProgessGetSetGo, MSGBOX_DEFAULT
 	trainerhill_start
 	releaseall

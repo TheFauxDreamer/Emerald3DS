@@ -35,6 +35,9 @@
 #include "constants/songs.h"
 #include "constants/trainers.h"
 #include "constants/rgb.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
 
 static void PlayerHandleGetMonData(void);
 static void PlayerHandleSetMonData(void);
@@ -114,7 +117,11 @@ static void Task_UpdateLvlInHealthbox(u8);
 static void PrintLinkStandbyMsg(void);
 static u32 CopyPlayerMonData(u8, u8 *);
 static void SetPlayerMonData(u8);
+#if PLATFORM_3DS
+static void StartSendOutAnim(u8, bool8, bool8);
+#else
 static void StartSendOutAnim(u8, bool8);
+#endif
 static void DoSwitchOutAnimation(void);
 static void PlayerDoMoveAnimation(void);
 static void Task_StartSendOutAnim(u8);
@@ -2389,11 +2396,44 @@ static void PlayerHandleSwitchInAnim(void)
     BattleLoadPlayerMonSpriteGfx(&gPlayerParty[gBattlerPartyIndexes[gActiveBattler]], gActiveBattler);
     gActionSelectionCursor[gActiveBattler] = 0;
     gMoveSelectionCursor[gActiveBattler] = 0;
+#if PLATFORM_3DS
+    #ifdef BATTLE_ENGINE
+    StartSendOutAnim(gActiveBattler, gBattleResources->bufferA[gActiveBattler][2], FALSE);
+    #else
+    StartSendOutAnim(gActiveBattler, gBattleBufferA[gActiveBattler][2], FALSE);
+    #endif
+#else
     StartSendOutAnim(gActiveBattler, gBattleBufferA[gActiveBattler][2]);
+#endif
     gBattlerControllerFuncs[gActiveBattler] = SwitchIn_TryShinyAnimShowHealthbox;
 }
 
+#if PLATFORM_3DS
+// In normal singles, if follower pokemon exists,
+// and the pokemon following is being sent out,
+// have it slide in instead of being thrown
+static bool8 ShouldDoSlideInAnim(void) {
+    struct ObjectEvent *followerObj = GetFollowerObject();
+    if (!followerObj || followerObj->invisible)
+        return FALSE;
+
+    if (gBattleTypeFlags & (
+        BATTLE_TYPE_LINK | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_FIRST_BATTLE |
+        BATTLE_TYPE_SAFARI | BATTLE_TYPE_WALLY_TUTORIAL | BATTLE_TYPE_EREADER_TRAINER | BATTLE_TYPE_TWO_OPPONENTS |
+        BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_RECORDED | BATTLE_TYPE_TRAINER_HILL)
+    )
+        return FALSE;
+
+    if (GetFirstLiveMon() != &gPlayerParty[gBattlerPartyIndexes[gActiveBattler]])
+        return FALSE;
+
+    return TRUE;
+}
+
+static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit, bool8 doSlideIn)
+#else
 static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit)
+#endif
 {
     u16 species;
 
@@ -2421,7 +2461,11 @@ static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit)
     gSprites[gBattlerSpriteIds[battler]].invisible = TRUE;
     gSprites[gBattlerSpriteIds[battler]].callback = SpriteCallbackDummy;
 
+#if PLATFORM_3DS
+    gSprites[gBattleControllerData[battler]].data[0] = DoPokeballSendOutAnimation(0, doSlideIn ? POKEBALL_PLAYER_SLIDEIN : POKEBALL_PLAYER_SENDOUT);
+#else
     gSprites[gBattleControllerData[battler]].data[0] = DoPokeballSendOutAnimation(0, POKEBALL_PLAYER_SENDOUT);
+#endif
 }
 
 static void PlayerHandleReturnMonToBall(void)
@@ -3176,7 +3220,11 @@ static void PlayerHandleIntroTrainerBallThrow(void)
     gSprites[gBattlerSpriteIds[gActiveBattler]].sBattlerId = gActiveBattler;
 
     StoreSpriteCallbackInData6(&gSprites[gBattlerSpriteIds[gActiveBattler]], SpriteCB_FreePlayerSpriteLoadMonSprite);
+#if PLATFORM_3DS
+    StartSpriteAnim(&gSprites[gBattlerSpriteIds[gActiveBattler]], ShouldDoSlideInAnim() ? 2 : 1);
+#else
     StartSpriteAnim(&gSprites[gBattlerSpriteIds[gActiveBattler]], 1);
+#endif
 
     paletteNum = AllocSpritePalette(0xD6F8);
     LoadCompressedPalette(gTrainerBackPicPaletteTable[gSaveBlock2Ptr->playerGender].data, OBJ_PLTT_ID(paletteNum), PLTT_SIZE_4BPP);
@@ -3223,16 +3271,28 @@ static void Task_StartSendOutAnim(u8 taskId)
         if (!IsDoubleBattle() || (gBattleTypeFlags & BATTLE_TYPE_MULTI))
         {
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
         }
         else
         {
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
             gActiveBattler ^= BIT_FLANK;
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
             BattleLoadPlayerMonSpriteGfx(&gPlayerParty[gBattlerPartyIndexes[gActiveBattler]], gActiveBattler);
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
             gActiveBattler ^= BIT_FLANK;
         }
         gBattlerControllerFuncs[gActiveBattler] = Intro_TryShinyAnimShowHealthbox;

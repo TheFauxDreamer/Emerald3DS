@@ -249,10 +249,27 @@ struct ObjectEvent
     /*0x1F*/ u8 previousMetatileBehavior;
     /*0x20*/ u8 previousMovementDirection;
     /*0x21*/ u8 directionSequenceIndex;
+#if PLATFORM_3DS
+    /*0x22*/ union __attribute__((packed)) {
+        u8 playerCopyableMovement; // COPY_MOVE_*
+        struct __attribute__((packed)) {
+            u16 species:10; // 11 bits; 1024 species
+            u16 form:5; // Used for Deoxys, Unown, etc
+            u16 shiny:1;
+        } mon;
+        u16 asU16;
+    } extra;
+#else
     /*0x22*/ u8 playerCopyableMovement; // COPY_MOVE_*
     /*0x23*/ //u8 padding2;
+#endif
     /*size = 0x24*/
 };
+
+#if PLATFORM_3DS
+// The follower data uses the padding byte. The save keeps the retail layout.
+STATIC_ASSERT(sizeof(struct ObjectEvent) == 0x24, ObjectEventSizeUnchanged);
+#endif
 
 struct ObjectEventGraphicsInfo
 {
@@ -294,6 +311,13 @@ enum {
 #define PLAYER_AVATAR_FLAG_FORCED_MOVE  (1 << 6)
 #define PLAYER_AVATAR_FLAG_DASH         (1 << 7)
 
+#if PLATFORM_3DS
+#define PLAYER_AVATAR_FLAG_BIKE        (PLAYER_AVATAR_FLAG_MACH_BIKE | PLAYER_AVATAR_FLAG_ACRO_BIKE)
+// Player avatar flags for which follower pokemon are hidden
+#define FOLLOWER_INVISIBLE_FLAGS       (PLAYER_AVATAR_FLAG_SURFING | PLAYER_AVATAR_FLAG_UNDERWATER | \
+                                        PLAYER_AVATAR_FLAG_BIKE | PLAYER_AVATAR_FLAG_FORCED_MOVE)
+
+#endif
 enum
 {
     ACRO_BIKE_NORMAL,

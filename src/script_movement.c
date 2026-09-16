@@ -5,6 +5,9 @@
 #include "util.h"
 #include "constants/event_objects.h"
 #include "constants/event_object_movement.h"
+#if PLATFORM_3DS
+#include "event_scripts.h"
+#endif
 
 static void ScriptMovement_StartMoveObjects(u8 priority);
 static u8 GetMoveObjectsTaskId(void);
@@ -205,13 +208,45 @@ static void ScriptMovement_MoveObjects(u8 taskId)
     }
 }
 
+#if PLATFORM_3DS
+// from event_object_movement
+#define sTypeFuncId data[1]
+#define sTimer      data[5]
+
+#endif
 static void ScriptMovement_TakeStep(u8 taskId, u8 moveScrId, u8 objEventId, const u8 *movementScript)
 {
     u8 nextMoveActionId;
+#if PLATFORM_3DS
+    struct ObjectEvent *obj = &gObjectEvents[objEventId];
+#endif
 
+#if PLATFORM_3DS
+    if (ObjectEventIsHeldMovementActive(obj) &&
+        !ObjectEventClearHeldMovementIfFinished(obj))
+    {
+        // If, while undergoing scripted movement,
+        // a non-player object collides with an active follower pokemon,
+        // put that follower into a pokeball
+        // (sTimer helps limit this expensive check to once per step)
+        if (OW_MON_SCRIPT_MOVEMENT &&
+            gSprites[obj->spriteId].sTimer == 1 &&
+            (objEventId = GetObjectObjectCollidesWith(obj, 0, 0, TRUE)) < OBJECT_EVENTS_COUNT &&
+            // switch `obj` to follower
+            ((obj = &gObjectEvents[objEventId])->movementType == MOVEMENT_TYPE_FOLLOW_PLAYER) &&
+            gSprites[obj->spriteId].sTypeFuncId != 0)
+        {
+            ClearObjectEventMovement(obj, &gSprites[obj->spriteId]);
+            ScriptMovement_StartObjectMovementScript(obj->localId, obj->mapNum, obj->mapGroup, EnterPokeballMovement);
+        }
+#else
     if (ObjectEventIsHeldMovementActive(&gObjectEvents[objEventId])
      && !ObjectEventClearHeldMovementIfFinished(&gObjectEvents[objEventId]))
+#endif
         return;
+#if PLATFORM_3DS
+    }
+#endif
 
     nextMoveActionId = *movementScript;
     if (nextMoveActionId == MOVEMENT_ACTION_STEP_END)
@@ -229,3 +264,7 @@ static void ScriptMovement_TakeStep(u8 taskId, u8 moveScrId, u8 objEventId, cons
     }
 }
 
+#if PLATFORM_3DS
+#undef sTypeFuncId
+#undef sTimer
+#endif

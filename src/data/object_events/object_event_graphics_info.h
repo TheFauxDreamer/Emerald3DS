@@ -1138,6 +1138,26 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Nurse = {
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
+#if PLATFORM_3DS
+const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_PokeBall = {
+    .tileTag = TAG_NONE,
+    .paletteTag = OBJ_EVENT_PAL_TAG_NPC_3,
+    .reflectionPaletteTag = OBJ_EVENT_PAL_TAG_NONE,
+    .size = 256,
+    .width = 16,
+    .height = 32,
+    .paletteSlot = PALSLOT_NPC_1,
+    .shadowSize = SHADOW_SIZE_M,
+    .inanimate = TRUE,
+    .disableReflectionPaletteLoad = FALSE,
+    .tracks = TRACKS_NONE,
+    .oam = &gObjectEventBaseOam_16x32,
+    .subspriteTables = sOamTables_16x32,
+    .anims = sAnimTable_Following,
+    .images = sPicTable_PokeBall,
+    .affineAnims = gDummySpriteAffineAnimTable,
+};
+#else
 const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_ItemBall = {
     .tileTag = TAG_NONE,
     .paletteTag = OBJ_EVENT_PAL_TAG_NPC_3,
@@ -1156,6 +1176,7 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_ItemBall = {
     .images = sPicTable_ItemBall,
     .affineAnims = gDummySpriteAffineAnimTable,
 };
+#endif
 
 const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_BerryTree = {
     .tileTag = TAG_NONE,
@@ -1792,7 +1813,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Truck = {
     .width = 48,
     .height = 48,
     .paletteSlot = PALSLOT_NPC_SPECIAL,
+#if PLATFORM_3DS
+    .shadowSize = SHADOW_SIZE_NONE,
+#else
     .shadowSize = SHADOW_SIZE_M,
+#endif
     .inanimate = TRUE,
     .disableReflectionPaletteLoad = FALSE,
     .tracks = TRACKS_NONE,
@@ -1894,7 +1919,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Poochyena = {
     .oam = &gObjectEventBaseOam_32x32,
     .subspriteTables = sOamTables_32x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_PoochyenaOld,
+#else
     .images = sPicTable_Poochyena,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -3927,7 +3956,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Skitty = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_SkittyOld,
+#else
     .images = sPicTable_Skitty,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -3946,7 +3979,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Kecleon = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_KecleonOld,
+#else
     .images = sPicTable_Kecleon,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -3996,14 +4033,22 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Rayquaza = {
     .width = 64,
     .height = 64,
     .paletteSlot = PALSLOT_NPC_3,
+#if PLATFORM_3DS
+    .shadowSize = SHADOW_SIZE_NONE,
+#else
     .shadowSize = SHADOW_SIZE_M,
+#endif
     .inanimate = FALSE,
     .disableReflectionPaletteLoad = TRUE,
     .tracks = TRACKS_FOOT,
     .oam = &gObjectEventBaseOam_64x64,
     .subspriteTables = sOamTables_64x64,
     .anims = sAnimTable_Rayquaza,
+#if PLATFORM_3DS
+    .images = sPicTable_RayquazaCutscene,
+#else
     .images = sPicTable_Rayquaza,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4022,7 +4067,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Zigzagoon = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_ZigzagoonOld,
+#else
     .images = sPicTable_Zigzagoon,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4041,7 +4090,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Pikachu = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_PikachuOld,
+#else
     .images = sPicTable_Pikachu,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4060,7 +4113,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Azumarill = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_AzumarillOld,
+#else
     .images = sPicTable_Azumarill,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4079,7 +4136,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Wingull = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_WingullOld,
+#else
     .images = sPicTable_Wingull,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4098,7 +4159,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_KecleonBridgeShado
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_KecleonOld,
+#else
     .images = sPicTable_Kecleon,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4136,7 +4201,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Azurill = {
     .oam = &gObjectEventBaseOam_16x16,
     .subspriteTables = sOamTables_16x16,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_AzurillOld,
+#else
     .images = sPicTable_Azurill,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4288,7 +4357,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Kirlia = {
     .oam = &gObjectEventBaseOam_16x32,
     .subspriteTables = sOamTables_16x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_KirliaOld,
+#else
     .images = sPicTable_Kirlia,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4307,7 +4380,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Dusclops = {
     .oam = &gObjectEventBaseOam_16x32,
     .subspriteTables = sOamTables_16x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_DusclopsOld,
+#else
     .images = sPicTable_Dusclops,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4383,7 +4460,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Sudowoodo = {
     .oam = &gObjectEventBaseOam_16x32,
     .subspriteTables = sOamTables_16x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_SudowoodoTree,
+#else
     .images = sPicTable_Sudowoodo,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4402,7 +4483,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Mew = {
     .oam = &gObjectEventBaseOam_16x32,
     .subspriteTables = sOamTables_16x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_MewOld,
+#else
     .images = sPicTable_Mew,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4421,7 +4506,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Deoxys = {
     .oam = &gObjectEventBaseOam_32x32,
     .subspriteTables = sOamTables_32x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_DeoxysOld,
+#else
     .images = sPicTable_Deoxys,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4630,7 +4719,11 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Lugia = {
     .oam = &gObjectEventBaseOam_32x32,
     .subspriteTables = sOamTables_32x32,
     .anims = sAnimTable_Standard,
+#if PLATFORM_3DS
+    .images = sPicTable_LugiaOld,
+#else
     .images = sPicTable_Lugia,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
 
@@ -4649,6 +4742,31 @@ const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_HoOh = {
     .oam = &gObjectEventBaseOam_32x32,
     .subspriteTables = sOamTables_32x32,
     .anims = sAnimTable_HoOh,
+#if PLATFORM_3DS
+    .images = sPicTable_HoOhOld,
+#else
     .images = sPicTable_HoOh,
+#endif
     .affineAnims = gDummySpriteAffineAnimTable,
 };
+
+#if PLATFORM_3DS
+const struct ObjectEventGraphicsInfo gObjectEventGraphicsInfo_Follower = {
+    .tileTag = TAG_NONE,
+    .paletteTag = OBJ_EVENT_PAL_TAG_DYNAMIC,
+    .reflectionPaletteTag = OBJ_EVENT_PAL_TAG_NONE,
+    .size = 512,
+    .width = 32,
+    .height = 32,
+    .paletteSlot = PALSLOT_NPC_1,
+    .shadowSize = SHADOW_SIZE_M,
+    .inanimate = FALSE,
+    .disableReflectionPaletteLoad = FALSE,
+    .tracks = TRACKS_FOOT,
+    .oam = &gObjectEventBaseOam_32x32,
+    .subspriteTables = sOamTables_32x32,
+    .anims = sAnimTable_Following,
+    .images = sPicTable_Togetic,
+    .affineAnims = gDummySpriteAffineAnimTable,
+};
+#endif

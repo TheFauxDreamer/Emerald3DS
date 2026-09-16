@@ -19,6 +19,9 @@
 #include "constants/rgb.h"
 #include "constants/songs.h"
 #include "constants/metatile_labels.h"
+#if PLATFORM_3DS
+#include "field_effect.h"
+#endif
 
 struct MirageTowerPulseBlend
 {
@@ -147,10 +150,19 @@ static const union AnimCmd *const sAnims_FallingFossil[] =
     sAnim_FallingFossil,
 };
 
+#if PLATFORM_3DS
+// Duplicate of event_object_movement
+#define OBJ_EVENT_PAL_TAG_NPC_1                   0x1103
+
+#endif
 static const struct SpriteTemplate sSpriteTemplate_FallingFossil =
 {
     .tileTag = TAG_NONE,
+#if PLATFORM_3DS
+    .paletteTag = OBJ_EVENT_PAL_TAG_NPC_1,
+#else
     .paletteTag = TAG_NONE,
+#endif
     .oam = &sOamData_FallingFossil,
     .anims = sAnims_FallingFossil,
     .images = NULL,
@@ -695,6 +707,9 @@ static void Task_FossilFallAndSink(u8 taskId)
         {
             struct SpriteTemplate fossilTemplate = sSpriteTemplate_FallingFossil;
             fossilTemplate.images = sFallingFossil->frameImage;
+#if PLATFORM_3DS
+            LoadObjectEventPalette(sSpriteTemplate_FallingFossil.paletteTag);
+#endif
             sFallingFossil->spriteId = CreateSprite(&fossilTemplate, 128, -16, 1);
             gSprites[sFallingFossil->spriteId].centerToCornerVecX = 0;
             gSprites[sFallingFossil->spriteId].data[0] = gSprites[sFallingFossil->spriteId].x;
@@ -720,6 +735,11 @@ static void Task_FossilFallAndSink(u8 taskId)
         // Wait for fossil to finish falling / disintegrating
         if (gSprites[sFallingFossil->spriteId].callback != SpriteCallbackDummy)
             return;
+#if PLATFORM_3DS
+        gSprites[sFallingFossil->spriteId].inUse = FALSE;
+        FieldEffectFreePaletteIfUnused(gSprites[sFallingFossil->spriteId].oam.paletteNum);
+        gSprites[sFallingFossil->spriteId].inUse = TRUE;
+#endif
         DestroySprite(&gSprites[sFallingFossil->spriteId]);
         FREE_AND_SET_NULL(sFallingFossil->disintegrateRand);;
         FREE_AND_SET_NULL(sFallingFossil->frameImage);

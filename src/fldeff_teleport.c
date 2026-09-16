@@ -14,7 +14,11 @@ bool8 SetUpFieldMove_Teleport(void)
 {
     if (Overworld_MapTypeAllowsTeleportAndFly(gMapHeader.mapType) == TRUE)
     {
+#if PLATFORM_3DS
+        gFieldCallback2 = FieldCallback_PrepareFadeInForTeleport;
+#else
         gFieldCallback2 = FieldCallback_PrepareFadeInFromMenu;
+#endif
         gPostMenuFieldCallback = FieldCallback_Teleport;
         return TRUE;
     }

@@ -268,6 +268,9 @@ RusturfTunnel_EventScript_TunnelBlockagePos3::
 
 RusturfTunnel_EventScript_AquaGruntBackUp::
 	lockall
+#if PLATFORM_3DS
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	msgbox RusturfTunnel_Text_ComeAndGetSome, MSGBOX_DEFAULT
 	closemessage
 	applymovement LOCALID_RUSTURF_TUNNEL_GRUNT, RusturfTunnel_Movement_GruntAndPeekoBackUp

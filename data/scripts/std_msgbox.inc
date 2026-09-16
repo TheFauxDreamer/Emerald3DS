@@ -8,11 +8,17 @@ Std_MsgboxNPC:
 	return
 
 Std_MsgboxSign:
+#if PLATFORM_3DS
+  setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	lockall
 	message NULL
 	waitmessage
 	waitbuttonpress
 	releaseall
+#if PLATFORM_3DS
+  clearflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	return
 
 Std_MsgboxDefault:

@@ -178,7 +178,11 @@ const u32 gMonFrontPic_Pichu[] = INCGFX_U32("graphics/pokemon/pichu/anim_front.p
 const u32 gMonFrontPic_Cleffa[] = INCGFX_U32("graphics/pokemon/cleffa/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Igglybuff[] = INCGFX_U32("graphics/pokemon/igglybuff/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Togepi[] = INCGFX_U32("graphics/pokemon/togepi/anim_front.png", ".4bpp.lz");
+#if PLATFORM_3DS
+const u32 gMonFrontPic_Togetic[] = INCGFX_U32("graphics/followers/pokemon/togetic/anim_front.png", ".4bpp.lz");
+#else
 const u32 gMonFrontPic_Togetic[] = INCGFX_U32("graphics/pokemon/togetic/anim_front.png", ".4bpp.lz");
+#endif
 const u32 gMonFrontPic_Natu[] = INCGFX_U32("graphics/pokemon/natu/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Xatu[] = INCGFX_U32("graphics/pokemon/xatu/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Mareep[] = INCGFX_U32("graphics/pokemon/mareep/anim_front.png", ".4bpp.lz");
@@ -358,7 +362,11 @@ const u32 gMonFrontPic_Huntail[] = INCGFX_U32("graphics/pokemon/huntail/anim_fro
 const u32 gMonFrontPic_Gorebyss[] = INCGFX_U32("graphics/pokemon/gorebyss/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Absol[] = INCGFX_U32("graphics/pokemon/absol/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Shuppet[] = INCGFX_U32("graphics/pokemon/shuppet/anim_front.png", ".4bpp.lz");
+#if PLATFORM_3DS
+const u32 gMonFrontPic_Banette[] = INCGFX_U32("graphics/followers/pokemon/banette/anim_front.png", ".4bpp.lz");
+#else
 const u32 gMonFrontPic_Banette[] = INCGFX_U32("graphics/pokemon/banette/anim_front.png", ".4bpp.lz");
+#endif
 const u32 gMonFrontPic_Seviper[] = INCGFX_U32("graphics/pokemon/seviper/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Zangoose[] = INCGFX_U32("graphics/pokemon/zangoose/anim_front.png", ".4bpp.lz");
 const u32 gMonFrontPic_Relicanth[] = INCGFX_U32("graphics/pokemon/relicanth/anim_front.png", ".4bpp.lz");

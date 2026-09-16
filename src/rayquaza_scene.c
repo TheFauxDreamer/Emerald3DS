@@ -15,6 +15,10 @@
 #include "constants/songs.h"
 #include "constants/rgb.h"
 #include "random.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#include "constants/event_objects.h"
+#endif
 
 /*
     This file handles the cutscene showing Rayquaza arriving to settle the Groudon/Kyogre fight
@@ -1295,9 +1299,17 @@ void DoRayquazaScene(u8 animId, bool8 endEarly, MainCallback exitCallback)
 
 static void CB2_InitRayquazaScene(void)
 {
+#if PLATFORM_3DS
+    u32 i;
+#endif
     SetVBlankHBlankCallbacksToNull();
     ClearScheduledBgCopiesToVram();
     ScanlineEffect_Stop();
+#if PLATFORM_3DS
+    for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
+        if (gObjectEvents[i].graphicsId == OBJ_EVENT_GFX_RAYQUAZA)
+            gObjectEvents[i].invisible = FALSE;
+#endif
     FreeAllSpritePalettes();
     ResetPaletteFade();
     ResetSpriteData();
