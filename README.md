@@ -108,7 +108,8 @@ playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
 syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
-**EXTRA.** Three pages of port settings.
+**EXTRA.** Three pages of port settings. A setting that is only on or off is a
+checkbox: tap the box or its name.
 
 *Page 1* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or FILL

@@ -427,7 +427,7 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:162](ui/tab_extra.c#L162)); `DrawBtn` ([tab_map.c:428](ui/tab_map.c#L428)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
+| named helper | `DrawButtonH` ([tab_extra.c:169](ui/tab_extra.c#L169)); `DrawBtn` ([tab_map.c:428](ui/tab_map.c#L428)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
 | inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:885](ui/tab_party.c#L885)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:513](ui/bottom_screen.c#L513)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)) |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 

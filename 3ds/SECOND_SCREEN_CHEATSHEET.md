@@ -117,7 +117,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 |---|---|---|
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 1198 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 247 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1043 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1033 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 409 / 63 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/tab_party.c](ui/tab_party.c) | 1256 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 697 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
@@ -125,7 +125,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 67 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
 | [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
 | [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 809 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
+| [ui/tab_extra.c](ui/tab_extra.c) | 822 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 158 / 39 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
@@ -328,14 +328,14 @@ Two things follow, and both are load bearing:
 Acting on release rather than press means a touch that slides off a control does
 not fire it. Keep that convention.
 
-Hit testing is one helper, [ui_draw.c:948](ui/ui_draw.c#L948):
+Hit testing is one helper, [ui_draw.c:988](ui/ui_draw.c#L988):
 
 ```c
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:888](ui/tab_extra.c#L888), which tests the
+(see `UiExtraTouch` at [tab_extra.c:790](ui/tab_extra.c#L790), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -343,7 +343,7 @@ as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L2
 
 ### Press and hold
 
-`UiHoldRepeat` ([ui_draw.c:959](ui/ui_draw.c#L959)) is the one exception to the
+`UiHoldRepeat` ([ui_draw.c:999](ui/ui_draw.c#L999)) is the one exception to the
 `justReleased` guard, and it is why the guard moved down a few lines in the two
 list tabs. Both scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)) and
 BAG ([tab_bag.c:579](ui/tab_bag.c#L579)) run through it:
@@ -746,7 +746,14 @@ void UiRect(int x, int y, int w, int h, u16 color);        // 1px outline
 int  UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 bool8 UiHoldRepeat(UiHold *h, const CtrTouchState *t,     // section 6
                    int x, int y, int w, int hgt);
+void UiCheckBox(int x, int y, bool8 checked);             // 14x14, accent tick
 ```
+
+An on/off setting is a checkbox, not an OFF and an ON button. EXTRA draws it as
+a check row (`DrawCheckRow` in `tab_extra.c`): the box, the label and a dim
+hint, with the whole row width as the touch target. Checked always means "on"
+in the words of the label, so a stored "off" flag is inverted at the draw and
+the tap.
 
 ### Panels
 
@@ -1118,7 +1125,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:693](ui/tab_extra.c#L693)) in a bit range nothing else
+   `UiExtraStateKey()` ([:649](ui/tab_extra.c#L649)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1237,9 +1244,11 @@ uses the same expression the draw code does.
 rows.** `tab_extra.c` kept page 1 and page 2 on one set of `ROW*_Y` constants
 after the tab-unlock override moved off page 1, which left page 1's first label
 against the top frame and 32px dead under its last button while page 2 stayed
-full. It now has two grids: `ROW*_LABEL_Y` for page 2's four rows, `P1_ROW_Y(i)`
-for page 1's three. They still share the COLUMNS, which is what keeps the pages
-looking like one panel, and both still end on the interior floor at y=183. `tab_party.c` gets this right by
+full. Each page now has its own grid, and every grid starts below the pager at
+y=30: `P1_ROW_Y(i)` for page 1's three button rows, the `P2_*` rows for page 2's
+mix of check rows and button rows, and `P3_ROW_Y(i)` for page 3's check rows.
+The button rows still share the COLUMNS (`SCL_X`), which is what keeps the pages
+looking like one panel, and no grid goes below the interior floor at y=183. `tab_party.c` gets this right by
 computing both from `CellH()`/`CellTop()`, which change when the cheat tag strip
 appears.
 
