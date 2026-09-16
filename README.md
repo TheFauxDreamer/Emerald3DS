@@ -286,25 +286,73 @@ working reference for how that layer is wired.
 
 The rest is the pret decompilation and carries no license from this project.
 Following pret convention, no ROM is required or included; the decompilation
-builds the game from its own committed sources. Pokémon and Pokémon character
-names are trademarks of Nintendo, Creatures Inc., and GAME FREAK Inc. This
-project is not affiliated with or endorsed by any of them.
+builds the game from its own committed sources.
+
+The follower code and its sprites come from aarant's fork of pokeemerald, which
+states no license. They are used here with credit, and the rights to the art
+stay with its creators. The tools under `tools/` that pret includes keep their
+own licenses.
+
+Pokémon and Pokémon character names are trademarks of Nintendo, Creatures Inc.,
+and GAME FREAK Inc. This project is not affiliated with or endorsed by any of
+them.
 
 ## Credits
 
+**Code this port is built on**
+
 - **[pret/pokeemerald](https://github.com/pret/pokeemerald)**: the
-  decompilation everything is built on.
+  decompilation everything is built on. Its tools include third-party code:
+  [wav2agb](https://github.com/ipatix/wav2agb) by ipatix,
+  [inja](https://github.com/pantor/inja) by pantor and
+  [JSON for Modern C++](https://github.com/nlohmann/json) by nlohmann.
 - **[tripplyons/pokeemerald-wasm](https://github.com/tripplyons/pokeemerald-wasm)**
   fenced every dependency on real GBA hardware behind `#if WASM`. That work,
   reused as `#if WASM || RP2350`, is why this port did not have to rediscover
   where a million-line decompilation touches hardware.
-- **[aarant/pokeemerald, `followers` branch](https://github.com/aarant/pokeemerald/tree/followers)**
-  is the FOLLOWER option: the following Pokémon, their messages and emotes, and
-  the overworld sprites. The sprite artists are credited in that branch's
-  history, among them SonikkuA-DatH, Jaizu, LarryTurbo, ShinyDragonHunter and
-  shikashipx.
 - **[mattdeeds/pokeemerald-rp2350](https://github.com/mattdeeds/pokeemerald-rp2350)**
   is this repo's direct base: the software rasteriser, the m4a mixer in C, and
-  the flash-save hooks the 3DS port inherits.
+  the flash-save hooks the 3DS port inherits. Its hardware build uses the
+  [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk).
+
+**Features taken from other projects**
+
+- **[aarant/pokeemerald](https://github.com/aarant/pokeemerald)** by Ariel
+  Antonitis. Its `followers` branch is the FOLLOWER option: the following
+  Pokémon, their messages, emotes and field-move animations, the Poké Ball
+  sprites and the dynamic overworld palettes. The branch history credits these
+  contributors:
+  - **Jaizu**: the Combusken, Chansey, Espeon, Gyarados, Magikarp, Skiploom and
+    Shuppet sprites, the Lombre palette, and fixes.
+  - **SonikkuA-DatH**: the Donphan, Taillow, Swellow, Silcoon and Cascoon
+    sprites, palette edits, the extra footprint types, and the movements in
+    the follower messages.
+  - **[LarryTurbo](https://www.deviantart.com/larryturbo)**: the resized 32x32
+    sprites for large Pokémon, and the Castform forms.
+  - **ShinyDragonHunter**: the Regirock and Registeel sprites.
+  - **shikashipx**: the Poké Ball sprites, the Substitute sprite and
+    asymmetrical followers.
+  - **andrian_timeswift**: the Squirtle, Wartortle and Blastoise sprites.
+  - **rayrobdod**: the right-walking Krabby and Kingler sprites, from
+    [pokeemerald-expansion PR #7881](https://github.com/rh-hideout/pokeemerald-expansion/pull/7881).
+  - **Bassoonian** and **Eduardo Quezada**: text fixes and code.
+
+  The follower sprites are based on the overworld sprites of Pokémon HeartGold
+  and SoulSilver.
+- **[rh-hideout/pokeemerald-expansion](https://github.com/rh-hideout/pokeemerald-expansion)**:
+  the LEVEL CAP values come from its `src/caps.c`, and it carried the
+  Krabby and Kingler sprites above.
+
+**Tools and libraries for the 3DS build**
+
+- **[devkitPro](https://devkitpro.org)**: the devkitARM toolchain and the
+  libctru, citro2d and citro3d libraries the port links against.
+- **[makerom](https://github.com/3DSGuy/Project_CTR)** from 3DSGuy's Project_CTR
+  builds the CIA and the .3ds file.
+- **bannertool** by Steveice10 builds the Home Menu banner. CI uses the
+  [Linux build by Epicpkmn11](https://github.com/Epicpkmn11/bannertool).
+- **[TricksterGuy/3ds-template](https://github.com/TricksterGuy/3ds-template)**:
+  `3ds/emerald3ds.rsf` starts from its RSF.
+
 - The original pokeemerald README is preserved at
   [docs/original-pokeemerald-readme.md](docs/original-pokeemerald-readme.md).
