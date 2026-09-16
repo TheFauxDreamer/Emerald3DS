@@ -3260,3 +3260,27 @@ static void SpriteCB_LinkPlayer(struct Sprite *sprite)
         sprite->data[7]++;
     }
 }
+
+#if PLATFORM_3DS
+// The time of day from the game clock. The hours are those of UpdateTimeOfDay
+// in the lighting branch of aarant's fork, without the palette blend. On the
+// 3DS, the game clock runs on the console clock (src/siirtc.c).
+u8 GetTimeOfDay(void)
+{
+    RtcCalcLocalTime();
+    if (gLocalTime.hours < 4 || gLocalTime.hours >= 20)
+        return TIME_OF_DAY_NIGHT;
+    if (gLocalTime.hours >= 18)
+        return TIME_OF_DAY_TWILIGHT;
+    return TIME_OF_DAY_DAY;
+}
+
+// TRUE for a map type that is outdoors, as in the lighting branch.
+bool8 MapHasNaturalLight(u8 mapType)
+{
+    return mapType == MAP_TYPE_TOWN
+        || mapType == MAP_TYPE_CITY
+        || mapType == MAP_TYPE_ROUTE
+        || mapType == MAP_TYPE_OCEAN_ROUTE;
+}
+#endif
