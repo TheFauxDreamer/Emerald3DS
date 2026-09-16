@@ -90,7 +90,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:811](host/main.c#L811),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:832](host/main.c#L832),
   after audio init and before `AgbMain()`.
 
 ---
@@ -335,7 +335,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:856](ui/tab_extra.c#L856), which tests the
+(see `UiExtraTouch` at [tab_extra.c:888](ui/tab_extra.c#L888), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -346,7 +346,7 @@ as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L2
 `UiHoldRepeat` ([ui_draw.c:959](ui/ui_draw.c#L959)) is the one exception to the
 `justReleased` guard, and it is why the guard moved down a few lines in the two
 list tabs. Both scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)) and
-BAG ([tab_bag.c:577](ui/tab_bag.c#L577)) run through it:
+BAG ([tab_bag.c:579](ui/tab_bag.c#L579)) run through it:
 
 ```c
 static UiHold sHoldUp, sHoldDn;   // one counter per control, beside its state
@@ -959,7 +959,7 @@ static bool8 CanUseItemNow(void)
 Mutating party or bag data mid-script can contradict whatever the script is
 about to do. Any new write path must pass the same four.
 
-### In battle: through the controller ([src/battle_controller_player.c:272](../src/battle_controller_player.c#L272))
+### In battle: through the controller ([src/battle_controller_player.c:279](../src/battle_controller_player.c#L279))
 
 `Ctr3dsQueueBattleItem(item, partySlot)` does **not** apply the effect itself. It
 requires `gBattlerControllerFuncs[player] == HandleInputChooseAction`
@@ -1109,15 +1109,16 @@ value without writing the file back out during the load that produced it.
    or to the save.
    - **Per console:** use a byte of `pad[3]` in `struct CtrSettings`, and add
      the `extern` and the load/save lines.
-   - **Per save:** use a byte of `pad[2]` in `struct CtrSaveSettings`, and add
-     the value to `save_get()`, `save_apply()` and `save_is_default()`.
+   - **Per save:** use the `pad` byte in `struct CtrSaveSettings`, and add the
+     value to `save_get()`, `save_apply()` and `save_is_default()`. It is the
+     last free byte. The next per-save value needs a larger record.
 
    Then bump `SETTINGS_VERSION`, and let the load accept the old version. Keep
    every byte of both structs in use, with explicit `pad`. Otherwise
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:544](ui/tab_extra.c#L678)) in a bit range nothing else
+   `UiExtraStateKey()` ([:693](ui/tab_extra.c#L693)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1139,24 +1140,26 @@ A failed write is also not retried: one attempt per change, or a read-only card
 would turn one tap into an FS attempt on every frame for the rest of the
 session.
 
-The struct is **164 bytes at v11**:
+The struct is **164 bytes at v11 and v12**:
 
 - Bytes 0 to 27 are the v10 layout. They hold the per-console values, and the
   last three bytes are `pad`.
 - Then comes the per-save table: a clock, a count, and `CTR_SETTINGS_SAVES` (8)
-  records of 16 bytes. Each record has two bytes of `pad`.
+  records of 16 bytes. Each record has one byte of `pad`. Version 12 used the
+  other byte for the follower switch, so a v11 file loads as it is.
 
 From v5 on, most versions used bytes that the version before wrote as zero
 padding. Thus v6, v8 and v9 needed no migration. The padding stops the compiler
 from rounding a struct up to its 4-byte alignment. The `_Static_assert` lines in
 `settings.c` fail if a struct gets implicit padding.
 
-**Six values are per save**: EXP All, the level cap, the randomizer, the bag
-sort, the phone-call switch and the last ball. Each save has a record, keyed on
-its full 32-bit trainer ID. When all 8 records are in use, a new save replaces
-the least recently used record, as in the achievements store.
+**Seven values are per save**: EXP All, the level cap, the randomizer, the bag
+sort, the phone-call switch, the last ball and the follower switch. Each save
+has a record, keyed on its full 32-bit trainer ID. When all 8 records are in
+use, a new save replaces the least recently used record, as in the achievements
+store.
 
-- At boot, only the per-console values load. The six stay at their defaults.
+- At boot, only the per-console values load. The seven stay at their defaults.
 - On the first overworld frame of a save, `Adopt()` in `3ds/achievements.c`
   calls `CtrSettingsAdopt()`. That applies the save's record, or the defaults
   if the save has no record.
@@ -1169,7 +1172,7 @@ the least recently used record, as in the achievements store.
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:334](host/main.c#L334)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:335](host/main.c#L335)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
@@ -1263,7 +1266,7 @@ appears.
 | A battle partner's Pokemon look like the player's | A party view that does not ask `UiAllySlot` (section 10). In a partner battle slots 3-5 are the partner's. |
 | A battler is drawn in front of the textbox during a move's effect (top screen) | An OBJ-window sprite rendered as an ordinary one. `rp2350/ppu.c` implements the OBJ window now; see `docs/PORTING.md`, the reference-inherited defects. |
 | Heap exhaustion after a few flies | Left the overworld without `CleanupOverworldWindowsAndTilemaps()`. |
-| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:278](tweaks.c#L278). |
+| A wild Pokémon turns into a Bad Egg | Wrote `MON_DATA_PERSONALITY` into an existing mon. It is the substructure order *and* half the encryption key, and `SetBoxMonData` does not re-encrypt for it (the field is below `MON_DATA_ENCRYPT_SEPARATOR`). Create the mon with the personality you want instead: [3ds/tweaks.c:351](tweaks.c#L351). |
 | A `src/` feature silently disappears | `3ds/ui/*.c` basename collided with a `src/*.c` object. |
 | A playthrough gets another save's achievements | Conditions were read while the save in memory belonged to someone else. A New Game sets the trainer ID in Birch's speech while the old save's flags are still loaded, until `NewGameInitData()` clears them; a soft reset reloads the card's save under whatever was being played. So a playthrough is adopted only on a `CB2_Overworld` frame, and nothing is evaluated unless the save block's trainer ID matches it ([achievements.c](achievements.c), `Current` and `Adopt`). |
 | Saved achievements come back as the wrong ones | An achievement's id was changed or reused. The id is its bit in `achievements.bin`, so ids are permanent: a new achievement takes the next unused id, and a retired one's id is never handed out again. Row order is free. The EXTRA debug row counts duplicate ids, and so does `3ds/check_achievements_md.py`. |

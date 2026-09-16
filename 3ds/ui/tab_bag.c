@@ -273,6 +273,8 @@ static void UseItemOn(u16 item, u8 slot)
     {
         RemoveBagItem(item, 1);
         sMessage = MSG_USED;
+        // A Revive can change which Pokemon follows the player.
+        Ctr3dsRefreshFollowerNow();
     }
     else
     {

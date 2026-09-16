@@ -52,6 +52,7 @@
 #include "constants/songs.h"
 #include "constants/species.h"
 #include "constants/weather.h"
+#include "../3ds/tweaks.h"
 #endif
 
 #define SPECIAL_LOCALIDS_START (min(LOCALID_CAMERA, \
@@ -2124,7 +2125,9 @@ void UpdateFollowingPokemon(void) {
     // 1. GetFollowerInfo returns FALSE
     // 2. Map is indoors and gfx is larger than 32x32
     // 3. flag is set
-    if (!GetFollowerInfo(&species, &form, &shiny) ||
+    // 4. The FOLLOWER switch on the EXTRA tab is OFF
+    if (!Ctr3dsFollowerOn() ||
+        !GetFollowerInfo(&species, &form, &shiny) ||
         (gMapHeader.mapType == MAP_TYPE_INDOOR && SpeciesToGraphicsInfo(species, 0)->oam->size > ST_OAM_SIZE_2) ||
         FlagGet(FLAG_TEMP_HIDE_FOLLOWER))
     {

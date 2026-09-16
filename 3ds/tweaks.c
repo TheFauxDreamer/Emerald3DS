@@ -17,6 +17,7 @@
 #include "battle_pike.h"
 #include "battle_pyramid.h"
 #include "event_data.h"
+#include "event_object_movement.h"
 #include "item.h"
 #include "main.h"
 #include "overworld.h"
@@ -37,6 +38,30 @@
 bool8 Ctr3dsExpAllOn(void)
 {
     return Ctr3dsGetExpAll() ? TRUE : FALSE;
+}
+
+// ---- Follower --------------------------------------------------------------
+
+bool8 Ctr3dsFollowerOn(void)
+{
+    return Ctr3dsGetFollowerOn() ? TRUE : FALSE;
+}
+
+void Ctr3dsRefreshFollowerNow(void)
+{
+    // The same gate as Ctr3dsSortBagNow. A follower that appears during a
+    // script can block the script's movement. The next map load, return to
+    // the field or heal updates the follower if this refuses.
+    if (gMain.inBattle)
+        return;
+    if (gMain.callback2 != CB2_Overworld)
+        return;
+    if (ArePlayerFieldControlsLocked())
+        return;
+    if (ScriptContext_IsEnabled())
+        return;
+
+    UpdateFollowingPokemon();
 }
 
 // ---- Phone calls -----------------------------------------------------------

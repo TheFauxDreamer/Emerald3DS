@@ -144,6 +144,15 @@ through, and so does the PokéNav's own Match Call screen. **QUICK BALL** turns 
 the quick-throw strip described below, for anyone who would rather keep those
 forty rows of their party grid during a wild battle.
 
+**FOLLOWER** makes the first Pokémon in your party walk behind you, as in
+HeartGold and SoulSilver. It comes out of its own type of Poké Ball. It goes
+back into the ball for Surf, the bike, doors and cutscenes, and comes out again
+after. Talk to it and it shows an emote and says how it feels. It also takes
+part when you use Cut or Rock Smash. If your first Pokémon has fainted, the next
+one follows. The switch is off by default, and each save keeps its own setting.
+The feature is aarant's `followers` branch of pokeemerald, with its sprites for
+all 386 Pokémon.
+
 **A fourth page exists in debug builds only.** It holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
 every tab regardless of what the save has unlocked, silence one half of the
@@ -289,6 +298,11 @@ project is not affiliated with or endorsed by any of them.
   fenced every dependency on real GBA hardware behind `#if WASM`. That work,
   reused as `#if WASM || RP2350`, is why this port did not have to rediscover
   where a million-line decompilation touches hardware.
+- **[aarant/pokeemerald, `followers` branch](https://github.com/aarant/pokeemerald/tree/followers)**
+  is the FOLLOWER option: the following Pokémon, their messages and emotes, and
+  the overworld sprites. The sprite artists are credited in that branch's
+  history, among them SonikkuA-DatH, Jaizu, LarryTurbo, ShinyDragonHunter and
+  shikashipx.
 - **[mattdeeds/pokeemerald-rp2350](https://github.com/mattdeeds/pokeemerald-rp2350)**
   is this repo's direct base: the software rasteriser, the m4a mixer in C, and
   the flash-save hooks the 3DS port inherits.

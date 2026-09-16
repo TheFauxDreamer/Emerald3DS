@@ -53,13 +53,15 @@
 // - v11 adds a table of per-save records, keyed on the trainer ID. Six values
 //   move into it. An older file has one set of them, and the first save that
 //   CtrSettingsAdopt() gets takes that set.
-#define SETTINGS_VERSION 11
+// - v12 uses one padding byte of each record for the FOLLOWER switch. Same
+//   size. A v11 record has zero there, which means off.
+#define SETTINGS_VERSION 12
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
 #define CTR_SETTINGS_SAVES 8
 
-// The values of one save (v11). A fixed size with every byte in use.
+// The values of one save (v11, v12). A fixed size with every byte in use.
 struct CtrSaveSettings {
     uint32_t playerId;                 // the save's full 32-bit trainer ID
     uint32_t lastUsed;                 // the table clock at the last use
@@ -69,7 +71,8 @@ struct CtrSaveSettings {
     uint8_t  bagSort;                  // CTR_BAGSORT_*
     uint8_t  phoneCallsOff;
     uint8_t  lastBall;
-    uint8_t  pad[2];                   // explicit, always written as 0
+    uint8_t  followerOn;               // added in v12
+    uint8_t  pad;                      // explicit, always written as 0
 };
 
 // A fixed size with every byte in use, so the file layout does not depend on
@@ -168,6 +171,8 @@ extern int  Ctr3dsGetFfAudio(void);
 extern void Ctr3dsApplyFfAudio(int mode);
 extern int  Ctr3dsGetPhoneCallsOff(void);
 extern void Ctr3dsApplyPhoneCallsOff(int on);
+extern int  Ctr3dsGetFollowerOn(void);
+extern void Ctr3dsApplyFollowerOn(int on);
 extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
 extern int  Ctr3dsGetBattleAnimOff(void);
@@ -284,10 +289,10 @@ static int save_is_default(const struct CtrSaveSettings *v)
 {
     return v->expAll == 0 && v->levelCap == CTR_CAP_OFF && v->randomizer == 0
         && v->bagSort == CTR_BAGSORT_OFF && v->phoneCallsOff == 0
-        && v->lastBall == 0;
+        && v->lastBall == 0 && v->followerOn == 0;
 }
 
-// Read the six live values.
+// Read the seven live values.
 static void save_get(struct CtrSaveSettings *v)
 {
     v->expAll        = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
@@ -296,9 +301,10 @@ static void save_get(struct CtrSaveSettings *v)
     v->bagSort       = (uint8_t)Ctr3dsGetBagSort();
     v->phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
     v->lastBall      = (uint8_t)Ctr3dsGetLastBall();
+    v->followerOn    = (uint8_t)(Ctr3dsGetFollowerOn() ? 1 : 0);
 }
 
-// Set the six live values, or the defaults if v is NULL.
+// Set the seven live values, or the defaults if v is NULL.
 //
 // Set the defaults first. Apply refuses a bad mode, and a bad byte must give
 // the default, not the value of the save before. The lastBall field has no
@@ -311,6 +317,7 @@ static void save_apply(const struct CtrSaveSettings *v)
     Ctr3dsApplyBagSort(CTR_BAGSORT_OFF);
     Ctr3dsApplyPhoneCallsOff(0);
     Ctr3dsApplyLastBall(0);
+    Ctr3dsApplyFollowerOn(0);
 
     if (v == NULL)
         return;
@@ -321,6 +328,7 @@ static void save_apply(const struct CtrSaveSettings *v)
     Ctr3dsApplyBagSort(v->bagSort);
     Ctr3dsApplyPhoneCallsOff(v->phoneCallsOff != 0);
     Ctr3dsApplyLastBall(v->lastBall);
+    Ctr3dsApplyFollowerOn(v->followerOn != 0);
 }
 
 static struct CtrSaveSettings *find_record(uint32_t playerId)
@@ -441,7 +449,8 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    if (s.version == SETTINGS_VERSION)
+    // A v11 file has the same size. Its records have zero in the v12 byte.
+    if (s.version == SETTINGS_VERSION || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -450,7 +459,8 @@ void CtrSettingsLoad(void)
     {
         // At least 28 bytes, not exactly 28. The write never truncates, so a
         // v10 build that writes over a v11 file leaves the old table after its
-        // bytes. The table is read only from a v11 file, so the tail is ignored.
+        // bytes. The table is read only from a v11 or v12 file, so the tail is
+        // ignored.
         if (n < SETTINGS_V10_SIZE)
             return;
     }
@@ -515,7 +525,7 @@ void CtrSettingsLoad(void)
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION)
+    if (s.version == SETTINGS_VERSION || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
