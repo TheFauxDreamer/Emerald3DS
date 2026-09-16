@@ -5326,14 +5326,18 @@ static bool32 EndFollowerTransformEffect(struct ObjectEvent *objectEvent, struct
     return FALSE;
 }
 
+// GetLocalWildMon writes to its pointer. Upstream gives it NULL (FALSE), which
+// the GBA ignores and the 3DS does not. The species test is first, so other
+// followers do not use the wild table or the RNG.
 static bool32 TryStartFollowerTransformEffect(struct ObjectEvent *objectEvent, struct Sprite *sprite) {
     u32 multi;
+    bool8 isWaterMon;
     if (objectEvent->extra.mon.species == SPECIES_CASTFORM && objectEvent->extra.mon.form != (multi = GetOverworldCastformForm())) {
         sprite->data[7] = TRANSFORM_TYPE_PERMANENT << 8;
         objectEvent->extra.mon.form = multi;
         return TRUE;
-    } else if ((gRngValue >> 16) < 18 && GetLocalWildMon(FALSE)
-            && (objectEvent->extra.mon.species == SPECIES_MEW || objectEvent->extra.mon.species == SPECIES_DITTO)) {
+    } else if ((objectEvent->extra.mon.species == SPECIES_MEW || objectEvent->extra.mon.species == SPECIES_DITTO)
+            && (gRngValue >> 16) < 18 && GetLocalWildMon(&isWaterMon)) {
         sprite->data[7] = TRANSFORM_TYPE_RANDOM_WILD << 8;
         PlaySE(SE_M_MINIMIZE);
         return TRUE;
@@ -5346,6 +5350,7 @@ static bool8 UpdateFollowerTransformEffect(struct ObjectEvent *objectEvent, stru
     u8 frames = sprite->data[7] & 0xFF;
     u8 stretch;
     u32 multi;
+    bool8 isWaterMon;
     if (!type)
         return TryStartFollowerTransformEffect(objectEvent, sprite);
     sprite->oam.mosaic = TRUE;
@@ -5364,7 +5369,7 @@ static bool8 UpdateFollowerTransformEffect(struct ObjectEvent *objectEvent, stru
             break;
         case TRANSFORM_TYPE_RANDOM_WILD:
             multi = objectEvent->extra.asU16;
-            objectEvent->extra.mon.species = GetLocalWildMon(FALSE);
+            objectEvent->extra.mon.species = GetLocalWildMon(&isWaterMon);
             if (!objectEvent->extra.mon.species) {
                 objectEvent->extra.asU16 = multi;
                 break;
@@ -9405,7 +9410,8 @@ void ObjectEventUpdateElevation(struct ObjectEvent *objEvent)
     if (curElevation == ELEVATION_MULTI_LEVEL || prevElevation == ELEVATION_MULTI_LEVEL) {
         // Ignore subsprite priorities under bridges
         // so all subsprites will display below it
-        if (LARGE_OW_SUPPORT)
+        // The link player objects in overworld.c give no sprite.
+        if (LARGE_OW_SUPPORT && sprite != NULL)
             sprite->subspriteMode = SUBSPRITES_IGNORE_PRIORITY;
 #else
     if (curElevation == ELEVATION_MULTI_LEVEL || prevElevation == ELEVATION_MULTI_LEVEL)
