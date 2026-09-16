@@ -320,6 +320,7 @@ static uint8_t sPhoneCallsOff;
 static uint8_t sQuickBallOff;
 static uint8_t sBattleAnimOff;
 static uint8_t sFollowerOn;
+static uint8_t sDayCareYard;
 
 // The last ball thrown, as a raw item id. There is no range check here: the
 // valid range is a game constant that this side cannot include.
@@ -443,6 +444,26 @@ void Ctr3dsSetFollowerOn(int on)
 int Ctr3dsGetFollowerOn(void)
 {
     return sFollowerOn;
+}
+
+void Ctr3dsApplyDayCareYard(int on)
+{
+    sDayCareYard = on ? 1 : 0;
+}
+
+void Ctr3dsSetDayCareYard(int on)
+{
+    int before = sDayCareYard;
+
+    Ctr3dsApplyDayCareYard(on);
+
+    if (sDayCareYard != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetDayCareYard(void)
+{
+    return sDayCareYard;
 }
 
 void Ctr3dsApplyQuickBallOff(int on)

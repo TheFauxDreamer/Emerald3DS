@@ -47,6 +47,7 @@
 #include "constants/abilities.h"
 #include "constants/battle.h"
 #include "constants/map_types.h"
+#include "constants/maps.h"
 #include "constants/rgb.h"
 #include "constants/region_map_sections.h"
 #include "constants/songs.h"
@@ -1514,6 +1515,9 @@ u8 Unref_TryInitLocalObjectEvent(u8 localId)
             objectEventCount = HILL_TRAINERS_PER_FLOOR;
         else
             objectEventCount = gMapHeader.events->objectEventCount;
+#if PLATFORM_3DS
+            objectEventCount += GetDayCareYardTemplateCount();
+#endif
 
         for (i = 0; i < objectEventCount; i++)
         {
@@ -1712,11 +1716,15 @@ static u8 TrySpawnObjectEventTemplate(const struct ObjectEventTemplate *objectEv
         }
     // Set runtime species based on VAR_TEMP_4, if template has a dynamic graphics ID
     } else if (objectEventTemplate->graphicsId >= OBJ_EVENT_GFX_VARS && VarGetObjectEventGraphicsId(objectEventTemplate->graphicsId - OBJ_EVENT_GFX_VARS) == OBJ_EVENT_GFX_OW_MON) {
-        gObjectEvents[objectEventId].extra.asU16 = VarGet(VAR_TEMP_4);
+        // A template can name its own var in trainerRange_berryTreeId, as the
+        // Day Care yard does. Upstream gave the form where the shiny bit goes.
+        u16 var = objectEventTemplate->trainerRange_berryTreeId >= VARS_START
+                ? objectEventTemplate->trainerRange_berryTreeId : VAR_TEMP_4;
+        gObjectEvents[objectEventId].extra.asU16 = VarGet(var);
         FollowerSetGraphics(&gObjectEvents[objectEventId],
             gObjectEvents[objectEventId].extra.mon.species,
             gObjectEvents[objectEventId].extra.mon.form,
-            gObjectEvents[objectEventId].extra.mon.form);
+            gObjectEvents[objectEventId].extra.mon.shiny);
     }
 
 #endif
@@ -2091,6 +2099,29 @@ static u8 GetOverworldCastformForm(void) {
 }
 
 // Retrieve graphic information about the following pokemon, if any
+// Retrieve graphic information about a box pokemon. The follower and the Day
+// Care yard use it. Upstream casts the Day Care mon to struct Pokemon; this
+// reads the struct BoxPokemon directly.
+static bool8 GetBoxMonInfo(struct BoxPokemon *boxMon, u16 *species, u8 *form, u8 *shiny) {
+    *species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+    *form = 0; // default
+    *shiny = 0;
+    if (*species == SPECIES_NONE)
+        return FALSE;
+    *shiny = IsShinyOtIdPersonality(GetBoxMonData(boxMon, MON_DATA_OT_ID),
+                                    GetBoxMonData(boxMon, MON_DATA_PERSONALITY));
+    switch (*species)
+    {
+    case SPECIES_UNOWN:
+        *form = GET_UNOWN_LETTER(boxMon->personality);
+        break;
+    case SPECIES_CASTFORM: // form is based on overworld weather
+        *form = GetOverworldCastformForm();
+        break;
+    }
+    return TRUE;
+}
+
 static bool8 GetFollowerInfo(u16 *species, u8 *form, u8 *shiny) {
     struct Pokemon *mon = GetFirstLiveMon();
     if (!mon) {
@@ -2099,19 +2130,121 @@ static bool8 GetFollowerInfo(u16 *species, u8 *form, u8 *shiny) {
         *shiny = 0;
         return FALSE;
     }
-    *species = GetMonData(mon, MON_DATA_SPECIES);
-    *shiny = IsMonShiny(mon);
-    *form = 0; // default
-    switch (*species)
+    return GetBoxMonInfo(&mon->box, species, form, shiny);
+}
+
+// The Day Care Pokemon walk in the Route 117 yard (the followers-expanded-id
+// branch of aarant's fork). Upstream adds two objects to Route117/map.json.
+// That file also makes the GBA map data, so this build adds the two templates
+// after the map header's objects when the map loads.
+#define LOCALID_DAYCARE_MON_0     25
+#define LOCALID_ROUTE117_PIKACHU  7
+#define DAYCARE_YARD_TEMPLATES    DAYCARE_MON_COUNT
+
+static bool8 IsDayCareYardMap(void)
+{
+    return gMapHeader.events != NULL
+        && gSaveBlock1Ptr->location.mapGroup == MAP_GROUP(MAP_ROUTE117)
+        && gSaveBlock1Ptr->location.mapNum == MAP_NUM(MAP_ROUTE117)
+        && gMapHeader.events->objectEventCount + DAYCARE_YARD_TEMPLATES <= OBJECT_EVENT_TEMPLATES_COUNT;
+}
+
+// Called at the end of LoadObjEventTemplatesFromHeader, which clears the table.
+void AddDayCareYardTemplates(void)
+{
+    struct ObjectEventTemplate *templates = gSaveBlock1Ptr->objectEventTemplates;
+    u32 count, i;
+
+    if (!Ctr3dsDayCareYardOn() || !IsDayCareYardMap())
+        return;
+
+    count = gMapHeader.events->objectEventCount;
+    for (i = 0; i < DAYCARE_YARD_TEMPLATES; i++)
     {
-    case SPECIES_UNOWN:
-        *form = GET_UNOWN_LETTER(mon->box.personality);
-        break;
-    case SPECIES_CASTFORM: // form is based on overworld weather
-        *form = GetOverworldCastformForm();
-        break;
+        struct ObjectEventTemplate *template = &templates[count + i];
+
+        template->localId = LOCALID_DAYCARE_MON_0 + i;
+        template->graphicsId = OBJ_EVENT_GFX_VAR_0 + i;
+        template->kind = OBJ_KIND_NORMAL;
+        template->x = 47 + 2 * i;
+        template->y = 2;
+        template->elevation = 3;
+        template->movementType = MOVEMENT_TYPE_LOOK_AROUND;
+        template->trainerType = TRAINER_TYPE_NONE;
+        // The var that holds the species (ScrFunc_getdaycaregfx).
+        template->trainerRange_berryTreeId = VAR_TEMP_0 + i;
+        template->script = NULL;
+        template->flagId = FLAG_TEMP_1 + i;
     }
-    return TRUE;
+
+    // Upstream moves Pikachu away from the place of the second Pokemon.
+    for (i = 0; i < count; i++)
+    {
+        if (templates[i].localId == LOCALID_ROUTE117_PIKACHU
+         && templates[i].graphicsId == OBJ_EVENT_GFX_PIKACHU)
+        {
+            templates[i].x = 51;
+            templates[i].y = 1;
+        }
+    }
+}
+
+// The number of yard templates in the table. It reads the table, not the
+// setting, so a save continued on Route 117 keeps its yard.
+u8 GetDayCareYardTemplateCount(void)
+{
+    if (IsDayCareYardMap()
+     && gSaveBlock1Ptr->objectEventTemplates[gMapHeader.events->objectEventCount].localId == LOCALID_DAYCARE_MON_0)
+        return DAYCARE_YARD_TEMPLATES;
+    return 0;
+}
+
+// LoadSaveblockObjEventScripts copies a script pointer into all 64 templates
+// from the header, past the map's own objects. The yard templates have no
+// script, so set their pointers back to NULL.
+void ClearDayCareYardScripts(void)
+{
+    u32 i;
+
+    for (i = 0; i < GetDayCareYardTemplateCount(); i++)
+        gSaveBlock1Ptr->objectEventTemplates[gMapHeader.events->objectEventCount + i].script = NULL;
+}
+
+// Put the graphics of the Day Care mons in vars, for the Route 117 script:
+// getdaycaregfx gfxVar0, gfxVar1, monVar0, monVar1. Each gfx var gets the
+// follower graphics id, and each mon var the packed species, form and shiny
+// bit. VAR_RESULT is the number of mons, or 0 if the yard is not on the map.
+bool8 ScrFunc_getdaycaregfx(struct ScriptContext *ctx) {
+    u16 varGfx[DAYCARE_MON_COUNT];
+    u16 varMon[DAYCARE_MON_COUNT];
+    struct ObjectEvent packed;
+    u16 species;
+    u8 form;
+    u8 shiny;
+    u32 i;
+
+    // Read in script order. The order in an initializer list is not defined.
+    varGfx[0] = ScriptReadHalfword(ctx);
+    varGfx[1] = ScriptReadHalfword(ctx);
+    varMon[0] = ScriptReadHalfword(ctx);
+    varMon[1] = ScriptReadHalfword(ctx);
+
+    gSpecialVar_Result = 0;
+    if (GetDayCareYardTemplateCount() == 0)
+        return FALSE;
+
+    for (i = 0; i < DAYCARE_MON_COUNT; i++) {
+        if (!GetBoxMonInfo(&gSaveBlock1Ptr->daycare.mons[i].mon, &species, &form, &shiny))
+            break;
+        packed.extra.asU16 = 0;
+        packed.extra.mon.species = species;
+        packed.extra.mon.form = form;
+        packed.extra.mon.shiny = shiny;
+        VarSet(varGfx[i], OBJ_EVENT_GFX_OW_MON);
+        VarSet(varMon[i], packed.extra.asU16);
+    }
+    gSpecialVar_Result = i;
+    return FALSE;
 }
 
 void UpdateFollowingPokemon(void) {
@@ -2499,6 +2632,9 @@ void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
             objectCount = HILL_TRAINERS_PER_FLOOR;
         else
             objectCount = gMapHeader.events->objectEventCount;
+#if PLATFORM_3DS
+            objectCount += GetDayCareYardTemplateCount();
+#endif
 
         for (i = 0; i < objectCount; i++)
         {
@@ -3399,6 +3535,9 @@ static const struct ObjectEventTemplate *GetObjectEventTemplateByLocalIdAndMap(u
     {
         templates = gSaveBlock1Ptr->objectEventTemplates;
         count = gMapHeader.events->objectEventCount;
+#if PLATFORM_3DS
+        count += GetDayCareYardTemplateCount();
+#endif
     }
     else
     {

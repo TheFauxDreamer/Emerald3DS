@@ -482,6 +482,9 @@ void LoadObjEventTemplatesFromHeader(void)
     CpuCopy32(gMapHeader.events->objectEvents,
               gSaveBlock1Ptr->objectEventTemplates,
               gMapHeader.events->objectEventCount * sizeof(struct ObjectEventTemplate));
+#if PLATFORM_3DS
+    AddDayCareYardTemplates();
+#endif
 }
 
 void LoadSaveblockObjEventScripts(void)
@@ -492,6 +495,9 @@ void LoadSaveblockObjEventScripts(void)
 
     for (i = 0; i < OBJECT_EVENT_TEMPLATES_COUNT; i++)
         savObjTemplates[i].script = mapHeaderObjTemplates[i].script;
+#if PLATFORM_3DS
+    ClearDayCareYardScripts();
+#endif
 }
 
 void SetObjEventTemplateCoords(u8 localId, s16 x, s16 y)
