@@ -4,9 +4,71 @@ Outstanding work on the port, and the reasoning behind the decisions already
 taken. Companion to the root `README-TECHNICAL.md`, which describes how the port is
 built and why it is structured the way it is.
 
+## Status
+
+Checked against `67090b3` on 2026-09-16.
+
+| Part | State |
+|---|---|
+| A: Top-screen sharpness | **Done.** A runtime SCREEN SIZE setting, not a build flag. |
+| B: Bottom-screen UI, stages 3-5 | **Done.** BAG, MAP (with fly-from-map) and DEX. |
+| D: Gameplay tweaks | **Done.** |
+| Save durability | **Done.** |
+| The busy-wait audit | **Done.** |
+| C: Local wireless | **Written, not built.** On the `local-wireless` branch. |
+| E: Achievements | **Built in.** Two items are left. |
+
+The done parts stay in this file because their facts are recorded nowhere else.
+
+## Open items
+
+The large pieces:
+- **[SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md):** a view stack, a widget
+  layer, text clipping and a catalogue of new views. Not started.
+- **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
+  assets. Not started.
+- **Part C, the Cable Club over local wireless.** The branch is one commit
+  (`feb3472`), 138 commits behind main, so the work starts with a rebase. Where
+  its LINK screen goes is an open question (C.3).
+- **Part E:** the trade-dependent achievements, and a RetroAchievements
+  provider.
+
+The small ones:
+- **A bar that starts to slide under an overlay stalls** on the single-core
+  path (cheatsheet section 5, "Single core"). The second-core path repaints for
+  it. One full repaint when the slide ends would fix the single-core path, for
+  the cost of that repaint.
+- **The Old 3DS is not measured.** It runs the rasterizer on core 1, with 80%
+  of that core (`PPU_SYSCORE_PERCENT`), and takes the second-core path. Read its
+  log before calling it supported. ZL and ZR cannot be tested there.
+- **MAP extras not built:** the city zoom, the indoor icon blink and the
+  fly-destination icons (Part B, stage 4).
+- **Only if core 0 needs time back.** None of these is necessary at the
+  measured numbers (cheatsheet section 7):
+  - Upload only the dirty 8-row bands of the bottom screen. Any 8-row band is
+    contiguous in the stage and in the texture. The estimate is an upload of
+    about 1.0 ms for a party step and 0.4 ms for a sparkle step, against about
+    1.6 ms for the whole screen.
+  - Start the bottom transfer asynchronously, and wait for it before
+    `C3D_FrameBegin`.
+  - Paint straight into the 512-wide linear stage. That removes the copy,
+    measured at 0.4 to 1.1 ms mean and 2.1 ms worst.
+  - Trim `ppu.snap`, the one part of the rasterizer's cost still on core 0
+    (about 0.7 ms on the console).
+
 ---
 
-# Part A: Top-screen sharpness
+# Part A: Top-screen sharpness (done)
+
+**How it landed.** A.2 shipped as a runtime setting, SCREEN SIZE on EXTRA page
+1, not as the `CTR_TOP_SCALE` build flag below. It has three modes
+(`3ds/bridge.h:182`, `3ds/host/video.c:38`):
+- 1x: 240x160, pixel-perfect, wide borders;
+- 1.5x: 360x240, the default, 20px bars;
+- FILL: 400x240, no borders, 11% wider.
+
+The 800-wide mode 3 was not built, and FILL took its place, so nothing calls
+`gfxSetWide`. The reasoning below, and the A.1 emulator settings, still hold.
 
 ## Context
 
@@ -122,13 +184,14 @@ for s in 1 2 3; do make -C 3ds clean && make -C 3ds CTR_TOP_SCALE=$s; done
 
 ---
 
-# Part B: Bottom-screen UI (Stages 3-5 outstanding)
+# Part B: Bottom-screen UI (done)
 
-Stages 0-2 are implemented: `ui_draw.c` (4bpp blitter, BGR555→RGB565, Emerald
+All stages are implemented. Stages 0-2: `ui_draw.c` (4bpp blitter, BGR555→RGB565, Emerald
 nine-slice window frames, mon icons), `ui_text.c` (Emerald's own font via
 `DecompressGlyphTile`), the tabbed shell in `bottom_screen.c`, and the 2x3 party
-grid with detail view in `tab_party.c`. `tab_bag.c` and `tab_map.c` are
-placeholders.
+grid with detail view in `tab_party.c`. Stages 3-5, below: `tab_bag.c`,
+`tab_map.c` and `tab_dex.c`. The text below is the record of how they were
+built. For the code as it is now, read `SECOND_SCREEN_CHEATSHEET.md`.
 
 ## Reuse first
 
@@ -150,7 +213,7 @@ top screen through hardware the bottom screen does not own, and expect to be
 entered from their own menu's context. Calling one will appear to work and then
 fight the top screen for BG layers and tasks.
 
-## Stage 3: BAG and item use (WORKING)
+## Stage 3: BAG and item use (done)
 
 Verified in Azahar: a Potion used from the touch screen heals the Pokemon the
 player picks, in the field and in battle, and the safety gate holds.
@@ -199,7 +262,7 @@ finished and the next has not started.
 Item use changes the save; the deferred flush in `3ds/host/save.c` covers it.
 Ensure the party hash changes so the grid repaints.
 
-## Stage 4: MAP (WORKING)
+## Stage 4: MAP (done)
 
 Emerald's own region map art, drawn at 1:1, with a marker where the player is and
 tap-a-place-for-its-name. Read-only throughout: unlike BAG, nothing here writes
@@ -252,14 +315,16 @@ the player is, so without it the map goes stale while they walk. It is naturally
 coarse: the cursor position only moves when the player crosses a band boundary
 within a mapsec, so walking one stretch of route costs no repaints.
 
-Not built: flying (it would have to drive the field warp flow from the per-frame
-hook, which is the thing "The limit" above warns about), the indoor icon blink
-(one cosmetic effect for a new per-frame tick entry point), fly-destination icons
-and the city zoom.
+Flying was first left out here, because it would have to drive the field warp
+flow from the per-frame hook, which is the thing "The limit" above warns about.
+It shipped later (`04fb65b`): `tab_map.c` checks the game's own conditions and
+then takes the same steps as `CB_ExitFlyMap`. Still not built: the indoor icon
+blink (one cosmetic effect for a new per-frame tick entry point),
+fly-destination icons and the city zoom.
 
-## Stage 5: DEX
+## Stage 5: DEX (done)
 
-Seen/caught counts from `GetHoennPokedexCount()` / `GetNationalPokedexCount()`,
+Shipped in `9026ab3`. Seen/caught counts from `GetHoennPokedexCount()` / `GetNationalPokedexCount()`,
 a scrollable list filtered by `GetSetPokedexFlag()`, and per-entry category,
 height, weight and description from `struct PokedexEntry`.
 
@@ -302,7 +367,7 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ---
 
-# Part D: Gameplay tweaks (WORKING)
+# Part D: Gameplay tweaks (done)
 
 EXTRA page 2: EXP All, a badge-based level cap, a species randomiser, and a
 persistent bag sort. All off by default.
@@ -341,7 +406,7 @@ starts at the defaults.
 Four things that cost real time and are not recoverable by reading the code:
 
 - **A level cap must gate exp, never the level field.** `CalculateMonStats`
-  (`src/pokemon.c:2841`) recomputes `MON_DATA_LEVEL` from `MON_DATA_EXP` every
+  (`src/pokemon.c:2829`) recomputes `MON_DATA_LEVEL` from `MON_DATA_EXP` every
   time it runs, and it runs from `BoxMonToMon`, evolution, PC deposit and
   withdraw, and item use. Anything that clamped the level would be silently
   undone by the next unrelated call. Exp is the source of truth, so the gates
@@ -440,7 +505,7 @@ will still print the original name; that is a cosmetic data-side mismatch in
 
 ---
 
-# Save durability
+# Save durability (done)
 
 Symptom that led here: saving once, closing the game and reopening loaded the
 *previous* save, and saving twice worked around it.
@@ -486,6 +551,14 @@ save is 28 hook calls.
 
 # Part C: Local wireless (Cable Club over UDS)
 
+**Status: written, not built.** The work below is one commit, `feb3472`
+("link: Cable Club over 3DS local wireless (UDS)"), on the `local-wireless`
+branch. The branch is 138 commits behind main at `67090b3`. That commit changes
+`3ds/bridge.h`, `3ds/host/main.c`, `3ds/ui/bottom_screen.c` and
+`3ds/ui/ui_shell.h`, which all changed a lot on main since, so expect conflicts
+when it is rebased. C.3 no longer fits the tab bar as written (see there). The
+line numbers below were checked against main.
+
 ## Context
 
 The port has no link at all. `IsWirelessAdapterConnected()` is hardcoded to
@@ -511,7 +584,7 @@ offer the Wireless Club in the first place.
 The GBA cable link is a fixed 4-player shared bus that moves **one 16-byte
 command per player per frame**, and `src/link.c` already isolates that:
 
-- `LinkMain1()` (line 1896) calls `EnqueueSendCmd()` / `DequeueRecvCmds()`,
+- `LinkMain1()` (line 1898) calls `EnqueueSendCmd()` / `DequeueRecvCmds()`,
   which only touch `gLink.sendQueue` and `gLink.recvQueue`.
 - `SerialCB()` (line 2146) is the only thing that fills those queues, via
   `DoRecv()` / `DoSend()`, eight u16 at a time.
@@ -535,8 +608,7 @@ layer, `cable_club.c`, `trade.c`, `battle_controller_link_*.c`,
   `BeginHostingNetwork`, `ConnectToNetwork`, `Bind`, `SendTo`, `PullPacket`,
   `GetConnectionStatus`, `GetNodeInformation`, `RecvBeaconBroadcastData` (which
   backs `udsScanBeacons`) and `SetApplicationData`. Two Azahar instances in one
-  multiplayer room can test this without hardware, which matters because nothing
-  in this port has ever run on a real console.
+  multiplayer room can test this without a second console.
 
 ## C.1: Transport, host side (`3ds/host/link.c`, new)
 
@@ -601,9 +673,23 @@ inventing a checksum to satisfy it.
 
 ## C.3: LINK tab on the bottom screen
 
-`UI_TAB_LINK` added to `enum UiTab` and to `sTabs[]` (`3ds/ui/bottom_screen.c:58`)
-with flag `0`, always available, like BAG. The tab bar already divides by the
-visible count, so a fifth tab needs no layout change.
+**Open question: this no longer fits as written.** The branch adds LINK as a
+new tab. Since then TROPHY became the sixth tab, and six is the practical floor
+for a fingertip, so the bar is full (cheatsheet section 5, "Adding a tab"). Not
+decided yet:
+- LINK as a page of EXTRA now, and of HOME later. Part C then does not wait for
+  the refactor.
+- LINK as a tile of HOME, the launcher that `SECOND_SCREEN_PLAN.md` proposes.
+  Part C then waits for that plan's steps 0 to 3.
+- TROPHY moves into that launcher, and LINK takes the sixth tab.
+
+`SECOND_SCREEN_PLAN.md` records the same question. The panel's content below
+holds whichever place it gets.
+
+As first written: `UI_TAB_LINK` added to `enum UiTab` and to `sTabs[]`
+(`3ds/ui/bottom_screen.c:58`) with flag `0`, always available, like BAG. The tab
+bar divides by the visible count, so a new tab needed no layout change while
+there were five.
 
 New `3ds/ui/tab_link.c` following the established shape (`UiLinkDraw`,
 `UiLinkTouch`, entry points in `ui_shell.h`), on `UiWindowFrame` like every other
@@ -619,7 +705,7 @@ an automatic scan-then-host would suffer from.
 
 ## C: Files
 
-- `3ds/host/link.c` (new), plus `HOST_SRCS` in `3ds/Makefile:43`.
+- `3ds/host/link.c` (new), plus `HOST_SRCS` in `3ds/Makefile:55`.
 - `3ds/bridge.h`: the transport seam, stdint only, next to the existing
   `Ctr3dsGetClock` block.
 - `src/link.c`: one `#if PLATFORM_3DS` block over the transport functions.
@@ -660,9 +746,9 @@ Two Azahar instances in one multiplayer room, both on the same build:
 - **Lockstep drift is the thing most likely to bite.** Blocking on a peer stalls
   the whole frame, including audio, so a bad connection will crackle before it
   desyncs. The bounded wait keeps that finite; the jitter buffer keeps it rare.
-- Nothing in this port has run on real hardware, and UDS on hardware behaves in
-  ways an emulator will not reproduce, particularly around wireless being
-  disabled and around the sleep switch.
+- The port runs on a New 3DS XL, but UDS has never run there. On hardware it
+  behaves in ways an emulator will not reproduce, particularly around wireless
+  being disabled and around the sleep switch.
 - Cross-play with a real GBA is impossible and must not be implied anywhere in
   the UI. This is Emerald3DS talking to Emerald3DS.
 - Save corruption is conceivable if a trade is interrupted at the wrong moment.
