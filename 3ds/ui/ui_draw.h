@@ -136,6 +136,14 @@ void UiArrow(int x, int y, bool8 up, u16 fill);
 
 void UiChevron(int x, int y);
 
+// A checkbox for an on/off setting. The box has a 1px dim outline, as a button
+// frame has. A checked box also has a tick in the accent color with a theme
+// shadow, so the shape shows the state, not the color alone. (x, y) is the top
+// left corner of the box.
+#define UI_CHECKBOX_SIZE 14
+
+void UiCheckBox(int x, int y, bool8 checked);
+
 // A gold sparkle, at the three sizes of the game's shiny animation.
 //
 // The file gold_stars.png has six 8x8 tiles: tiles 0-3 are a 16x16 star, tile 4

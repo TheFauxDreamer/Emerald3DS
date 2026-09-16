@@ -61,24 +61,38 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define LABELLED_ROW_H  (LABEL_TO_BTN + BTN_H)
 
 // The top line, y 8..25. The pager uses its right end on each page. On its
-// left: the first row label on page 2, the DEBUG caption on page 4, and nothing
-// on page 1.
+// left there is only the DEBUG caption of the debug page. All other rows start
+// below it, at y 30.
 #define TOP_LINE_Y    8
 
-// Page 2's grid, which page 3 also uses: four rows. They fit only because the
-// fourth row has its label next to its buttons, not above them. There is no
-// space left: y 8 to 183, with gaps of 7 and 6.
-#define ROW1_LABEL_Y  TOP_LINE_Y
-#define ROW2_LABEL_Y  58
-#define ROW3_LABEL_Y  108
+// A check row: an on/off setting as a checkbox, its label and a dim hint on one
+// line. The full row width is the touch target, so a tap on the label also
+// toggles. The labels are at most 63px ("PHONE CALLS"), so they end before the
+// hint column at x 110. The widest hint is 135px and ends at x 245.
+#define CHK_ROW_H     26
+#define CHK_BOX_X     16
+#define CHK_LABEL_X   38
+#define CHK_HINT_X    110
+#define CHK_HIT_X     8
+#define CHK_HIT_W     (CTR_BOTTOM_WIDTH - 2 * CHK_HIT_X)
 
-#define ROW1_BTN_Y    (ROW1_LABEL_Y + LABEL_TO_BTN)
-#define ROW2_BTN_Y    (ROW2_LABEL_Y + LABEL_TO_BTN)
-#define ROW3_BTN_Y    (ROW3_LABEL_Y + LABEL_TO_BTN)
+// Page 2's grid from y 30: a check row, a labelled row of three buttons, a
+// check row and a row with its label next to its buttons. It ends at y 175.
+#define P2_EXP_Y        30
+#define P2_CAP_LABEL_Y  64
+#define P2_CAP_BTN_Y    (P2_CAP_LABEL_Y + LABEL_TO_BTN)
+#define P2_RAND_Y       115
+#define P2_SORT_Y       149
+#define P2_SORT_LABEL_X 16
 
-// Page 1's grid: three rows. They start below the pager line, as on the debug
-// page. The rows have a 55px pitch from y 30. Thus the last button is at
-// 157..183, at the same place as page 2's fourth row.
+// Page 3's grid: check rows at a 30px pitch from y 30. Five rows end at y 176,
+// and the interior ends at y 183.
+#define P3_ROW_PITCH  30
+#define P3_ROW_Y(i)   (30 + (i) * P3_ROW_PITCH)
+
+// Page 1's grid: three rows. They start below the pager line, as on the other
+// pages. The rows have a 55px pitch from y 30. Thus the last button is at
+// 157..183.
 #define P1_ROW_GAP    12
 #define P1_ROW_Y(i)   (30 + (i) * (LABELLED_ROW_H + P1_ROW_GAP))
 #define P1_BTN_Y(i)   (P1_ROW_Y(i) + LABEL_TO_BTN)
@@ -112,14 +126,9 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
 
-// The fourth row, with its label next to its buttons: BAG SORT on page 2 and
-// FOLLOWER on page 3.
-#define ROW4_Y        157
-#define ROW4_LABEL_X  16
-
 // The pager, right-aligned to the interior edge at x 311, on the top line of
-// each page. It is 17px tall at y 8 and ends at y 24. On pages 2 and 3, it
-// touches the row-1 buttons at y 25. Pages 1 and 4 start their rows below it.
+// each page. It is 17px tall at y 8 and ends at y 24. Every page starts its
+// rows below it.
 //
 // It uses TOP_LINE_Y, not a page's first row. Thus the pager does not move on a
 // page turn.
@@ -138,15 +147,13 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 
 // Right-aligned to the interior edge. The pager grows to the left when there
 // are more pages, so the last button stays in the same place. The first button
-// is at x 226 with three pages and at x 196 with four. Page 2's top line has
-// only "EXP ALL" at x 16. Page 3's top line has "PHONE CALLS" and its hint,
-// which ends at x 178. Both are clear.
+// is at x 226 with three pages and at x 196 with four.
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
-// Page 2 rows 1 to 3 use the columns of the SCREEN SIZE row (SCL_X and SCL_W,
-// not SCL_Y). Thus the two pages align horizontally. Row 4 has its label next
-// to its buttons, and three 75px buttons fit after the label.
+// The LEVEL CAP buttons use the columns of the SCREEN SIZE row (SCL_X and
+// SCL_W, not SCL_Y). Thus the two pages align horizontally. BAG SORT has its
+// label next to its buttons, and three 75px buttons fit after the label.
 #define P2_HINT_X     96
 #define WIDE_W        SCL_W
 #define WIDE_X(i)     SCL_X(i)
@@ -176,6 +183,29 @@ static void DrawButtonH(int x, int y, int w, int h, const u8 *label, int active)
 static void DrawButton(int x, int y, int w, const u8 *label, int active)
 {
     DrawButtonH(x, y, w, BTN_H, label, active);
+}
+
+// One on/off setting: the checkbox, the label and a dim hint, centered in a row
+// of height h. The hint can be NULL. Checked means "on" in the words of the
+// label.
+static void DrawCheckRow(int y, int h, const char *text, const char *hint,
+                         int checked)
+{
+    u8 label[40];
+
+    UiCheckBox(CHK_BOX_X, y + (h - UI_CHECKBOX_SIZE) / 2, checked ? TRUE : FALSE);
+    UiText(CHK_LABEL_X, y + (h - UI_GLYPH_H) / 2,
+           UiAscii(label, text, sizeof(label)), UiThemeText(), UiThemeShadow());
+
+    if (hint != NULL)
+        UiText(CHK_HINT_X, y + (h - UI_GLYPH_H) / 2,
+               UiAscii(label, hint, sizeof(label)), UI_COL_DIM, UiThemeShadow());
+}
+
+// TRUE if the touch is on a check row. The draw uses the same y and h.
+static bool8 HitCheckRow(const CtrTouchState *t, int y, int h)
+{
+    return UiHit(t, CHK_HIT_X, y, CHK_HIT_W, h) ? TRUE : FALSE;
 }
 
 static void DrawPage1(void)
@@ -269,15 +299,9 @@ static void DrawPage2(void)
     int cap = Ctr3dsCurrentLevelCap();
     int mode;
 
-    UiText(16, ROW1_LABEL_Y, UiAscii(label, "EXP ALL", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
+    DrawCheckRow(P2_EXP_Y, CHK_ROW_H, "EXP ALL", NULL, Ctr3dsGetExpAll());
 
-    DrawButton(WIDE_X(0), ROW1_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
-               !Ctr3dsGetExpAll());
-    DrawButton(WIDE_X(1), ROW1_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
-               Ctr3dsGetExpAll());
-
-    UiText(16, ROW2_LABEL_Y, UiAscii(label, "LEVEL CAP", sizeof(label)),
+    UiText(16, P2_CAP_LABEL_Y, UiAscii(label, "LEVEL CAP", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     // The cap that applies now, so the row shows what it does. It follows the
@@ -287,61 +311,52 @@ static void DrawPage2(void)
     {
         int x = P2_HINT_X;
 
-        x += UiText(x, ROW2_LABEL_Y, UiAscii(label, "cap ", sizeof(label)),
+        x += UiText(x, P2_CAP_LABEL_Y, UiAscii(label, "cap ", sizeof(label)),
                     UI_COL_DIM, UiThemeShadow());
-        UiNum(x, ROW2_LABEL_Y, cap, UI_COL_DIM, UiThemeShadow());
+        UiNum(x, P2_CAP_LABEL_Y, cap, UI_COL_DIM, UiThemeShadow());
     }
 
-    DrawButton(WIDE_X(0), ROW2_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(WIDE_X(0), P2_CAP_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
                mode == CTR_CAP_OFF);
-    DrawButton(WIDE_X(1), ROW2_BTN_Y, WIDE_W, UiAscii(label, "SOFT", sizeof(label)),
+    DrawButton(WIDE_X(1), P2_CAP_BTN_Y, WIDE_W, UiAscii(label, "SOFT", sizeof(label)),
                mode == CTR_CAP_SOFT);
-    DrawButton(WIDE_X(2), ROW2_BTN_Y, WIDE_W, UiAscii(label, "HARD", sizeof(label)),
+    DrawButton(WIDE_X(2), P2_CAP_BTN_Y, WIDE_W, UiAscii(label, "HARD", sizeof(label)),
                mode == CTR_CAP_HARD);
-
-    UiText(16, ROW3_LABEL_Y, UiAscii(label, "RANDOMISER", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
 
     // Nothing that is already caught or on the screen changes. The mapping uses
     // this save's trainer ID, so it is the same at each launch. A toggle off
     // and on does not change it.
-    UiText(P2_HINT_X, ROW3_LABEL_Y,
-           UiAscii(label, "new encounters only", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
+    DrawCheckRow(P2_RAND_Y, CHK_ROW_H, "RANDOMISER", "new encounters only",
+                 Ctr3dsGetRandomizer());
 
-    DrawButton(WIDE_X(0), ROW3_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
-               !Ctr3dsGetRandomizer());
-    DrawButton(WIDE_X(1), ROW3_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
-               Ctr3dsGetRandomizer());
-
-    UiText(ROW4_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
+    UiText(P2_SORT_LABEL_X, P2_SORT_Y + (BTN_H - UI_GLYPH_H) / 2,
            UiAscii(label, "BAG SORT", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     mode = Ctr3dsGetBagSort();
 
-    DrawButton(SORT_X(0), ROW4_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(SORT_X(0), P2_SORT_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
                mode == CTR_BAGSORT_OFF);
-    DrawButton(SORT_X(1), ROW4_Y, SORT_W, UiAscii(label, "TYPE", sizeof(label)),
+    DrawButton(SORT_X(1), P2_SORT_Y, SORT_W, UiAscii(label, "TYPE", sizeof(label)),
                mode == CTR_BAGSORT_TYPE);
-    DrawButton(SORT_X(2), ROW4_Y, SORT_W, UiAscii(label, "NAME", sizeof(label)),
+    DrawButton(SORT_X(2), P2_SORT_Y, SORT_W, UiAscii(label, "NAME", sizeof(label)),
                mode == CTR_BAGSORT_NAME);
 }
 
 // ---- PAGE 3: quality of life -----------------------------------------------
 //
-// Page 2's grid: three labelled rows and a fourth row with its label next to
-// its buttons. Thus the two pages align. All four rows are used.
+// One check row for each setting, on page 3's grid. The stored values for
+// PHONE CALLS, QUICK BALL and BATTLE ANIM are "off" flags, so the checkbox
+// shows the inverse: checked means the calls, the strip or the animation occur.
+enum {
+    P3_PHONE_CALLS,
+    P3_QUICK_BALL,
+    P3_BATTLE_ANIM,
+    P3_FOLLOWER,
+};
+
 static void DrawPage3(void)
 {
-    u8 label[40];
-    int off = Ctr3dsGetPhoneCallsOff();
-    int qb;
-    int anim;
-
-    UiText(16, ROW1_LABEL_Y, UiAscii(label, "PHONE CALLS", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
-
     // This stops only the trainers who call without a reason during a route.
     // All scripted calls still occur (StartMatchCallFromScript), for example
     // Norman, Wally, Scott and the Rayquaza call. The PokeNav's Match Call
@@ -349,72 +364,29 @@ static void DrawPage3(void)
     //
     // A stopped call also does not offer a rematch. Rematches still occur on
     // map load, and the PokeNav still shows who is ready.
-    //
-    // This hint shares the top line with the pager. It is 82px, from x 96, and
-    // the pager starts at x 196 with the debug page.
-    UiText(P2_HINT_X, ROW1_LABEL_Y,
-           UiAscii(label, "story calls ring", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-
-    DrawButton(WIDE_X(0), ROW1_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
-               !off);
-    DrawButton(WIDE_X(1), ROW1_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
-               off);
+    DrawCheckRow(P3_ROW_Y(P3_PHONE_CALLS), CHK_ROW_H, "PHONE CALLS",
+                 "story calls still ring", !Ctr3dsGetPhoneCallsOff());
 
     // The quick-throw strip (3ds/ui/ui_quickball.c). It covers a tab while the
     // player uses it: the bottom 40 rows of the content area, during action
-    // selection in each wild battle. Thus it gets a switch.
-    //
-    // The label must be less than 80px: it starts at x 16 and P2_HINT_X is 96.
-    qb = Ctr3dsGetQuickBallOff();
+    // selection in each wild battle. Thus it gets a switch. It is stored for
+    // each console, not for each save.
+    DrawCheckRow(P3_ROW_Y(P3_QUICK_BALL), CHK_ROW_H, "QUICK BALL",
+                 "last ball, one tap", !Ctr3dsGetQuickBallOff());
 
-    UiText(16, ROW2_LABEL_Y, UiAscii(label, "QUICK BALL", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
+    // The bottom-screen animation in battle (sliding HP bars and cycling
+    // icons). The values stay correct either way. The hint says what off gives,
+    // which depends on the path. On one core, off gives frames to the top
+    // screen, because each repaint costs a VBlank. With a second core, off only
+    // gives a still screen.
+    DrawCheckRow(P3_ROW_Y(P3_BATTLE_ANIM), CHK_ROW_H, "BATTLE ANIM",
+                 Ctr3dsRasteriserOnOwnCore() ? "off = still in battle"
+                                             : "off = smoother battles",
+                 !Ctr3dsGetBattleAnimOff());
 
-    // What the switch does, in the space available. The setting persists across
-    // launches. It is stored for each console, not for each save, because it is
-    // in settings.bin.
-    UiText(P2_HINT_X, ROW2_LABEL_Y,
-           UiAscii(label, "last ball, one tap", sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-
-    DrawButton(WIDE_X(0), ROW2_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
-               !qb);
-    DrawButton(WIDE_X(1), ROW2_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
-               qb);
-
-    // The third row: the bottom-screen animation in battle (sliding HP bars and
-    // cycling icons). The values stay correct either way. The hint says what
-    // OFF gives, which depends on the path. On one core, OFF gives frames to
-    // the top screen, because each repaint costs a VBlank. With a second core,
-    // OFF only gives a still screen.
-    anim = Ctr3dsGetBattleAnimOff();
-
-    UiText(16, ROW3_LABEL_Y, UiAscii(label, "BATTLE ANIM", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
-
-    UiText(P2_HINT_X, ROW3_LABEL_Y,
-           UiAscii(label, Ctr3dsRasteriserOnOwnCore() ? "off = still in battle"
-                                                      : "off = smoother battles",
-                   sizeof(label)),
-           UI_COL_DIM, UiThemeShadow());
-
-    DrawButton(WIDE_X(0), ROW3_BTN_Y, WIDE_W, UiAscii(label, "ON", sizeof(label)),
-               !anim);
-    DrawButton(WIDE_X(1), ROW3_BTN_Y, WIDE_W, UiAscii(label, "OFF", sizeof(label)),
-               anim);
-
-    // The fourth row: the first Pokemon of the party walks behind the player.
-    // OFF is the original game, so OFF comes first, as on page 2. The label is
-    // 48px, so it ends before the buttons at x 70.
-    UiText(ROW4_LABEL_X, ROW4_Y + (BTN_H - UI_GLYPH_H) / 2,
-           UiAscii(label, "FOLLOWER", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
-
-    DrawButton(SORT_X(0), ROW4_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
-               !Ctr3dsGetFollowerOn());
-    DrawButton(SORT_X(1), ROW4_Y, SORT_W, UiAscii(label, "ON", sizeof(label)),
-               Ctr3dsGetFollowerOn());
+    // The first Pokemon of the party walks behind the player.
+    DrawCheckRow(P3_ROW_Y(P3_FOLLOWER), CHK_ROW_H, "FOLLOWER",
+                 "lead Pokemon walks behind", Ctr3dsGetFollowerOn());
 }
 
 // PAGE 4: the debug menu.
@@ -424,7 +396,7 @@ static void DrawPage3(void)
 // pager button are not in the build. The host also holds the three settings at
 // their neutral values, so nothing can come from settings.bin into a release.
 //
-// Each row has the same shape: a label, two buttons, and a note that says what
+// Each switch is a check row: a checkbox, a label, and a note that says what
 // the switch does. The notes are necessary: "PSG" and "DIRECT" mean nothing to
 // a tester who does not know the mixer.
 #if CTR_DEBUG_MENU
@@ -439,14 +411,14 @@ enum {
     DBG_ROW_COUNT
 };
 
-static const struct { const char *label, *off, *on, *note; } sDebugRows[DBG_ROW_COUNT] =
+static const struct { const char *label, *note; } sDebugRows[DBG_ROW_COUNT] =
 {
-    [DBG_SHINY]  = { "SHINY",  "OFF",  "NEXT", "next wild encounter" },
-    [DBG_TABS]   = { "TABS",   "GAME", "ALL",  "ignore save unlocks" },
-    [DBG_PSG]    = { "PSG",    "OFF",  "ON",   "the 4 GB voices"     },
-    [DBG_DIRECT] = { "DIRECT", "OFF",  "ON",   "the sampled half"    },
-    [DBG_REVERB] = { "REVERB", "OFF",  "ON",   "479 of 529 songs"    },
-    [DBG_STEREO] = { "STEREO", "OFF",  "ON",   "off = downmix"       },
+    [DBG_SHINY]  = { "SHINY",    "next wild encounter" },
+    [DBG_TABS]   = { "ALL TABS", "ignore save unlocks" },
+    [DBG_PSG]    = { "PSG",      "the 4 GB voices"     },
+    [DBG_DIRECT] = { "DIRECT",   "the sampled half"    },
+    [DBG_REVERB] = { "REVERB",   "479 of 529 songs"    },
+    [DBG_STEREO] = { "STEREO",   "off = downmix"       },
 };
 
 // The four audio rows, in the order above. Do not calculate the index from the
@@ -458,12 +430,12 @@ static const u8 sDebugAudio[] = {
 };
 
 // The rows start below the pager, because the pager uses the top line. This
-// page has seven rows: six switches and the achievements row. The buttons are
+// page has seven rows: six switches and the achievements row. The rows are
 // 20px tall at a 22px pitch. Row 0 starts at y 30 and row 6 ends at y 182.
 //
-// Columns: the label at x 16, the buttons at 62 and 128, and the notes from 198
-// to the interior edge at 311. The widest label ("DIRECT") is 36px, and the
-// widest note is 103px.
+// The switches use the check row columns. The achievements row has its label
+// at x 16, its buttons at 62 and 128, and its note from 198 to the interior
+// edge at 311. The widest note is 103px.
 #define DBG_BTN_H     20
 #define DBG_PITCH     22
 #define DBG_Y(i)      (30 + (int)(i) * DBG_PITCH)
@@ -587,21 +559,8 @@ static void DrawPageDebug(void)
 
     for (i = 0; i < DBG_ROW_COUNT; i++)
     {
-        int y = DBG_Y(i);
-        int on = DebugRowOn(i);
-
-        UiText(DBG_LABEL_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
-               UiAscii(label, sDebugRows[i].label, sizeof(label)),
-               UiThemeText(), UiThemeShadow());
-
-        DrawButtonH(DBG_BTN_X(0), y, DBG_BTN_W, DBG_BTN_H,
-                    UiAscii(label, sDebugRows[i].off, sizeof(label)), !on);
-        DrawButtonH(DBG_BTN_X(1), y, DBG_BTN_W, DBG_BTN_H,
-                    UiAscii(label, sDebugRows[i].on, sizeof(label)), on);
-
-        UiText(DBG_NOTE_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
-               UiAscii(label, sDebugRows[i].note, sizeof(label)),
-               UI_COL_DIM, UiThemeShadow());
+        DrawCheckRow(DBG_Y(i), DBG_BTN_H, sDebugRows[i].label,
+                     sDebugRows[i].note, DebugRowOn(i));
     }
 
     DrawAchRow();
@@ -621,14 +580,11 @@ static void TouchPageDebug(const CtrTouchState *t)
 
     for (u32 i = 0; i < DBG_ROW_COUNT; i++)
     {
-        for (u32 c = 0; c < 2; c++)
+        if (HitCheckRow(t, DBG_Y(i), DBG_BTN_H))
         {
-            if (UiHit(t, DBG_BTN_X((int)c), DBG_Y(i), DBG_BTN_W, DBG_BTN_H))
-            {
-                DebugRowSet(i, (int)c);
-                UiMarkDirty();
-                return;
-            }
+            DebugRowSet(i, !DebugRowOn(i));
+            UiMarkDirty();
+            return;
         }
     }
 }
@@ -768,22 +724,16 @@ static void TouchPage2(const CtrTouchState *t)
     static const u8 sCapModes[]  = { CTR_CAP_OFF, CTR_CAP_SOFT, CTR_CAP_HARD };
     static const u8 sSortModes[] = { CTR_BAGSORT_OFF, CTR_BAGSORT_TYPE, CTR_BAGSORT_NAME };
 
-    if (UiHit(t, WIDE_X(0), ROW1_BTN_Y, WIDE_W, BTN_H))
+    if (HitCheckRow(t, P2_EXP_Y, CHK_ROW_H))
     {
-        Ctr3dsSetExpAll(0);
-        UiMarkDirty();
-        return;
-    }
-    if (UiHit(t, WIDE_X(1), ROW1_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetExpAll(1);
+        Ctr3dsSetExpAll(!Ctr3dsGetExpAll());
         UiMarkDirty();
         return;
     }
 
     for (u32 i = 0; i < ARRAY_COUNT(sCapModes); i++)
     {
-        if (UiHit(t, WIDE_X((int)i), ROW2_BTN_Y, WIDE_W, BTN_H))
+        if (UiHit(t, WIDE_X((int)i), P2_CAP_BTN_Y, WIDE_W, BTN_H))
         {
             Ctr3dsSetLevelCap(sCapModes[i]);
             UiMarkDirty();
@@ -791,22 +741,16 @@ static void TouchPage2(const CtrTouchState *t)
         }
     }
 
-    if (UiHit(t, WIDE_X(0), ROW3_BTN_Y, WIDE_W, BTN_H))
+    if (HitCheckRow(t, P2_RAND_Y, CHK_ROW_H))
     {
-        Ctr3dsSetRandomizer(0);
-        UiMarkDirty();
-        return;
-    }
-    if (UiHit(t, WIDE_X(1), ROW3_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetRandomizer(1);
+        Ctr3dsSetRandomizer(!Ctr3dsGetRandomizer());
         UiMarkDirty();
         return;
     }
 
     for (u32 i = 0; i < ARRAY_COUNT(sSortModes); i++)
     {
-        if (UiHit(t, SORT_X((int)i), ROW4_Y, SORT_W, BTN_H))
+        if (UiHit(t, SORT_X((int)i), P2_SORT_Y, SORT_W, BTN_H))
         {
             Ctr3dsSetBagSort(sSortModes[i]);
 
@@ -823,66 +767,24 @@ static void TouchPage2(const CtrTouchState *t)
 
 static void TouchPage3(const CtrTouchState *t)
 {
-    // ON is the original behavior, so it clears the stored flag; the flag
-    // stores OFF. The draw uses the same coordinates.
-    if (UiHit(t, WIDE_X(0), ROW1_BTN_Y, WIDE_W, BTN_H))
+    // Each tap sets the inverse of the value that the draw shows.
+    if (HitCheckRow(t, P3_ROW_Y(P3_PHONE_CALLS), CHK_ROW_H))
+        Ctr3dsSetPhoneCallsOff(!Ctr3dsGetPhoneCallsOff());
+    else if (HitCheckRow(t, P3_ROW_Y(P3_QUICK_BALL), CHK_ROW_H))
+        Ctr3dsSetQuickBallOff(!Ctr3dsGetQuickBallOff());
+    else if (HitCheckRow(t, P3_ROW_Y(P3_BATTLE_ANIM), CHK_ROW_H))
+        Ctr3dsSetBattleAnimOff(!Ctr3dsGetBattleAnimOff());
+    else if (HitCheckRow(t, P3_ROW_Y(P3_FOLLOWER), CHK_ROW_H))
     {
-        Ctr3dsSetPhoneCallsOff(0);
-        UiMarkDirty();
-        return;
-    }
-    if (UiHit(t, WIDE_X(1), ROW1_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetPhoneCallsOff(1);
-        UiMarkDirty();
-        return;
-    }
-
-    // The same shape on the second row. ON is the default, so it clears the
-    // flag; the flag stores OFF.
-    if (UiHit(t, WIDE_X(0), ROW2_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetQuickBallOff(0);
-        UiMarkDirty();
-        return;
-    }
-    if (UiHit(t, WIDE_X(1), ROW2_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetQuickBallOff(1);
-        UiMarkDirty();
-        return;
-    }
-
-    // The third row, the same shape. ON is the default, so it clears the flag.
-    if (UiHit(t, WIDE_X(0), ROW3_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetBattleAnimOff(0);
-        UiMarkDirty();
-        return;
-    }
-    if (UiHit(t, WIDE_X(1), ROW3_BTN_Y, WIDE_W, BTN_H))
-    {
-        Ctr3dsSetBattleAnimOff(1);
-        UiMarkDirty();
-        return;
-    }
-
-    // The fourth row. The follower appears or goes away now if the player is
-    // in the overworld with no script. Otherwise the next map load does it.
-    if (UiHit(t, SORT_X(0), ROW4_Y, SORT_W, BTN_H))
-    {
-        Ctr3dsSetFollowerOn(0);
+        // The follower appears or goes away now if the player is in the
+        // overworld with no script. Otherwise the next map load does it.
+        Ctr3dsSetFollowerOn(!Ctr3dsGetFollowerOn());
         Ctr3dsRefreshFollowerNow();
-        UiMarkDirty();
-        return;
     }
-    if (UiHit(t, SORT_X(1), ROW4_Y, SORT_W, BTN_H))
-    {
-        Ctr3dsSetFollowerOn(1);
-        Ctr3dsRefreshFollowerNow();
-        UiMarkDirty();
+    else
         return;
-    }
+
+    UiMarkDirty();
 }
 
 void UiExtraTouch(const CtrTouchState *t)

@@ -793,6 +793,46 @@ void UiChevron(int x, int y)
     }
 }
 
+// The tick of UiCheckBox. Value 1 is the accent body and 2 is the shadow, as in
+// sChevron. It is 2px thick, so it stays clear on the light window frames.
+#define CHECK_TICK_W 10
+#define CHECK_TICK_H 8
+
+static const u8 sCheckTick[CHECK_TICK_H][CHECK_TICK_W] =
+{
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 1, 2},
+    {0, 0, 0, 0, 0, 0, 1, 1, 2, 0},
+    {1, 1, 0, 0, 0, 1, 1, 2, 0, 0},
+    {2, 1, 1, 0, 1, 1, 2, 0, 0, 0},
+    {0, 2, 1, 1, 1, 2, 0, 0, 0, 0},
+    {0, 0, 2, 1, 2, 0, 0, 0, 0, 0},
+    {0, 0, 0, 2, 0, 0, 0, 0, 0, 0},
+};
+
+void UiCheckBox(int x, int y, bool8 checked)
+{
+    u16 shadow = UiThemeShadow();
+
+    UiRect(x, y, UI_CHECKBOX_SIZE, UI_CHECKBOX_SIZE, UI_COL_DIM);
+
+    if (!checked)
+        return;
+
+    // The tick is centered in the 12x12 interior.
+    for (int row = 0; row < CHECK_TICK_H; row++)
+    {
+        for (int col = 0; col < CHECK_TICK_W; col++)
+        {
+            u8 ink = sCheckTick[row][col];
+
+            if (ink != 0)
+                UiPixel(x + 2 + col, y + 3 + row,
+                        (ink == 1) ? UI_COL_ACCENT : shadow);
+        }
+    }
+}
+
 // The gold sparkle that the game shows around a shiny, copied from
 // graphics/battle_anims/sprites/gold_stars.png (ANIM_TAG_GOLD_STARS, used by
 // TryShinyAnimation). UI_COL_SHINY* comes from the same art.
