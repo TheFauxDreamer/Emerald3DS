@@ -88,6 +88,9 @@ IslandCave_EventScript_ClearSteps::
 	return
 
 IslandCave_EventScript_Regice::
+#if PLATFORM_3DS
+	bufferspeciesname 0, SPECIES_REGICE
+#endif
 	lock
 	faceplayer
 	waitse

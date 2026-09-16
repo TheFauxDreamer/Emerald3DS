@@ -72,6 +72,9 @@
 #include "constants/party_menu.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
 
 #if PLATFORM_3DS
 // The level cap from the badges, which the EXTRA tab of the bottom screen turns
@@ -3826,6 +3829,13 @@ bool8 FieldCallback_PrepareFadeInFromMenu(void)
     return TRUE;
 }
 
+#if PLATFORM_3DS
+bool8 FieldCallback_PrepareFadeInForTeleport(void) { // same as above, but removes follower pokemon
+    RemoveFollowingPokemon();
+    return FieldCallback_PrepareFadeInFromMenu();
+}
+
+#endif
 static void Task_FieldMoveWaitForFade(u8 taskId)
 {
     if (IsWeatherNotFadingIn() == TRUE)

@@ -55,6 +55,9 @@ DesertRuins_EventScript_CaveEntranceSide::
 	end
 
 DesertRuins_EventScript_Regirock::
+#if PLATFORM_3DS
+	bufferspeciesname 0, SPECIES_REGIROCK
+#endif
 	lock
 	faceplayer
 	waitse

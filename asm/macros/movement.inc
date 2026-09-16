@@ -162,5 +162,9 @@
 	create_movement_action figure_8, MOVEMENT_ACTION_FIGURE_8
 	create_movement_action fly_up, MOVEMENT_ACTION_FLY_UP
 	create_movement_action fly_down, MOVEMENT_ACTION_FLY_DOWN
+#if PLATFORM_3DS
+  create_movement_action exit_pokeball, MOVEMENT_ACTION_EXIT_POKEBALL
+  create_movement_action enter_pokeball, MOVEMENT_ACTION_ENTER_POKEBALL
+#endif
 
 	create_movement_action step_end, MOVEMENT_ACTION_STEP_END

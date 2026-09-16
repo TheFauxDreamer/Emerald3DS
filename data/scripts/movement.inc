@@ -1,3 +1,8 @@
+#if PLATFORM_3DS
+@ Starting from here, these movements are considered
+@ 'safe' (won't put follower into a Pokeball)
+Common_Movement_FollowerSafeStart::
+#endif
 Common_Movement_QuestionMark:
 	emote_question_mark
 	step_end
@@ -68,6 +73,12 @@ Common_Movement_WalkInPlaceRight:
 	walk_in_place_right
 	step_end
 
+#if PLATFORM_3DS
+@ End of follower-safe movements
+Common_Movement_FollowerSafeEnd::
+	step_end
+
+#endif
 Common_Movement_WalkUp6:
 	walk_up
 	walk_up

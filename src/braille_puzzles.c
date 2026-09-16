@@ -11,6 +11,9 @@
 #include "fieldmap.h"
 #include "party_menu.h"
 #include "fldeff.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
 
 EWRAM_DATA static bool8 sIsRegisteelPuzzle = 0;
 
@@ -86,7 +89,9 @@ void DoBrailleDigEffect(void)
     DrawWholeMapView();
     PlaySE(SE_BANG);
     FlagSet(FLAG_SYS_BRAILLE_DIG);
+#if !PLATFORM_3DS
     UnlockPlayerFieldControls();
+#endif
 }
 
 bool8 CheckRelicanthWailord(void)
@@ -214,6 +219,9 @@ static void DoBrailleRegirockEffect(void)
     PlaySE(SE_BANG);
     FlagSet(FLAG_SYS_REGIROCK_PUZZLE_COMPLETED);
     UnlockPlayerFieldControls();
+#if PLATFORM_3DS
+    UnfreezeObjectEvents();
+#endif
 }
 
 bool8 ShouldDoBrailleRegisteelEffect(void)
@@ -253,6 +261,9 @@ static void DoBrailleRegisteelEffect(void)
     PlaySE(SE_BANG);
     FlagSet(FLAG_SYS_REGISTEEL_PUZZLE_COMPLETED);
     UnlockPlayerFieldControls();
+#if PLATFORM_3DS
+    UnfreezeObjectEvents();
+#endif
 }
 
 // theory: another commented out DoBrailleWait and Task_BrailleWait.

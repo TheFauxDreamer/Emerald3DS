@@ -15,6 +15,9 @@ BattleFrontier_BattleDomeBattleRoom_MapScripts::
 	.byte 0
 
 BattleFrontier_BattleDomeBattleRoom_OnTransition:
+#if PLATFORM_3DS
+	setflag FLAG_TEMP_HIDE_FOLLOWER
+#endif
 	dome_setopponentgfx
 	frontier_get FRONTIER_DATA_BATTLE_NUM
 	copyvar VAR_TEMP_F, VAR_RESULT

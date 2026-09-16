@@ -8,6 +8,10 @@ extern u8 ALIGNED(4) gDecompressionBuffer[0x4000];
 void LZDecompressWram(const u32 *src, void *dest);
 void LZDecompressVram(const u32 *src, void *dest);
 
+#if PLATFORM_3DS
+bool32 IsLZ77Data(const void *ptr, u32 minSize, u32 maxSize);
+
+#endif
 u16 LoadCompressedSpriteSheet(const struct CompressedSpriteSheet *src);
 void LoadCompressedSpriteSheetOverrideBuffer(const struct CompressedSpriteSheet *src, void *buffer);
 bool8 LoadCompressedSpriteSheetUsingHeap(const struct CompressedSpriteSheet *src);
