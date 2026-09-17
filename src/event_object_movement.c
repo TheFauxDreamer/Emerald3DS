@@ -1917,12 +1917,9 @@ struct Pokemon *GetFirstLiveMon(void) { // Return address of first conscious par
     u32 i;
     for (i = 0; i < PARTY_SIZE; i++) {
         struct Pokemon *mon = &gPlayerParty[i];
-        if ((OW_MON_ALLOWED_SPECIES && GetMonData(mon, MON_DATA_SPECIES_OR_EGG) != VarGet(OW_MON_ALLOWED_SPECIES))
-            || (OW_MON_ALLOWED_MET_LVL && GetMonData(mon, MON_DATA_MET_LEVEL) != VarGet(OW_MON_ALLOWED_MET_LVL))
-            || (OW_MON_ALLOWED_MET_LOC && GetMonData(mon, MON_DATA_MET_LOCATION) != VarGet(OW_MON_ALLOWED_MET_LOC))
-        ) {
+        // The WHO setting. Upstream tests the OW_MON_ALLOWED_* macros here.
+        if (!Ctr3dsFollowerAllowed(mon))
             continue;
-        }
 
         if (gPlayerParty[i].hp > 0 && !(gPlayerParty[i].box.isEgg || gPlayerParty[i].box.isBadEgg))
             return &gPlayerParty[i];
@@ -5591,7 +5588,7 @@ bool8 MovementType_FollowPlayer_Moving(struct ObjectEvent *objectEvent, struct S
             sprite->sTypeFuncId = 1;
     } else if (objectEvent->movementActionId < MOVEMENT_ACTION_EXIT_POKEBALL) {
         UpdateFollowerTransformEffect(objectEvent, sprite);
-        if (OW_MON_BOBBING == TRUE && (sprite->data[5] & 7) == 2)
+        if (Ctr3dsFollowerBobOn() && (sprite->data[5] & 7) == 2)
             sprite->y2 ^= -1;
     }
     return FALSE;
@@ -5602,13 +5599,16 @@ bool8 FollowablePlayerMovement_Idle(struct ObjectEvent *objectEvent, struct Spri
     if (!objectEvent->singleMovementActive) {
         // walk in place
       ObjectEventSetSingleMovement(objectEvent, sprite, GetWalkInPlaceNormalMovementAction(objectEvent->facingDirection));
+      // BOBBING can go off during a bob. Remove the offset that it left.
+      if (!Ctr3dsFollowerBobOn())
+          sprite->y2 = 0;
       sprite->sTypeFuncId = 1;
       objectEvent->singleMovementActive = 1;
       return TRUE;
     } else if (ObjectEventExecSingleMovementAction(objectEvent, sprite)) {
         // finish movement action
         objectEvent->singleMovementActive = 0;
-    } else if (OW_MON_BOBBING == TRUE && (sprite->data[3] & 7) == 2)
+    } else if (Ctr3dsFollowerBobOn() && (sprite->data[3] & 7) == 2)
         sprite->y2 ^= -1;
     UpdateFollowerTransformEffect(objectEvent, sprite);
     return FALSE;
@@ -5646,8 +5646,9 @@ bool8 FollowablePlayerMovement_Step(struct ObjectEvent *objectEvent, struct Spri
         ObjectEventSetSingleMovement(objectEvent, sprite, MOVEMENT_ACTION_EXIT_POKEBALL);
         objectEvent->singleMovementActive = 1;
         sprite->sTypeFuncId = 2;
-        if (OW_MON_BOBBING == TRUE)
-            sprite->y2 = 0;
+        // Clear the offset always. BOBBING can go off while the follower is in
+        // its ball.
+        sprite->y2 = 0;
         return TRUE;
     } else if (x == targetX && y == targetY) {
         // don't move if already in the player's last position
@@ -5683,8 +5684,8 @@ bool8 FollowablePlayerMovement_Step(struct ObjectEvent *objectEvent, struct Spri
         objectEvent->movementActionId = GetWalkFastMovementAction(direction);
     } else {
         objectEvent->movementActionId = GetWalkNormalMovementAction(direction);
-        if (OW_MON_BOBBING == TRUE)
-            sprite->y2 = -1;
+        // Without BOBBING, remove an offset that a bob left before the change.
+        sprite->y2 = Ctr3dsFollowerBobOn() ? -1 : 0;
     }
     sprite->sActionFuncId = 0;
     objectEvent->singleMovementActive = 1;
@@ -7330,7 +7331,7 @@ static u8 LoadFillColorPalette(u16 color, u16 paletteTag, struct Sprite *sprite)
 static void ObjectEventSetPokeballGfx(struct ObjectEvent *objEvent) {
     #if OW_MON_POKEBALLS
     u32 ball = BALL_POKE;
-    if (objEvent->localId == OBJ_EVENT_ID_FOLLOWER) {
+    if (objEvent->localId == OBJ_EVENT_ID_FOLLOWER && Ctr3dsFollowerOwnBall()) {
         struct Pokemon *mon = GetFirstLiveMon();
         if (mon)
             ball = ItemIdToBallId(GetMonData(mon, MON_DATA_POKEBALL));

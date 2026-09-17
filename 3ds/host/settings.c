@@ -58,13 +58,23 @@
 // - v13 uses the first of the three padding bytes after battleAnimOff for the
 //   DAY CARE switch, for each console. Same size. Older files have zero there,
 //   which means off.
-#define SETTINGS_VERSION 13
+// - v14 uses three more bits of each record's follower byte for WHO, BOBBING
+//   and BALL. Same size. Versions v12 and v13 wrote only 0 or 1 there, so the
+//   new bits load as zero, the defaults.
+#define SETTINGS_VERSION 14
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
 #define CTR_SETTINGS_SAVES 8
 
-// The values of one save (v11, v12). A fixed size with every byte in use.
+// The bits of a record's follower byte. Bit 0 is the v12 switch. Each v14 bit
+// stores the choice that is not the default, so zero means the default.
+#define REC_FOLLOWER_ON         0x01
+#define REC_FOLLOWER_STARTER    0x02   // CTR_FOLLOWER_STARTER, else LEAD
+#define REC_FOLLOWER_BOB_OFF    0x04
+#define REC_FOLLOWER_POKE_BALL  0x08
+
+// The values of one save (v11 and later). A fixed size with every byte in use.
 struct CtrSaveSettings {
     uint32_t playerId;                 // the save's full 32-bit trainer ID
     uint32_t lastUsed;                 // the table clock at the last use
@@ -74,7 +84,7 @@ struct CtrSaveSettings {
     uint8_t  bagSort;                  // CTR_BAGSORT_*
     uint8_t  phoneCallsOff;
     uint8_t  lastBall;
-    uint8_t  followerOn;               // added in v12
+    uint8_t  follower;                 // REC_FOLLOWER_*, added in v12
     uint8_t  pad;                      // explicit, always written as 0
 };
 
@@ -179,6 +189,12 @@ extern int  Ctr3dsGetPhoneCallsOff(void);
 extern void Ctr3dsApplyPhoneCallsOff(int on);
 extern int  Ctr3dsGetFollowerOn(void);
 extern void Ctr3dsApplyFollowerOn(int on);
+extern int  Ctr3dsGetFollowerWho(void);
+extern void Ctr3dsApplyFollowerWho(int mode);
+extern int  Ctr3dsGetFollowerBobOff(void);
+extern void Ctr3dsApplyFollowerBobOff(int on);
+extern int  Ctr3dsGetFollowerPokeBall(void);
+extern void Ctr3dsApplyFollowerPokeBall(int on);
 extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
 extern int  Ctr3dsGetDayCareYard(void);
@@ -297,10 +313,10 @@ static int save_is_default(const struct CtrSaveSettings *v)
 {
     return v->expAll == 0 && v->levelCap == CTR_CAP_OFF && v->randomizer == 0
         && v->bagSort == CTR_BAGSORT_OFF && v->phoneCallsOff == 0
-        && v->lastBall == 0 && v->followerOn == 0;
+        && v->lastBall == 0 && v->follower == 0;
 }
 
-// Read the seven live values.
+// Read the live values.
 static void save_get(struct CtrSaveSettings *v)
 {
     v->expAll        = (uint8_t)(Ctr3dsGetExpAll() ? 1 : 0);
@@ -309,10 +325,19 @@ static void save_get(struct CtrSaveSettings *v)
     v->bagSort       = (uint8_t)Ctr3dsGetBagSort();
     v->phoneCallsOff = (uint8_t)(Ctr3dsGetPhoneCallsOff() ? 1 : 0);
     v->lastBall      = (uint8_t)Ctr3dsGetLastBall();
-    v->followerOn    = (uint8_t)(Ctr3dsGetFollowerOn() ? 1 : 0);
+    v->follower      = 0;
+
+    if (Ctr3dsGetFollowerOn())
+        v->follower |= REC_FOLLOWER_ON;
+    if (Ctr3dsGetFollowerWho() == CTR_FOLLOWER_STARTER)
+        v->follower |= REC_FOLLOWER_STARTER;
+    if (Ctr3dsGetFollowerBobOff())
+        v->follower |= REC_FOLLOWER_BOB_OFF;
+    if (Ctr3dsGetFollowerPokeBall())
+        v->follower |= REC_FOLLOWER_POKE_BALL;
 }
 
-// Set the seven live values, or the defaults if v is NULL.
+// Set the live values, or the defaults if v is NULL.
 //
 // Set the defaults first. Apply refuses a bad mode, and a bad byte must give
 // the default, not the value of the save before. The lastBall field has no
@@ -326,6 +351,9 @@ static void save_apply(const struct CtrSaveSettings *v)
     Ctr3dsApplyPhoneCallsOff(0);
     Ctr3dsApplyLastBall(0);
     Ctr3dsApplyFollowerOn(0);
+    Ctr3dsApplyFollowerWho(CTR_FOLLOWER_LEAD);
+    Ctr3dsApplyFollowerBobOff(0);
+    Ctr3dsApplyFollowerPokeBall(0);
 
     if (v == NULL)
         return;
@@ -336,7 +364,13 @@ static void save_apply(const struct CtrSaveSettings *v)
     Ctr3dsApplyBagSort(v->bagSort);
     Ctr3dsApplyPhoneCallsOff(v->phoneCallsOff != 0);
     Ctr3dsApplyLastBall(v->lastBall);
-    Ctr3dsApplyFollowerOn(v->followerOn != 0);
+    // Each bit is a valid value, so a bad byte cannot be out of range. Bits 4
+    // to 7 are not in use.
+    Ctr3dsApplyFollowerOn((v->follower & REC_FOLLOWER_ON) != 0);
+    Ctr3dsApplyFollowerWho((v->follower & REC_FOLLOWER_STARTER)
+                               ? CTR_FOLLOWER_STARTER : CTR_FOLLOWER_LEAD);
+    Ctr3dsApplyFollowerBobOff((v->follower & REC_FOLLOWER_BOB_OFF) != 0);
+    Ctr3dsApplyFollowerPokeBall((v->follower & REC_FOLLOWER_POKE_BALL) != 0);
 }
 
 static struct CtrSaveSettings *find_record(uint32_t playerId)
@@ -457,9 +491,10 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // Files v11 and v12 have the same size. Their bytes for the later values
+    // Files v11 to v14 have the same size. Their bytes for the later values
     // are zero.
-    if (s.version == SETTINGS_VERSION || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 13 || s.version == 12
+        || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -537,7 +572,8 @@ void CtrSettingsLoad(void)
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 13 || s.version == 12
+        || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;

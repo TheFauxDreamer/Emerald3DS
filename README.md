@@ -108,7 +108,7 @@ playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
 syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
-**EXTRA.** Three pages of port settings. A setting that is only on or off is a
+**EXTRA.** Four pages of port settings. A setting that is only on or off is a
 checkbox: tap the box or its name.
 
 *Page 1* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
@@ -145,23 +145,36 @@ through, and so does the PokéNav's own Match Call screen. **QUICK BALL** turns 
 the quick-throw strip described below, for anyone who would rather keep those
 forty rows of their party grid during a wild battle.
 
-**FOLLOWER** makes the first Pokémon in your party walk behind you, as in
-HeartGold and SoulSilver. It comes out of its own type of Poké Ball. It goes
-back into the ball for Surf, the bike, doors and cutscenes, and comes out again
-after. Talk to it and it shows an emote and says how it feels. Outdoors, it can
-also look up at the sky in the day or gaze at the stars at night, by the 3DS
-clock. It takes part when you use Cut or Rock Smash. If your first Pokémon has
-fainted, the next one follows. The switch is off by default, and each save keeps
-its own setting. The feature is aarant's `followers` branch of pokeemerald, with
-its sprites for all 386 Pokémon.
-
 **DAY CARE** lets the Pokémon you leave at the Route 117 Day Care walk in its
 yard. With two, they face away from each other, turn toward each other or walk
 toward each other, by how well they get along. It is separate from FOLLOWER, it
 is kept once for the console, and a change shows the next time you enter
 Route 117.
 
-**A fourth page exists in debug builds only.** It holds the switches that test
+*Page 4* is the follower. **FOLLOWER** makes the first Pokémon in your party
+walk behind you, as in HeartGold and SoulSilver. It comes out of its own type of
+Poké Ball. It goes back into the ball for Surf, the bike, doors and cutscenes,
+and comes out again after. Talk to it and it shows an emote and says how it
+feels. Outdoors, it can also look up at the sky in the day or gaze at the stars
+at night, by the 3DS clock. It takes part when you use Cut or Rock Smash. If
+your first Pokémon has fainted, the next one follows. The switch is off by
+default. The feature is aarant's `followers` branch of pokeemerald, with its
+sprites for all 386 Pokémon.
+
+Three options below the switch change how the follower behaves. That branch
+sets them when the game is built. Here each save keeps its own values, and its
+own FOLLOWER switch.
+
+- **WHO: LEAD / STARTER.** LEAD is the first Pokémon that can fight. With
+  STARTER, only your starter follows, as Pikachu does in Yellow. The starter is
+  the Pokémon with your trainer ID that you met at level 5 on Route 101. If it
+  has fainted or is not in your party, nothing follows.
+- **BOBBING.** The follower moves up and down as it walks. Turn it off for a
+  steady sprite.
+- **BALL: OWN / POKE BALL.** OWN is the ball that caught the Pokémon. POKE BALL
+  uses a plain Poké Ball for every Pokémon.
+
+**A fifth page exists in debug builds only.** It holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
 every tab regardless of what the save has unlocked, silence one half of the
 mixer at a time, and fire a test achievement toast or re-derive the save's

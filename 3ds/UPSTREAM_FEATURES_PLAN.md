@@ -1,6 +1,6 @@
 # Features to port later from aarant's fork and pokeemerald-expansion
 
-**Status: not started.** Written 2026-09-17 against `b717279`. This is a
+**Status: item 1 done.** Written 2026-09-17 against `b717279`. This is a
 catalogue of features from other pokeemerald projects that this port can take
 in later, with what research found about each one. Pick an item, check it
 against the tree again, and write a plan for that item.
@@ -12,13 +12,14 @@ Already ported from the same sources (do not port these again):
 | FOLLOWER: HGSS-style following Pokémon, messages, emotes, Poké Ball sprites, field-move animation, battle slide-in, dynamic overworld palettes | aarant `followers` | `edf4589`, `acbbe64`, `a7cd5f5`, `f973516` |
 | Day and night follower lines | aarant `lighting` | `7a6a751` |
 | DAY CARE: the Day Care Pokémon walk in the Route 117 yard | aarant `followers-expanded-id` | `b717279` |
+| FOLLOWER options: WHO (lead or starter), BOBBING and BALL on EXTRA page 4 (item 1) | aarant `followers` | not committed yet |
 
 ## Contents
 
 - [Sources](#sources)
 - [How to port an item](#how-to-port-an-item)
 - [Candidates](#candidates)
-  1. [Follower options](#1-follower-options)
+  1. [Follower options](#1-follower-options) (done)
   2. [Overworld Pokémon walk in place and bob](#2-overworld-pokémon-walk-in-place-and-bob)
   3. [Gen 6 icons with shiny palettes](#3-gen-6-icons-with-shiny-palettes)
   4. [Day and night lighting](#4-day-and-night-lighting)
@@ -79,11 +80,14 @@ The follower port set these rules. Follow them, or say why not.
 
 Space that is left:
 - **settings.bin:** one free byte in each per-save record (`pad` in
-  `struct CtrSaveSettings`), two free per-console bytes (`pad[2]` in
+  `struct CtrSaveSettings`), and bits 4 to 7 of the record's `follower` byte for
+  more follower options. Also two free per-console bytes (`pad[2]` in
   `struct CtrSettings`), and three in the table header (`pad2`). A larger
   record needs a new version and a migration.
-- **EXTRA tab:** pages 1, 2 and 3 are full. Page 3 has five check rows that end
-  at y 176. A new setting needs a new page, or a tighter check-row pitch.
+- **EXTRA tab:** pages 1 and 2 are full. Page 3 has four check rows and room for
+  one more. Page 4 (FOLLOWER) has four rows at a 34px pitch that end at y 158,
+  so a fifth row needs a 30px pitch. A sixth page does not fit in a debug
+  build: the pager would reach the "test build" caption of the debug page.
 - **Save data:** keep the retail layout (`SAVE_STRUCT_ALIGNED` in
   `include/global.h`). Unused space: `SaveBlock2.filler_90[8]`, and
   `SaveBlock1.unused_9C2[6]`, `unused_3598[0x180]` and `unused_3D5A[10]`. There
@@ -92,6 +96,9 @@ Space that is left:
 ## Candidates
 
 ### 1. Follower options
+
+**Done.** EXTRA page 4 has FOLLOWER, WHO (LEAD or STARTER), BOBBING and BALL.
+The notes below are the research from before the work.
 
 **What it gives.** Settings for what the `followers` branch fixes at build
 time:
