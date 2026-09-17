@@ -5080,7 +5080,12 @@ static bool8 ResetReleaseMonSpritePtr(void)
 
 static void SetMovingMonPriority(u8 priority)
 {
-    sStorage->movingMonSprite->oam.priority = priority;
+#ifdef UBFIX
+    // UB: The pointer is NULL when no Pokémon is held. A GBA ignores the
+    // write. On the 3DS, address 0 is not mapped.
+    if (sStorage->movingMonSprite != NULL)
+#endif
+        sStorage->movingMonSprite->oam.priority = priority;
 }
 
 static void SpriteCB_HeldMon(struct Sprite *sprite)
