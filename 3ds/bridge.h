@@ -265,6 +265,27 @@ int  Ctr3dsGetPhoneCallsOff(void);
 void Ctr3dsSetFollowerOn(int on);
 int  Ctr3dsGetFollowerOn(void);
 
+// The FOLLOWER page of the EXTRA tab (page 4). Each save has its own values, in
+// the same record byte as the FOLLOWER switch. Zero is the default of each.
+//
+// WHO: LEAD is the first party Pokemon that can fight. STARTER is only the
+// Pokemon from Professor Birch's bag, as Pikachu in Yellow. If the starter
+// cannot fight or is not in the party, nothing follows.
+#define CTR_FOLLOWER_LEAD     0
+#define CTR_FOLLOWER_STARTER  1
+
+void Ctr3dsSetFollowerWho(int mode);   // CTR_FOLLOWER_*
+int  Ctr3dsGetFollowerWho(void);
+
+// Stored as "off": zero means that the follower bobs as it walks.
+void Ctr3dsSetFollowerBobOff(int on);
+int  Ctr3dsGetFollowerBobOff(void);
+
+// Zero means that the follower comes out of the ball that caught it. On means a
+// plain Poke Ball for every Pokemon.
+void Ctr3dsSetFollowerPokeBall(int on);
+int  Ctr3dsGetFollowerPokeBall(void);
+
 // The Day Care Pokemon walk in the yard on Route 117. Zero means off, which is
 // the original game. The value is for the console, not for each save. A change
 // shows at the next load of Route 117.

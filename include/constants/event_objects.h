@@ -282,9 +282,8 @@
 #define OBJ_EVENT_GFX_VAR_F  (OBJ_EVENT_GFX_VARS + 0xF) // 255
 
 #if PLATFORM_3DS
-// If true, follower pokemon will bob up and down
-// during their idle & walking animations
-#define OW_MON_BOBBING  TRUE
+// OW_MON_BOBBING and the OW_MON_ALLOWED_* rules of the aarant fork are settings
+// on the FOLLOWER page of the EXTRA tab (3ds/tweaks.c).
 
 // If true, adds a small amount of overhead
 // to OW code so that large (48x48, 64x64) OWs
@@ -293,6 +292,7 @@
 
 // Followers will emerge from the pokeball they are stored in,
 // instead of a normal pokeball
+// The build always has the ball graphics. The BALL setting chooses at run time.
 #define OW_MON_POKEBALLS TRUE
 
 // New/old handling for followers during scripts;
@@ -300,27 +300,6 @@
 // (scripted player movement moves follower too!)
 // FALSE: Script collisions unhandled, FLAG_SAFE_FOLLOWER_MOVEMENT off by default
 #define OW_MON_SCRIPT_MOVEMENT TRUE
-
-// If set, the only pokemon allowed to follow you
-// will be those matching species, met location,
-// and/or met level;
-// These accept vars, too: VAR_TEMP_1, etc
-#define OW_MON_ALLOWED_SPECIES (0)
-#define OW_MON_ALLOWED_MET_LVL (0)
-#define OW_MON_ALLOWED_MET_LOC (0)
-// Examples:
-// Yellow Pikachu:
-// #define OW_MON_ALLOWED_SPECIES (SPECIES_PIKACHU)
-// #define OW_MON_ALLOWED_MET_LVL (0)
-// #define OW_MON_ALLOWED_MET_LOC (MAPSEC_PALLET_TOWN)
-// Hoenn Starter:
-// #define OW_MON_ALLOWED_SPECIES (0)
-// #define OW_MON_ALLOWED_MET_LVL (5)
-// #define OW_MON_ALLOWED_MET_LOC (MAPSEC_ROUTE_101)
-// Species set in VAR_XXXX:
-// #define OW_MON_ALLOWED_SPECIES (VAR_XXXX)
-// #define OW_MON_ALLOWED_MET_LVL (0)
-// #define OW_MON_ALLOWED_MET_LOC (0)
 
 #endif
 #define SHADOW_SIZE_S   0

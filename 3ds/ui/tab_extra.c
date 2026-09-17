@@ -8,7 +8,8 @@
 // first. The file 3ds/tweaks.c holds the behavior. This file only draws the
 // toggles.
 //
-// Page 3 is quality of life. Page 4 is the debug menu, if the build has it.
+// Page 3 is quality of life. Page 4 is the follower and its options. Page 5 is
+// the debug menu, if the build has it.
 //
 // The pager uses the right end of the top line (y 8..25) on each page. Pages 1
 // and 2 use the same horizontal span, 22..298, so they look like one panel.
@@ -85,10 +86,15 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define P2_SORT_Y       149
 #define P2_SORT_LABEL_X 16
 
-// Page 3's grid: check rows at a 30px pitch from y 30. Five rows end at y 176,
-// and the interior ends at y 183.
+// Page 3's grid: check rows at a 30px pitch from y 30. Four rows end at y 146,
+// and the interior ends at y 183. A fifth row fits.
 #define P3_ROW_PITCH  30
 #define P3_ROW_Y(i)   (30 + (i) * P3_ROW_PITCH)
+
+// Page 4's grid: rows at page 2's 34px pitch from y 30. It has check rows and
+// rows with a label next to two buttons. Four rows end at y 158.
+#define P4_ROW_PITCH  34
+#define P4_ROW_Y(i)   (30 + (i) * P4_ROW_PITCH)
 
 // Page 1's grid: three rows. They start below the pager line, as on the other
 // pages. The rows have a 55px pitch from y 30. Thus the last button is at
@@ -135,19 +141,19 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_W         26
 #define PGR_H         17
 #define PGR_Y         TOP_LINE_Y
-// Three pages of settings, and the debug page if the build has it. All other
+// Four pages of settings, and the debug page if the build has it. All other
 // constants below come from this value.
 //
 // Page 3 exists because page 2 has no vertical space left.
 #if CTR_DEBUG_MENU
-#define PAGE_COUNT    4
+#define PAGE_COUNT    5
 #else
-#define PAGE_COUNT    3
+#define PAGE_COUNT    4
 #endif
 
 // Right-aligned to the interior edge. The pager grows to the left when there
 // are more pages, so the last button stays in the same place. The first button
-// is at x 226 with three pages and at x 196 with four.
+// is at x 196 with four pages and at x 166 with five.
 #define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
                        - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
 
@@ -352,7 +358,6 @@ enum {
     P3_PHONE_CALLS,
     P3_QUICK_BALL,
     P3_BATTLE_ANIM,
-    P3_FOLLOWER,
     P3_DAY_CARE,
 };
 
@@ -385,10 +390,6 @@ static void DrawPage3(void)
                                              : "off = smoother battles",
                  !Ctr3dsGetBattleAnimOff());
 
-    // The first Pokemon of the party walks behind the player.
-    DrawCheckRow(P3_ROW_Y(P3_FOLLOWER), CHK_ROW_H, "FOLLOWER",
-                 "lead Pokemon walks behind", Ctr3dsGetFollowerOn());
-
     // The Day Care Pokemon walk in the Route 117 yard. It is separate from
     // FOLLOWER, and it is for the console. A change shows at the next load of
     // Route 117, because the yard objects are made at map load.
@@ -396,7 +397,55 @@ static void DrawPage3(void)
                  "Pokemon in the yard", Ctr3dsGetDayCareYard());
 }
 
-// PAGE 4: the debug menu.
+// ---- PAGE 4: the follower --------------------------------------------------
+//
+// The FOLLOWER switch and its options, on page 4's grid. The aarant fork sets
+// the options at build time (OW_MON_*). Each save keeps its own values.
+enum {
+    P4_FOLLOWER,
+    P4_WHO,
+    P4_BOBBING,
+    P4_BALL,
+};
+
+// A label and two buttons. The buttons use the right two columns of LEVEL CAP
+// on page 2, so the pages align.
+static void DrawChoiceRow(int y, const char *text, const char *left,
+                          const char *right, int rightOn)
+{
+    u8 label[40];
+
+    UiText(16, y + (BTN_H - UI_GLYPH_H) / 2,
+           UiAscii(label, text, sizeof(label)), UiThemeText(), UiThemeShadow());
+    DrawButton(WIDE_X(1), y, WIDE_W, UiAscii(label, left, sizeof(label)),
+               !rightOn);
+    DrawButton(WIDE_X(2), y, WIDE_W, UiAscii(label, right, sizeof(label)),
+               rightOn);
+}
+
+static void DrawPage4(void)
+{
+    int starter = (Ctr3dsGetFollowerWho() == CTR_FOLLOWER_STARTER);
+
+    // The hint follows WHO, so the row says which Pokemon walks behind.
+    DrawCheckRow(P4_ROW_Y(P4_FOLLOWER), CHK_ROW_H, "FOLLOWER",
+                 starter ? "your starter walks behind"
+                         : "lead Pokemon walks behind",
+                 Ctr3dsGetFollowerOn());
+
+    // STARTER: only the Pokemon from Birch's bag follows, as Pikachu in Yellow.
+    DrawChoiceRow(P4_ROW_Y(P4_WHO), "WHO", "LEAD", "STARTER", starter);
+
+    // The stored value is an "off" flag, so the checkbox shows the inverse.
+    DrawCheckRow(P4_ROW_Y(P4_BOBBING), CHK_ROW_H, "BOBBING",
+                 "up and down as it walks", !Ctr3dsGetFollowerBobOff());
+
+    // OWN is the ball that caught the Pokemon.
+    DrawChoiceRow(P4_ROW_Y(P4_BALL), "BALL", "OWN", "POKE BALL",
+                  Ctr3dsGetFollowerPokeBall());
+}
+
+// PAGE 5: the debug menu.
 //
 // This page holds all controls that test the port, not the game, behind one
 // compile-time value: CTR_DEBUG_MENU in 3ds/bridge.h. At 0, this page and its
@@ -560,8 +609,9 @@ static void DrawPageDebug(void)
     // this page, so a build that has it must be clear at a glance.
     UiText(DBG_LABEL_X, TOP_LINE_Y, UiAscii(label, "DEBUG", sizeof(label)),
            UiThemeText(), UiThemeShadow());
+    // The caption ends at x 125, before the PAGE label of the pager.
     UiText(DBG_LABEL_X + 56, TOP_LINE_Y,
-           UiAscii(label, "not in shipping builds", sizeof(label)),
+           UiAscii(label, "test build", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
     for (i = 0; i < DBG_ROW_COUNT; i++)
@@ -629,6 +679,8 @@ void UiExtraDraw(void)
         DrawPage2();
     else if (sPage == 2)
         DrawPage3();
+    else if (sPage == 3)
+        DrawPage4();
 #if CTR_DEBUG_MENU
     else
         DrawPageDebug();
@@ -655,23 +707,21 @@ u32 UiTweakStateKey(void)
 
 u32 UiExtraStateKey(void)
 {
-    // The sPage value uses bits 0-1 and the tweaks start at bit 4, so bit 2 is
-    // free. Only the button above changes this value, but fold it in anyway: a
-    // setting on the screen must not go stale. The three audio switches go at
-    // bit 24, clear of UiTweakStateKey's range (which ends at bit 17 after the
-    // shift below).
+    // The sPage value uses bits 0-2 and the tweaks use bits 4-17. Bit 3 is for
+    // MUSIC FAST. Only its button changes it, but fold it in anyway: a setting
+    // on the screen must not go stale. The audio switches use bits 24-27.
     u32 audio = 0;
 
     for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         audio |= (u32)(Ctr3dsGetAudioDbg((int)i) != 0) << i;
 
     return (u32)sPage
-         | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 2)
-         // Bit 3, the last free bit below the tweaks. This switch can change
-         // without a touch: 3ds/tweaks.c clears it when the armed encounter
-         // starts, which can occur while this tab is on the screen.
-         | ((u32)(Ctr3dsGetShinyTest() != 0) << 3)
+         | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 3)
          | (UiTweakStateKey() << 4)
+         // This switch can change without a touch: 3ds/tweaks.c clears it when
+         // the armed encounter starts, which can occur while this tab is on the
+         // screen.
+         | ((u32)(Ctr3dsGetShinyTest() != 0) << 18)
          | (audio << 24);
 }
 
@@ -781,17 +831,46 @@ static void TouchPage3(const CtrTouchState *t)
         Ctr3dsSetQuickBallOff(!Ctr3dsGetQuickBallOff());
     else if (HitCheckRow(t, P3_ROW_Y(P3_BATTLE_ANIM), CHK_ROW_H))
         Ctr3dsSetBattleAnimOff(!Ctr3dsGetBattleAnimOff());
-    else if (HitCheckRow(t, P3_ROW_Y(P3_FOLLOWER), CHK_ROW_H))
+    else if (HitCheckRow(t, P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H))
+        Ctr3dsSetDayCareYard(!Ctr3dsGetDayCareYard());
+    else
+        return;
+
+    UiMarkDirty();
+}
+
+static void TouchPage4(const CtrTouchState *t)
+{
+    int who = -1;
+
+    if (HitCheckRow(t, P4_ROW_Y(P4_FOLLOWER), CHK_ROW_H))
     {
         // The follower appears or goes away now if the player is in the
         // overworld with no script. Otherwise the next map load does it.
         Ctr3dsSetFollowerOn(!Ctr3dsGetFollowerOn());
         Ctr3dsRefreshFollowerNow();
     }
-    else if (HitCheckRow(t, P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H))
-        Ctr3dsSetDayCareYard(!Ctr3dsGetDayCareYard());
+    else if (UiHit(t, WIDE_X(1), P4_ROW_Y(P4_WHO), WIDE_W, BTN_H))
+        who = CTR_FOLLOWER_LEAD;
+    else if (UiHit(t, WIDE_X(2), P4_ROW_Y(P4_WHO), WIDE_W, BTN_H))
+        who = CTR_FOLLOWER_STARTER;
+    // BOBBING and BALL need no refresh. They show at the next step and at the
+    // next ball animation.
+    else if (HitCheckRow(t, P4_ROW_Y(P4_BOBBING), CHK_ROW_H))
+        Ctr3dsSetFollowerBobOff(!Ctr3dsGetFollowerBobOff());
+    else if (UiHit(t, WIDE_X(1), P4_ROW_Y(P4_BALL), WIDE_W, BTN_H))
+        Ctr3dsSetFollowerPokeBall(0);
+    else if (UiHit(t, WIDE_X(2), P4_ROW_Y(P4_BALL), WIDE_W, BTN_H))
+        Ctr3dsSetFollowerPokeBall(1);
     else
         return;
+
+    // A new WHO can change the follower. Refresh it, as FOLLOWER does.
+    if (who >= 0 && who != Ctr3dsGetFollowerWho())
+    {
+        Ctr3dsSetFollowerWho(who);
+        Ctr3dsRefreshFollowerNow();
+    }
 
     UiMarkDirty();
 }
@@ -824,6 +903,8 @@ void UiExtraTouch(const CtrTouchState *t)
         TouchPage2(t);
     else if (sPage == 2)
         TouchPage3(t);
+    else if (sPage == 3)
+        TouchPage4(t);
 #if CTR_DEBUG_MENU
     else
         TouchPageDebug(t);

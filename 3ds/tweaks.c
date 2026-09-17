@@ -28,6 +28,7 @@
 #include "constants/item.h"
 #include "constants/items.h"
 #include "constants/pokemon.h"
+#include "constants/region_map_sections.h"
 #include "constants/species.h"
 
 #include "bridge.h"
@@ -45,6 +46,37 @@ bool8 Ctr3dsExpAllOn(void)
 bool8 Ctr3dsFollowerOn(void)
 {
     return Ctr3dsGetFollowerOn() ? TRUE : FALSE;
+}
+
+bool8 Ctr3dsFollowerAllowed(struct Pokemon *mon)
+{
+    if (Ctr3dsGetFollowerWho() != CTR_FOLLOWER_STARTER)
+        return TRUE;
+
+    // The trainer ID is in the save. Without a save there is no starter.
+    if (gSaveBlock2Ptr == NULL)
+        return FALSE;
+
+    // ChooseStarter (src/battle_setup.c) gives the starter at level 5 on Route
+    // 101. The wild Pokemon there are level 2 or 3, and a hatched Pokemon has
+    // met level 0. The trainer ID test stops a starter from a trade. The
+    // aarant fork has the same level and place test in OW_MON_ALLOWED_*.
+    //
+    // Test the trainer ID first. It is outside the encrypted substructs.
+    return GetMonData(mon, MON_DATA_OT_ID)
+               == T1_READ_32(gSaveBlock2Ptr->playerTrainerId)
+        && GetMonData(mon, MON_DATA_MET_LEVEL) == 5
+        && GetMonData(mon, MON_DATA_MET_LOCATION) == MAPSEC_ROUTE_101;
+}
+
+bool8 Ctr3dsFollowerBobOn(void)
+{
+    return Ctr3dsGetFollowerBobOff() ? FALSE : TRUE;
+}
+
+bool8 Ctr3dsFollowerOwnBall(void)
+{
+    return Ctr3dsGetFollowerPokeBall() ? FALSE : TRUE;
 }
 
 void Ctr3dsRefreshFollowerNow(void)

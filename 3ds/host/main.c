@@ -320,6 +320,9 @@ static uint8_t sPhoneCallsOff;
 static uint8_t sQuickBallOff;
 static uint8_t sBattleAnimOff;
 static uint8_t sFollowerOn;
+static uint8_t sFollowerWho;        // CTR_FOLLOWER_*
+static uint8_t sFollowerBobOff;
+static uint8_t sFollowerPokeBall;
 static uint8_t sDayCareYard;
 
 // The last ball thrown, as a raw item id. There is no range check here: the
@@ -444,6 +447,69 @@ void Ctr3dsSetFollowerOn(int on)
 int Ctr3dsGetFollowerOn(void)
 {
     return sFollowerOn;
+}
+
+void Ctr3dsApplyFollowerWho(int mode)
+{
+    if (mode != CTR_FOLLOWER_LEAD && mode != CTR_FOLLOWER_STARTER)
+        return;
+
+    sFollowerWho = (uint8_t)mode;
+}
+
+void Ctr3dsSetFollowerWho(int mode)
+{
+    int before = sFollowerWho;
+
+    Ctr3dsApplyFollowerWho(mode);
+
+    if (sFollowerWho != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetFollowerWho(void)
+{
+    return sFollowerWho;
+}
+
+void Ctr3dsApplyFollowerBobOff(int on)
+{
+    sFollowerBobOff = on ? 1 : 0;
+}
+
+void Ctr3dsSetFollowerBobOff(int on)
+{
+    int before = sFollowerBobOff;
+
+    Ctr3dsApplyFollowerBobOff(on);
+
+    if (sFollowerBobOff != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetFollowerBobOff(void)
+{
+    return sFollowerBobOff;
+}
+
+void Ctr3dsApplyFollowerPokeBall(int on)
+{
+    sFollowerPokeBall = on ? 1 : 0;
+}
+
+void Ctr3dsSetFollowerPokeBall(int on)
+{
+    int before = sFollowerPokeBall;
+
+    Ctr3dsApplyFollowerPokeBall(on);
+
+    if (sFollowerPokeBall != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetFollowerPokeBall(void)
+{
+    return sFollowerPokeBall;
 }
 
 void Ctr3dsApplyDayCareYard(int on)

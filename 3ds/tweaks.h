@@ -13,6 +13,8 @@
 
 #include "global.h"
 
+struct Pokemon;
+
 // EXP All. TRUE means: treat every living party member as if it holds an Exp.
 // Share. This uses the game's own split between participants and holders.
 bool8 Ctr3dsExpAllOn(void);
@@ -84,6 +86,16 @@ bool8 Ctr3dsMatchCallSuppressed(void);
 
 // TRUE when the first Pokemon of the party walks behind the player.
 bool8 Ctr3dsFollowerOn(void);
+
+// TRUE when this Pokemon may follow under the WHO setting. GetFirstLiveMon
+// takes the first party Pokemon that is allowed and can fight.
+bool8 Ctr3dsFollowerAllowed(struct Pokemon *mon);
+
+// TRUE when the follower bobs as it walks (BOBBING on the FOLLOWER page).
+bool8 Ctr3dsFollowerBobOn(void);
+
+// TRUE when the follower comes out of its own ball, FALSE for a Poke Ball.
+bool8 Ctr3dsFollowerOwnBall(void);
 
 // Show, change or remove the follower now, for callers on the bottom screen.
 // It has the overworld gate of Ctr3dsSortBagNow.
