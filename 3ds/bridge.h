@@ -76,11 +76,14 @@ void Rp2350PresentFrame(void);
 // (see section 7 of 3ds/SECOND_SCREEN_CHEATSHEET.md).
 int Ctr3dsRasteriserOnOwnCore(void);
 
-// The build: the output of `git describe --always --dirty` at build time. For
-// example "bc688ed", "bc688ed-dirty" for a tree with uncommitted changes, or
-// "nogit" outside a repository. ASCII, never NULL. The title screen shows it in
-// the bottom screen's corner, so a player can check the installed build. The
-// boot log also has it, with the build time.
+// The build: the output of `git describe --always --dirty` at build time, and
+// the branch name before it when the build is not off main. For example
+// "bc688ed" from main, "local-wireless/bc688ed" from a branch,
+// "bc688ed-dirty" for a tree with uncommitted changes, or "nogit" outside a
+// repository. ASCII, never NULL. The title screen shows it in the bottom
+// screen's corner, so a player can check the installed build, and two consoles
+// that must run the same build can be compared at a glance. The boot log also
+// has it, with the build time.
 const char *Ctr3dsBuildId(void);
 
 // The save flash write hooks, called from src/agb_flash*.c. Reads go directly
