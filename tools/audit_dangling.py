@@ -34,6 +34,17 @@ Thus this is a regression gate, not a bug list. The REVIEWED table below holds
 the sites that a person checked. The script fails only on a site that nobody
 checked yet.
 
+Two limits to know before reading the output:
+
+- The "was it reset first" test reads only the body of the function that frees.
+  It does not follow into callers. Roulette shows the cost: Task_ExitRoulette
+  calls ResetSpriteData() and then FreeRoulette(), so the site is safe, but the
+  free is inside FreeRoulette() where no reset is visible. Expect that shape as
+  a false positive, and check the caller before believing a finding.
+- reaches() fans out through the call graph, so a large scene reports most of
+  its callbacks as live readers. The list says "these could read it", not
+  "these do read it after the free".
+
     python3 tools/audit_dangling.py [--all] [src/foo.c ...]
 """
 
@@ -42,6 +53,29 @@ import re
 import sys
 
 FUNC_HDR = re.compile(r'^(?:static\s+)?[A-Za-z_][\w \t\*]*?\b([A-Za-z_]\w*)\s*\([^;]*\)\s*$')
+
+# A file-scope pointer definition, in any of the spellings this tree uses:
+#
+#     EWRAM_DATA static struct NamingScreenData *sNamingScreen = NULL;
+#     static EWRAM_DATA struct PokemonStorageSystemData *sStorage = NULL;
+#     COMMON_DATA u16 *gOverworldTilemapBuffer_Bg1 = NULL;
+#     } *sRoulette = NULL;                 // an anonymous struct
+#     } static EWRAM_DATA *sPokedexAreaScreen = NULL;
+#     } *sMoveRelearnerStruct = {0};
+#
+# The rule is "a line that starts at column 0, thus is not a statement, and
+# declares *NAME". The `(` case is excluded so that a function definition such
+# as `const struct MapConnection *GetMapConnection(u8 dir)` does not match.
+#
+# The earlier version of this script allowed only `static EWRAM_DATA struct X
+# *p`. That is the one order this tree does NOT use, so it skipped 24 of the 47
+# files that free a pointer, and every crash this port has found was in a
+# skipped file. Measure the corpus, not just the findings: main() prints it.
+# The second alternative is the pointer-to-array form, which wraps the name
+# in parentheses: `COMMON_DATA u16 (*gContestMonPixels)[][32] = {0};`.
+# It is kept separate rather than allowing a bare `)` after the name,
+# because that would also match a parameter in a function definition.
+PTR_DEF = r'^(?:\}|[A-Za-z_])[^;=\n]*(?:\*\s*%s\s*(?:=|;|\[)|\(\s*\*\s*%s\s*\))'
 
 # Sites that a person read and cleared, with the key (file, pointer, freeing
 # function). The first entries come from the sweep of 2026-09. Each entry tells
@@ -90,12 +124,6 @@ REVIEWED = {
         'PreparePokeblockFeedScene() reaches ResetSpriteData() in the same frame',
     ('src/use_pokeblock.c', 'sMenu', 'CloseUsePokeblockMenu'):
         'destroys all three reader sprites before the free',
-    ('src/cable_car.c', 'sCableCar', 'CB2_EndCableCar'):
-        'ResetSpriteData() and ResetTasks() before the free',
-    ('src/fldeff_cut.c', 'sCutGrassSpriteArrayPtr', 'CutGrassSpriteCallbackEnd'):
-        'destroys its own sprites first',
-    ('src/frontier_pass.c', 'sMapData', 'FreeFrontierMap'):
-        'ResetTasks() before the free',
 }
 
 
@@ -160,35 +188,106 @@ def signatures(text):
     return sig
 
 
-def audit(paths):
+def pointer_defs(paths):
+    """Map a pointer name to the files that define it, across the whole tree."""
+    defs = {}
+    for path in paths:
+        text = open(path, encoding='utf-8', errors='replace').read()
+        cands = set(re.findall(r'\*\s*(\w+)\s*(?:=|;|\[)', text))
+        cands |= set(re.findall(r'\(\s*\*\s*(\w+)\s*\)', text))
+        for name in cands:
+            esc = re.escape(name)
+            if re.search(PTR_DEF % (esc, esc), text, re.M):
+                defs.setdefault(name, set()).add(path)
+    return defs
+
+
+def entry_points(text, funcs, tbl, sig):
+    """The scheduled readers: sprite callbacks that AnimateSprites() runs, and
+    tasks that RunTasks() runs.
+
+    Three registration forms matter, and the earlier version of this script
+    modelled only the first two:
+
+      sprite->callback = Fn      an assignment, or a .callback field in a table
+      CreateTask(Fn, ...)        535 sites in src/
+      gTasks[id].func = Fn       790 sites in src/, so the MAJORITY form
+
+    Task_ExitRoulette, which frees sRoulette, is installed only by the third
+    form. Missing it is why this script reported nothing for roulette.c.
+
+    A name that merely sits in a function-pointer table is an entry too, if its
+    signature fits: the naming-screen crash came through sPageSwapSpriteFuncs[].
+    """
+    sprites = {m.group(1) for m in re.finditer(r'(?:->|\.)\s*callback\s*=\s*&?(\w+)', text)}
+    tasks = {m.group(1) for m in re.finditer(r'\bCreateTask\s*\(\s*&?(\w+)', text)}
+    tasks |= {m.group(1) for m in
+              re.finditer(r'\bgTasks\s*\[[^\]]*\]\s*\.\s*func\s*=\s*&?(\w+)', text)}
+    tasks |= {m.group(1) for m in
+              re.finditer(r'\b(?:SetTaskFuncWithFollowupFunc|SwitchTaskToFollowupFunc)'
+                          r'\s*\([^;)]*?&?(\w+)\s*[,)]', text)}
+    sprites |= {n for n in tbl if sig.get(n) == 'sprite'}
+    tasks |= {n for n in tbl if sig.get(n) == 'task'}
+    sprites = {n for n in sprites if n in funcs and sig.get(n) == 'sprite'}
+    tasks = {n for n in tasks if n in funcs and sig.get(n) == 'task'}
+    return sprites, tasks
+
+
+def audit(paths, defs=None):
+    if defs is None:
+        defs = pointer_defs(paths)
     out = []
     for path in paths:
         text = open(path, encoding='utf-8', errors='replace').read()
         freed = {p for p in re.findall(r'(?:TRY_)?FREE_AND_SET_NULL\(\s*(\w+)\s*\)', text)
-                 if re.search(r'^\s*(?:static\s+)?(?:EWRAM_DATA\s+)?'
-                              r'(?:struct\s+\w+|\w+)\s*\*\s*' + re.escape(p) + r'\b',
-                              text, re.M)}
+                 if p in defs}
         if not freed:
             continue
         funcs = parse_functions(path)
         tbl = table_members(text, funcs)
         sig = signatures(text)
-        sprites = {m.group(1) for m in re.finditer(r'(?:->|\.)\s*callback\s*=\s*&?(\w+)', text)
-                   if m.group(1) in funcs and sig.get(m.group(1)) == 'sprite'}
-        tasks = {m.group(1) for m in re.finditer(r'\bCreateTask\s*\(\s*&?(\w+)', text)
-                 if m.group(1) in funcs and sig.get(m.group(1)) == 'task'}
+        sprites, tasks = entry_points(text, funcs, tbl, sig)
         for ptr in sorted(freed):
-            reach = reaches(funcs, ptr, tbl)
-            sp = sorted(e for e in sprites if e in reach)
-            tk = sorted(e for e in tasks if e in reach)
+            # A pointer defined in another file is usually read there too, so
+            # fold that file in for this pointer only. Without it a global that
+            # is freed away from its definition is never analysed, and
+            # gBattleSpritesDataPtr -- the first crash this port fixed -- is
+            # exactly that: defined in battle_main.c, freed in
+            # battle_gfx_sfx_util.c.
+            pfuncs, ptbl, psp, ptk = funcs, tbl, sprites, tasks
+            for other in sorted(defs.get(ptr, ())):
+                if other == path:
+                    continue
+                otext = open(other, encoding='utf-8', errors='replace').read()
+                ofuncs = parse_functions(other)
+                otbl = table_members(otext, ofuncs)
+                osp, otk = entry_points(otext, ofuncs, otbl, signatures(otext))
+                pfuncs = {**ofuncs, **pfuncs}
+                ptbl = ptbl | otbl
+                psp = psp | osp
+                ptk = ptk | otk
+            reach = reaches(pfuncs, ptr, ptbl)
+            sp = sorted(e for e in psp if e in reach)
+            tk = sorted(e for e in ptk if e in reach)
             if not sp and not tk:
                 continue
-            for f, (body, line) in funcs.items():
+            for f, (body, line) in pfuncs.items():
                 if not re.search(r'(?:TRY_)?FREE_AND_SET_NULL\(\s*' + re.escape(ptr) + r'\s*\)', body):
                     continue
-                pre = body.split('FREE_AND_SET_NULL(' + ptr)[0]
-                left_sp = [] if 'ResetSpriteData(' in pre else [e for e in sp if e != f]
-                left_tk = [] if 'ResetTasks(' in pre else [e for e in tk if e != f]
+                # Judge EVERY free in the body, not only the first. Before, a
+                # function that frees at two points was assessed on the first
+                # alone, and CB2_CheckPlayAgainLink in berry_blender.c does
+                # exactly that.
+                chunks = re.split(r'(?:TRY_)?FREE_AND_SET_NULL\(\s*' + re.escape(ptr) + r'\s*\)', body)
+                left_sp, left_tk, pre = [], [], ''
+                for chunk in chunks[:-1]:
+                    pre += chunk          # everything before THIS free
+                    if 'ResetSpriteData(' not in pre:
+                        left_sp = [e for e in sp if e != f]
+                    if 'ResetTasks(' not in pre:
+                        left_tk = [e for e in tk if e != f]
+                    if left_sp or left_tk:
+                        break
                 if not left_sp and not left_tk:
                     continue
                 # The discriminator that a person needs: where does control go
@@ -200,11 +299,45 @@ def audit(paths):
     return out
 
 
+def corpus(paths, defs):
+    """How many files and pointers this script can actually see.
+
+    Print it every run. The script reported "no unreviewed sites" for a year
+    while it could see only 23 of 47 files, and a clean report from a tool that
+    reads half the tree is worse than no tool, because it is believed.
+    """
+    files = ptrs = 0
+    for path in paths:
+        text = open(path, encoding='utf-8', errors='replace').read()
+        freed = set(re.findall(r'(?:TRY_)?FREE_AND_SET_NULL\(\s*(\w+)\s*\)', text))
+        if not freed:
+            continue
+        files += 1
+        ptrs += len(freed & set(defs))
+    total_files = total_ptrs = 0
+    for path in paths:
+        text = open(path, encoding='utf-8', errors='replace').read()
+        freed = set(re.findall(r'(?:TRY_)?FREE_AND_SET_NULL\(\s*(\w+)\s*\)', text))
+        if freed:
+            total_files += 1
+            total_ptrs += len(freed)
+    return files, total_files, ptrs, total_ptrs
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('-')]
     show_all = '--all' in sys.argv
-    paths = args or sorted(glob.glob('src/**/*.c', recursive=True))
-    findings = audit(paths)
+    tree = sorted(glob.glob('src/**/*.c', recursive=True))
+    paths = args or tree
+    # Always index the whole tree, even when the caller names one file: a
+    # pointer can be defined in a file other than the one that frees it.
+    defs = pointer_defs(tree + sorted(glob.glob('include/**/*.h', recursive=True)))
+    seen_f, all_f, seen_p, all_p = corpus(tree, defs)
+    print(f'corpus: {seen_f}/{all_f} files, {seen_p}/{all_p} freed pointers visible')
+    if seen_f < all_f:
+        print('  WARNING: some files are invisible to this script. Fix PTR_DEF.')
+    print()
+    findings = audit(paths, defs)
 
     new = [f for f in findings if (f['path'], f['ptr'], f['freer']) not in REVIEWED]
     known = [f for f in findings if (f['path'], f['ptr'], f['freer']) in REVIEWED]
@@ -229,6 +362,16 @@ def main():
         for f in known:
             print(f"  {f['path']}:{f['line']} {f['ptr']} in {f['freer']}()")
             print(f"      {REVIEWED[(f['path'], f['ptr'], f['freer'])]}")
+
+    live = {(f['path'], f['ptr'], f['freer']) for f in findings}
+    stale = [k for k in REVIEWED if k not in live]
+    if stale and not args:
+        print(f'note: {len(stale)} REVIEWED row(s) match no current site. The shape is')
+        print('      gone, so the row is dead weight and would silently clear the')
+        print('      shape if it came back. Delete them:')
+        for k in stale:
+            print(f'        {k}')
+        print()
 
     print(f'{len(new)} unreviewed, {len(known)} reviewed '
           f'(re-run with --all to list the reviewed ones)')

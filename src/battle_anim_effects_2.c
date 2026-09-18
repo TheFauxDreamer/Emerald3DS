@@ -3820,12 +3820,26 @@ static void AnimGuardRing(struct Sprite *sprite)
 
 void AnimTask_IsFuryCutterHitRight(u8 taskId)
 {
-    gBattleAnimArgs[ARG_RET_ID] = gAnimDisableStructPtr->furyCutterCounter & 1;
+#ifdef UBFIX
+    // UB NULL: A Contest never sets gAnimDisableStructPtr. An appeal counts no
+    // earlier hits. See GetRolloutCounter in battle_anim_rock.c.
+    if (gAnimDisableStructPtr == NULL)
+        gBattleAnimArgs[ARG_RET_ID] = 0;
+    else
+#endif
+        gBattleAnimArgs[ARG_RET_ID] = gAnimDisableStructPtr->furyCutterCounter & 1;
     DestroyAnimVisualTask(taskId);
 }
 
 void AnimTask_GetFuryCutterHitCount(u8 taskId)
 {
-    gBattleAnimArgs[ARG_RET_ID] = gAnimDisableStructPtr->furyCutterCounter;
+#ifdef UBFIX
+    // UB NULL: A Contest never sets gAnimDisableStructPtr. An appeal counts no
+    // earlier hits. See GetRolloutCounter in battle_anim_rock.c.
+    if (gAnimDisableStructPtr == NULL)
+        gBattleAnimArgs[ARG_RET_ID] = 0;
+    else
+#endif
+        gBattleAnimArgs[ARG_RET_ID] = gAnimDisableStructPtr->furyCutterCounter;
     DestroyAnimVisualTask(taskId);
 }

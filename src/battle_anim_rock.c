@@ -756,6 +756,17 @@ static void AnimRolloutParticle(struct Sprite *sprite)
 
 static u8 GetRolloutCounter(void)
 {
+#ifdef UBFIX
+    // UB NULL: A Contest never sets gAnimDisableStructPtr. ClearBattleAnimationVars
+    // makes it NULL, and an appeal runs the same move animations as a battle. Thus
+    // Rollout as an appeal reads through NULL. A GBA reads the BIOS at address 0.
+    // On the 3DS, address 0 is not mapped.
+    //
+    // An appeal is one hit, and 1 is what the clamp below gives for a count that
+    // is out of range.
+    if (gAnimDisableStructPtr == NULL)
+        return 1;
+#endif
     u8 retVal = gAnimDisableStructPtr->rolloutTimerStartValue - gAnimDisableStructPtr->rolloutTimer;
     u8 var0 = retVal - 1;
     if (var0 > 4)
