@@ -2932,15 +2932,19 @@ static void CB2_CheckPlayAgainLink(void)
         break;
     }
 
-    ProcessLinkPlayerCmds();
 #ifdef UBFIX
-    // UB NULL: The switch above frees sBerryBlender on the way out of the
-    // game. The callee is empty, but C evaluates its arguments, so the read
-    // still occurs. A GBA reads the BIOS at address 0. On the 3DS, address 0
+    // UB NULL: The switch above frees sBerryBlender on the way out of the game
+    // and hands over to the next screen, but this frame carries on. Everything
+    // below reads the pointer: the two calls directly, and AnimateSprites()
+    // through SpriteCB_PlayerArrow, which reads bg_X with no test of its own.
+    // The next screen's setup resets the sprites, so this frame has nothing
+    // more to draw. A GBA reads the BIOS at address 0. On the 3DS, address 0
     // is not mapped.
-    if (sBerryBlender != NULL)
+    if (sBerryBlender == NULL)
+        return;
 #endif
-        Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
+    ProcessLinkPlayerCmds();
+    Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();
     AnimateSprites();
     BuildOamBuffer();
@@ -2994,15 +2998,19 @@ static void CB2_CheckPlayAgainLocal(void)
         break;
     }
 
-    ProcessLinkPlayerCmds();
 #ifdef UBFIX
-    // UB NULL: The switch above frees sBerryBlender on the way out of the
-    // game. The callee is empty, but C evaluates its arguments, so the read
-    // still occurs. A GBA reads the BIOS at address 0. On the 3DS, address 0
+    // UB NULL: The switch above frees sBerryBlender on the way out of the game
+    // and hands over to the next screen, but this frame carries on. Everything
+    // below reads the pointer: the two calls directly, and AnimateSprites()
+    // through SpriteCB_PlayerArrow, which reads bg_X with no test of its own.
+    // The next screen's setup resets the sprites, so this frame has nothing
+    // more to draw. A GBA reads the BIOS at address 0. On the 3DS, address 0
     // is not mapped.
-    if (sBerryBlender != NULL)
+    if (sBerryBlender == NULL)
+        return;
 #endif
-        Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
+    ProcessLinkPlayerCmds();
+    Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();
     AnimateSprites();
     BuildOamBuffer();
@@ -3012,13 +3020,6 @@ static void CB2_CheckPlayAgainLocal(void)
 
 static void ProcessLinkPlayerCmds(void)
 {
-#ifdef UBFIX
-    // UB NULL: CB2_CheckPlayAgainLink frees sBerryBlender while the link is
-    // still up, and calls this on the same frame. Without the struct there is
-    // nothing to record a command into.
-    if (sBerryBlender == NULL)
-        return;
-#endif
     if (gReceivedRemoteLinkPlayers)
     {
         if (CheckRecvCmdMatches(gRecvCmds[0][BLENDER_COMM_INPUT_STATE], LINKCMD_SEND_PACKET, RFUCMD_SEND_PACKET))

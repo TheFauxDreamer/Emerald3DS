@@ -3154,6 +3154,16 @@ static void HandleLinkDataSend(void)
 static void CB2_InGameTrade(void)
 {
     DoTradeAnim();
+#ifdef UBFIX
+    // UB NULL: DoTradeAnim frees sTradeAnim when the fade out ends, and this
+    // frame carries on into RunTasks() and AnimateSprites() with nothing reset
+    // first. The free itself tests the pointer, but that only stops a second
+    // free; it does not stop the reads below. CB2_ReturnToField is already set
+    // and resets the sprites, so this frame has nothing more to draw. A GBA
+    // reads the BIOS at address 0. On the 3DS, address 0 is not mapped.
+    if (sTradeAnim == NULL)
+        return;
+#endif
     RunTasks();
     RunTextPrinters();
     AnimateSprites();
@@ -4643,6 +4653,12 @@ static void CB2_UpdateLinkTrade(void)
         }
         SetMainCallback2(CB2_WaitTradeComplete);
     }
+#ifdef UBFIX
+    // UB NULL: as in CB2_InGameTrade. DoTradeAnim can free sTradeAnim on this
+    // frame, and everything below still runs.
+    if (sTradeAnim == NULL)
+        return;
+#endif
     HandleLinkDataSend();
     HandleLinkDataReceive();
     RunTasks();
@@ -4841,6 +4857,16 @@ static void CB2_FreeTradeAnim(void)
             DestroyWirelessStatusIndicatorSprite();
         SetMainCallback2(gMain.savedCallback);
     }
+#ifdef UBFIX
+    // UB NULL: The block above frees sTradeAnim and hands over to the saved
+    // callback, but this frame carries on into RunTasks() and AnimateSprites().
+    // Nothing reset the sprites or the tasks first, so any of them that reads
+    // sTradeAnim reads NULL. The next screen's setup resets them, so this frame
+    // has nothing more to draw. A GBA reads the BIOS at address 0. On the 3DS,
+    // address 0 is not mapped.
+    if (sTradeAnim == NULL)
+        return;
+#endif
     RunTasks();
     AnimateSprites();
     BuildOamBuffer();
