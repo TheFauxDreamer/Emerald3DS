@@ -83,7 +83,26 @@ CTR_PPU_THREAD ?= 1
 # difference between two builds of the same tree. The description alone is
 # CTR_BUILD_ID, which the title screen shows in the corner of the bottom screen
 # (Ctr3dsBuildId in ../bridge.h).
-BUILD_ID    := $(shell git describe --always --dirty 2>/dev/null || echo nogit)
+#
+# A build off main shows the git description alone. Every other branch shows its
+# name first, as "branch/description", so a test build on a console cannot be
+# mistaken for a main build. That matters most when two consoles must run the
+# same build, as local wireless needs.
+#
+# The branch name does not come from git alone. CI checks out a detached HEAD,
+# where git reports "HEAD", so GitHub supplies the name instead: GITHUB_HEAD_REF
+# on a pull request, GITHUB_REF_NAME on a push.
+#
+# The value becomes a C string literal below, so every character outside
+# [A-Za-z0-9._-] is dropped and a slash in the branch name becomes a dash. It is
+# cut to 24 characters, which keeps the title screen's corner text short enough
+# to stay on the screen in the small font.
+BUILD_ID    := $(shell \
+    d=$$(git describe --always --dirty 2>/dev/null || echo nogit); \
+    b="$${GITHUB_HEAD_REF:-$${GITHUB_REF_NAME:-$$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}}"; \
+    b=$$(printf '%s' "$$b" | tr '/' '-' | tr -cd 'A-Za-z0-9._-' | cut -c1-24); \
+    if [ -z "$$b" ] || [ "$$b" = HEAD ] || [ "$$b" = main ]; then printf '%s' "$$d"; \
+    else printf '%s/%s' "$$b" "$$d"; fi)
 BUILD_STAMP := $(shell date -u +%Y-%m-%d\ %H:%M:%SZ) $(BUILD_ID)
 
 # The build needs -MMD -MP. Without -MMD, each object depends only on its own .c
