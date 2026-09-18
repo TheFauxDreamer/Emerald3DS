@@ -6,7 +6,14 @@ extern const u8 gCgb3Vol[];
 
 #define BSS_CODE __attribute__((section(".bss.code")))
 
+#if PLATFORM_3DS
+// The 3DS runs the original src/m4a_1.s. The file 3ds/asm/m4a_arm11.s defines
+// this symbol as an alias for SoundMainRAM. A CXI has no memory that is both
+// writable and executable for a copy of the mixer. See the comment there.
+extern char SoundMainRAM_Buffer[];
+#else
 BSS_CODE ALIGNED(4) char SoundMainRAM_Buffer[0x800] = {0};
+#endif
 
 COMMON_DATA struct SoundInfo gSoundInfo = {0};
 COMMON_DATA struct PokemonCrySong gPokemonCrySongs[MAX_POKEMON_CRIES] = {0};
@@ -22,7 +29,7 @@ COMMON_DATA u8 gMPlayMemAccArea[0x10] = {0};
 COMMON_DATA struct MusicPlayerInfo gMPlayInfo_SE3 = {0};
 
 // RP2350 runs the real m4a engine: the asm core (m4a_1.s) is reimplemented in C
-// in rp2350/m4a_1.c, so RP2350 takes the #else (real) path below, not the WASM
+// in rp2350/m4a_engine.c, so RP2350 takes the #else (real) path below, not the WASM
 // audio stubs.
 #if WASM
 static void WasmMPlayStart(struct MusicPlayerInfo *mplayInfo)
@@ -136,8 +143,11 @@ void m4aSoundInit(void)
     s32 i;
 
 #if !RP2350
-    // The GBA copies the mixer into fast IWRAM. On RP2350 the mixer is plain C
-    // (rp2350/m4a_1.c) called directly, so SoundMainRAM_Buffer is unused.
+    // The GBA copies the mixer into fast IWRAM. The two native ports do not,
+    // and both define RP2350, which this tests. On the RP2350, the mixer is
+    // plain C (rp2350/m4a_engine.c) that the port calls directly. On the 3DS,
+    // SoundMainRAM_Buffer is SoundMainRAM (3ds/asm/m4a_arm11.s). Thus there is
+    // nothing to copy, and no executable memory for a copy.
     CpuCopy32((void *)((s32)SoundMainRAM & ~1), SoundMainRAM_Buffer, sizeof(SoundMainRAM_Buffer));
 #endif
 
@@ -147,6 +157,37 @@ void m4aSoundInit(void)
                | SOUND_MODE_FREQ_13379
                | (12 << SOUND_MODE_MASVOL_SHIFT)
                | (5 << SOUND_MODE_MAXCHN_SHIFT));
+
+#if PLATFORM_3DS
+    // Each pointer that the mixer calls through, printed once.
+    //
+    // SoundMain in src/m4a_1.s calls MPlayMainHead and CgbSound through
+    // pointers, and checks only the first for NULL. Then it jumps to
+    // SoundMainRAM_Buffer. A NULL in any of them is a NoExecuteFault at pc=0,
+    // and the register dump does not tell which one. This log names it.
+    {
+        extern void CtrTraceHex(const char *label, unsigned int value);
+        struct SoundInfo *si = SOUND_INFO_PTR;
+
+        CtrTraceHex("m4a SOUND_INFO_PTR   ", (unsigned int)si);
+        CtrTraceHex("m4a  .ident          ", (unsigned int)(si ? si->ident : 0));
+        CtrTraceHex("m4a  .MPlayMainHead  ", (unsigned int)(si ? (void *)si->MPlayMainHead : 0));
+        CtrTraceHex("m4a  .CgbSound       ", (unsigned int)(si ? (void *)si->CgbSound : 0));
+        CtrTraceHex("m4a  .MPlayJumpTable ", (unsigned int)(si ? (void *)si->MPlayJumpTable : 0));
+
+        // Entry 35 is Clear64byte and entry 34 is ClearChain: the two that the
+        // C side calls by index. MPlayJumpTableCopy (src/m4a_1.s) fills them.
+        // With the GBA guard in chk_adr_r2, all entries are zero on this
+        // target. Thus a NULL here means that the guard is back.
+        CtrTraceHex("m4a  jumpTable[34]   ", (unsigned int)(void *)gMPlayJumpTable[34]);
+        CtrTraceHex("m4a  jumpTable[35]   ", (unsigned int)(void *)gMPlayJumpTable[35]);
+
+        // Both are in src/m4a_1.s, which this port assembles.
+        // SoundMainRAM_Buffer is the alias that the top of this file declares.
+        CtrTraceHex("m4a SoundMainRAM_Buf ", (unsigned int)SoundMainRAM_Buffer);
+        CtrTraceHex("m4a SoundMainRAM     ", (unsigned int)(void *)SoundMainRAM);
+    }
+#endif
 
     for (i = 0; i < NUM_MUSIC_PLAYERS; i++)
     {

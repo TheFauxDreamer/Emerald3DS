@@ -190,10 +190,17 @@ function gbaColor(value) {
   return [r | 0, g | 0, b | 0];
 }
 
-function inWindowRange(value, range) {
+// Window bounds do not wrap. GBATEK: X2>240 or X1>X2 is interpreted as X2=240,
+// and Y2>160 or Y1>Y2 as Y2=160. Thus an inverted range goes to the edge of the
+// screen, and is empty when the start is past it. The `limit` argument is that
+// edge, because both axes below use this function. Keep this in step with
+// inWindowRange and winrowFill in rp2350/ppu.c, because ppu_validate.sh
+// compares the two.
+function inWindowRange(value, range, limit) {
   const start = range >> 8;
-  const end = range & 0xff;
-  return start <= end ? value >= start && value < end : value >= start || value < end;
+  let end = range & 0xff;
+  if (start > end || end > limit) end = limit;
+  return value >= start && value < end;
 }
 
 function windowMask(x, y) {
@@ -202,18 +209,39 @@ function windowMask(x, y) {
   if (!windowsEnabled) return 0x3f;
 
   if ((dispcnt & 0x2000)
-      && inWindowRange(x, u16[(REG + 0x40) >> 1])
-      && inWindowRange(y, u16[(REG + 0x44) >> 1])) {
+      && inWindowRange(x, u16[(REG + 0x40) >> 1], WIDTH)
+      && inWindowRange(y, u16[(REG + 0x44) >> 1], HEIGHT)) {
     return u16[(REG + 0x48) >> 1] & 0x3f;
   }
 
   if ((dispcnt & 0x4000)
-      && inWindowRange(x, u16[(REG + 0x42) >> 1])
-      && inWindowRange(y, u16[(REG + 0x46) >> 1])) {
+      && inWindowRange(x, u16[(REG + 0x42) >> 1], WIDTH)
+      && inWindowRange(y, u16[(REG + 0x46) >> 1], HEIGHT)) {
     return (u16[(REG + 0x48) >> 1] >> 8) & 0x3f;
   }
 
+  if ((dispcnt & 0x8000) && objWindow[y * WIDTH + x]) {
+    return (u16[(REG + 0x4a) >> 1] >> 8) & 0x3f;
+  }
+
   return u16[(REG + 0x4a) >> 1] & 0x3f;
+}
+
+// The region of the OBJ window for the frame: set where a sprite in OBJ mode 2
+// has an opaque texel. These sprites are never drawn (renderSprites skips them
+// outside this pass). In the region, windowMask gives the high byte of WINOUT,
+// below WIN0 and WIN1 and above the outside. Keep this in step with objWinFill
+// in rp2350/ppu.c.
+const objWindow = new Uint8Array(WIDTH * HEIGHT);
+
+function stampObjWindow(x, y) {
+  if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) return;
+  objWindow[y * WIDTH + x] = 1;
+}
+
+function buildObjWindow(dispcnt) {
+  objWindow.fill(0);
+  if (dispcnt & 0x8000) renderSprites(dispcnt, null, true);
 }
 
 function activeBlendColor(color, layer, pixel, effectsEnabled) {
@@ -416,14 +444,22 @@ function renderBgLayer(bg, type) {
   }
 }
 
+// Back to front, and the last write wins. On the GBA, the lower-numbered BG
+// wins a priority tie, so it must be drawn last. That is why the sort has a bg
+// tie-break. The sort is stable, so without the tie-break, ties would keep
+// ascending order and BG1 would be on top of BG0. Keep this in step with
+// renderFrame in rp2350/ppu.c.
 function renderBgs(dispcnt) {
   clearScreen();
-  for (const { bg, type } of bgLayersForMode(dispcnt).sort((a, b) => b.priority - a.priority)) {
+  for (const { bg, type } of bgLayersForMode(dispcnt).sort((a, b) => b.priority - a.priority || b.bg - a.bg)) {
     renderBgLayer(bg, type);
   }
 }
 
-function renderSprites(dispcnt, priority = null) {
+// With `objWindowPass` set, this walks only the OBJ-window sprites (mode 2),
+// and stamps them into objWindow. It does not draw them. The normal pass skips
+// them.
+function renderSprites(dispcnt, priority = null, objWindowPass = false) {
   if (!(dispcnt & 0x1000)) return;
   const mapping1d = dispcnt & 0x40;
   const sizes = [
@@ -442,6 +478,7 @@ function renderSprites(dispcnt, priority = null) {
     if (!affine && (a0 & 0x0200)) continue;
     const shape = (a0 >> 14) & 3;
     if (shape === 3) continue;
+    if ((((a0 >> 10) & 3) === 2) !== objWindowPass) continue;
     const [w, h] = sizes[shape][(a1 >> 14) & 3];
     const color256 = a0 & 0x2000;
     const spritePriority = (a2 >> 10) & 3;
@@ -475,7 +512,9 @@ function renderSprites(dispcnt, priority = null) {
           const py = ((pc * dx + pd * dy) >> 8) + texCy;
           if (px < 0 || py < 0 || px >= w || py >= h) continue;
           const color = objPixel(tileBase, px, py, w, color256, palette, mapping1d);
-          if (color) putPixel(ox + x, oy + y, color, 0x10);
+          if (!color) continue;
+          if (objWindowPass) stampObjWindow(ox + x, oy + y);
+          else putPixel(ox + x, oy + y, color, 0x10);
         }
       }
     } else {
@@ -484,7 +523,9 @@ function renderSprites(dispcnt, priority = null) {
           const px = a1 & 0x1000 ? w - 1 - x : x;
           const py = a1 & 0x2000 ? h - 1 - y : y;
           const color = objPixel(tileBase, px, py, w, color256, palette, mapping1d);
-          if (color) putPixel(ox + x, oy + y, color, 0x10);
+          if (!color) continue;
+          if (objWindowPass) stampObjWindow(ox + x, oy + y);
+          else putPixel(ox + x, oy + y, color, 0x10);
         }
       }
     }
@@ -493,7 +534,11 @@ function renderSprites(dispcnt, priority = null) {
 
 function renderTiled(dispcnt) {
   clearScreen();
-  const layers = bgLayersForMode(dispcnt);
+  // Highest BG number first at one priority, so the lower-numbered BG is
+  // painted last. On a tie, the GBA puts that BG in front. The bgLayersForMode
+  // function returns 0..3, so this reverses it. This is the same order as
+  // renderFrame in rp2350/ppu.c.
+  const layers = bgLayersForMode(dispcnt).reverse();
   for (let priority = 3; priority >= 0; priority--) {
     for (const { bg, type } of layers) {
       if ((u16[(REG + 8 + bg * 2) >> 1] & 3) === priority) renderBgLayer(bg, type);
@@ -505,6 +550,7 @@ function renderTiled(dispcnt) {
 function render() {
   const dispcnt = u16[REG >> 1];
   const mode = dispcnt & 7;
+  buildObjWindow(dispcnt);
   if (mode === 3) renderBitmapMode3();
   else if (mode === 4) renderBitmapMode4(dispcnt);
   else renderTiled(dispcnt);
@@ -575,6 +621,51 @@ function readS32(ptr) {
   return (u16[ptr >> 1] | (u16[(ptr + 2) >> 1] << 16)) | 0;
 }
 
+// Each site that the null pointer sweep reports, by its data block address.
+// The compiler makes one block for each dereference, so the address is the
+// identity of the site.
+const nullDerefSites = new Map();
+
+// The handler for -fsanitize=null. See the WASM_SANITIZE note in the Makefile.
+//
+// The compiler calls this before a dereference whose pointer is 0. Its first
+// argument points at a struct that starts with a source location: a pointer to
+// the file name, then the line, then the column. The second argument is the
+// pointer itself.
+//
+// The same check also reports a misaligned pointer and an object that is too
+// small, so the pointer test below keeps only the null ones.
+//
+// A site is logged once. Many of these run on every frame, and a line for each
+// would bury the report.
+function ubsanTypeMismatch(data, ptr) {
+  if (ptr !== 0) return;
+
+  let site = nullDerefSites.get(data);
+  if (site) {
+    site.hits++;
+    return;
+  }
+
+  site = {
+    file: readCString(readU32(data)),
+    line: readU32(data + 4),
+    column: readU32(data + 8),
+    hits: 1,
+  };
+  nullDerefSites.set(data, site);
+  console.warn(`ubsan: null deref at ${site.file}:${site.line}:${site.column}`);
+}
+
+// A summary for the end of a run. tools/wasm_replay.mjs keeps the console, so
+// calling this before the page closes puts the whole list in one place.
+function reportNullDerefs() {
+  const sites = [...nullDerefSites.values()].sort((a, b) => b.hits - a.hits);
+  console.warn(`ubsan: ${sites.length} null deref site(s)`);
+  for (const s of sites) console.warn(`ubsan:   ${s.file}:${s.line} x${s.hits}`);
+  return sites;
+}
+
 function writeS16(ptr, value) {
   u16[ptr >> 1] = value & 0xffff;
 }
@@ -585,7 +676,12 @@ function writeS32(ptr, value) {
 }
 
 function affineTerms(xScale, yScale, rotation) {
-  const angle = rotation * Math.PI * 2 / 256;
+  // The divisor is 65536, one full turn, not 256. The BIOS takes a u16, and
+  // uses the value alpha >> 8 as an index into a 256-entry table. Callers give
+  // multiples of 256, so with 256 each angle would be a whole number of turns.
+  // That gives an identity matrix, no rotation, and no visible error. See
+  // rp2350/bios.c.
+  const angle = rotation * Math.PI * 2 / 65536;
   const sin = Math.sin(angle) * 256;
   const cos = Math.cos(angle) * 256;
   return {
@@ -647,6 +743,7 @@ function importsFor(module) {
         case 'Div': return args[1] ? (args[0] / args[1]) | 0 : 0;
         case 'Sqrt': return Math.sqrt(args[0]) | 0;
         case 'strcmp': return readCString(args[0]).localeCompare(readCString(args[1]));
+        case '__ubsan_handle_type_mismatch_v1': return ubsanTypeMismatch(args[0], args[1]);
         default: return 0;
       }
     };
@@ -723,7 +820,7 @@ async function boot() {
   const module = await WebAssembly.compile(bytes);
   instance = await WebAssembly.instantiate(module, importsFor(module));
   memory = instance.exports.memory;
-  window.pokeemerald = { instance, memory, runFrames };
+  window.pokeemerald = { instance, memory, runFrames, nullDerefs: reportNullDerefs };
   if (automate) window.pokeemerald.automation = automationApi();
   refreshViews();
   loadFlashSave();

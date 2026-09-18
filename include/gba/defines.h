@@ -8,10 +8,11 @@
 #define FALSE 0
 
 #if PLATFORM_3DS
-// The 3DS port has no linker-placed EWRAM/IWRAM regions -- gGbaMem is a runtime
-// heap block (3ds/gba_mem.c) -- so these variables are ordinary .bss/.data.
-// Side benefit over RP2350: common_data keeps its static initialisers instead
-// of being discarded by a NOLOAD region (see the IdentifyFlash note in main.c).
+// The 3DS port has no EWRAM or IWRAM regions that the linker places. The
+// gGbaMem array (3ds/gba_mem.c) holds the GBA memory, so these variables are
+// usual .bss or .data. Also, different from RP2350, common_data keeps its
+// static initializers, because no NOLOAD region discards them (see the
+// IdentifyFlash note in main.c).
 #define IWRAM_DATA
 #define EWRAM_DATA
 #define COMMON_DATA
@@ -35,13 +36,15 @@
 // so the regions are remapped into reserved RP2350 SRAM (0x20000000+). The
 // custom linker script (rp2350/memmap_rp2350.ld) reserves matching regions.
 #if PLATFORM_3DS
-// 3DS: one contiguous heap block, same region order and spacing as RP2350 so
-// that IsTileMapOutsideWram()'s `ptr > IWRAM_END` test behaves identically.
-// gGbaMem is an ARRAY, not a pointer, and that is deliberate: an array's
-// address is a link-time constant, so `&REG_WIN0H` still works in the static
-// initialisers that src/field_screen_effect.c and src/pokenav_menu_handler_gfx.c
-// build. A `u8 *` would make those "initializer element is not a compile-time
-// constant".
+// On the 3DS, one contiguous block holds the regions, with the same order and
+// spacing as on RP2350. Thus the `ptr > IWRAM_END` test in
+// IsTileMapOutsideWram() gives the same result.
+//
+// The gGbaMem symbol is an array, not a pointer, on purpose. The address of an
+// array is a link-time constant. Thus `&REG_WIN0H` still works in the static
+// initializers in src/field_screen_effect.c and src/pokenav_menu_handler_gfx.c.
+// With a `u8 *`, those give the error "initializer element is not a
+// compile-time constant".
 #ifndef __ASSEMBLER__
 extern unsigned char gGbaMem[];   // u8 is not declared yet at this point
 #endif

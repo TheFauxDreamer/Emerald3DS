@@ -1041,6 +1041,14 @@ static const struct YesNoFuncTable sYesNoTable_KeepPlaying =
 static void CB2_Roulette(void)
 {
     RunTasks();
+#ifdef UBFIX
+    // UB NULL: Task_ExitRoulette frees sRoulette in this frame, then this
+    // callback goes on and reads it. The task resets the sprites first, and the
+    // next screen sets up its own, so this frame has nothing more to draw. A
+    // GBA reads the BIOS at address 0. On the 3DS, address 0 is not mapped.
+    if (sRoulette == NULL)
+        return;
+#endif
     AnimateSprites();
     BuildOamBuffer();
     if (sRoulette->flashUtil.enabled)
@@ -1049,6 +1057,8 @@ static void CB2_Roulette(void)
 
 static void VBlankCB_Roulette(void)
 {
+    VBLANK_REQUIRE(sRoulette);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

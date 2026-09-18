@@ -702,6 +702,47 @@ static bool8 MainState_Exit(void)
         SetMainCallback2(sNamingScreen->returnCallback);
         DestroyTask(FindTaskIdByFunc(Task_NamingScreen));
         FreeAllWindowBuffers();
+#if PLATFORM_3DS
+        // Remove what this screen created before the struct that they all point
+        // at is freed.
+        //
+        // Vanilla frees sNamingScreen here, but its sprites and helper tasks
+        // stay. Only Task_NamingScreen is destroyed. Thus these continue in the
+        // return callback until some later code calls ResetSpriteData() and
+        // ResetTasks():
+        // - the cursor, the underscore and the input arrow
+        // - the three page-swap sprites
+        // - Task_HandleInput and Task_UpdateButtonFlash
+        // - Task_HandlePageSwapAnim, during a page swap
+        //
+        // Some of them read through sNamingScreen, which is now NULL.
+        //
+        // On a GBA, this has no effect. There is no MMU, and address 0 is the
+        // BIOS. The junk from it goes only to sprite graphics that are cleared
+        // soon. On the ARM11, address 0 is not mapped, and the read is a data
+        // abort.
+        //
+        // For example: catch a Pokemon, leave the nickname blank, and confirm.
+        // AnimateSprites() runs the page-swap sprite that stays. Its state-0
+        // handler, PageSwapSprite_Init, reads sNamingScreen->currentPage. That
+        // field is at offset 0x1E22: after three 0x800 tilemap buffers, a
+        // 16-byte text buffer and a 0x600 tile buffer.
+        //
+        // A guard in each reader is the wrong fix. The code gets to the readers
+        // through the sPageSwapSpriteFuncs[] table and helpers such as
+        // GetTextEntryPosition(). A list of them by hand could easily miss one.
+        // When this code removes the sprites and tasks, none of them can run.
+        //
+        // This is safe for all five naming-screen flows, because this screen
+        // owns the sprite and task sets at this point. Its own init always runs
+        // ResetSpriteData(), FreeAllSpritePalettes() and ResetTasks()
+        // (CB2_LoadNamingScreen cases 3 and 4). Thus nothing here belongs to
+        // the caller, and each return callback must build its graphics again
+        // from nothing. The callback is set but has not run yet, so it has no
+        // tasks that this can remove.
+        ResetSpriteData();
+        ResetTasks();
+#endif
         FREE_AND_SET_NULL(sNamingScreen);
     }
     return FALSE;
@@ -2030,6 +2071,8 @@ static void SetVBlank(void)
 
 static void VBlankCB_NamingScreen(void)
 {
+    VBLANK_REQUIRE(sNamingScreen);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

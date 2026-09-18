@@ -18,6 +18,21 @@ COMPARE     ?= 0
 WASM_CC ?= $(shell { command -v /opt/homebrew/opt/llvm/bin/clang || command -v /usr/local/opt/llvm/bin/clang || command -v clang; })
 WASM_LD ?= $(shell { command -v wasm-ld || find "$$HOME/.rustup/toolchains" -path '*/gcc-ld/wasm-ld' -type f 2>/dev/null | head -n1; })
 
+# Flags for the null pointer sweep. The flags are empty for a normal build.
+#
+# A GBA has no MMU, and address 0 is the BIOS. Thus a read or a write through a
+# NULL pointer is harmless, and the game does it in many places. On the ARM11 of
+# the 3DS, nothing is mapped below the code segment, so the same access stops
+# the console. To find those places, build the wasm with:
+#
+#   make wasm WASM_SANITIZE="-fsanitize=null -fsanitize-recover=null"
+#
+# The flag puts one test before each dereference. The recover flag makes the
+# test call __ubsan_handle_type_mismatch_v1 and then do the access. In wasm,
+# address 0 is inside the linear memory and is readable, so the run continues.
+# Thus one run reports every site it touches. web/app.js supplies the handler.
+WASM_SANITIZE ?=
+
 ifeq (modern,$(MAKECMDGOALS))
   MODERN := 1
 endif
@@ -261,7 +276,7 @@ $(WASM): Makefile $(WASM_C_OBJS) $(WASM_DATA_OBJS)
 
 $(WASM_OBJ_DIR)/%.o: $(C_SUBDIR)/%.c
 	@mkdir -p $(dir $@)
-	$(WASM_CC) --target=wasm32-unknown-unknown -DMODERN=1 -DWASM=1 -I include/wasm -I include -iquote include -E $< | $(PREPROC) -i -g $(ASSETS_DIR_NAME) $< charmap.txt | $(WASM_CC) --target=wasm32-unknown-unknown -x c -O2 -Wno-incompatible-library-redeclaration -Wno-unknown-attributes -Wno-ignored-attributes -Wno-parentheses -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-builtin-requires-header -Wno-gnu-alignof-expression -Wno-unknown-escape-sequence -Wno-excess-initializers -c - -o $@
+	$(WASM_CC) --target=wasm32-unknown-unknown -DMODERN=1 -DWASM=1 -I include/wasm -I include -iquote include -E $< | $(PREPROC) -i -g $(ASSETS_DIR_NAME) $< charmap.txt | $(WASM_CC) --target=wasm32-unknown-unknown -x c $(WASM_SANITIZE) -O2 -Wno-incompatible-library-redeclaration -Wno-unknown-attributes -Wno-ignored-attributes -Wno-parentheses -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-builtin-requires-header -Wno-gnu-alignof-expression -Wno-unknown-escape-sequence -Wno-excess-initializers -c - -o $@
 
 $(WASM_OBJ_DIR)/%.o: $(DATA_ASM_SUBDIR)/%.s tools/wasm_asm_data.py | generated
 	@mkdir -p $(dir $@) $(WASM_BUILD_DIR)

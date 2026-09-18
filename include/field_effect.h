@@ -13,6 +13,9 @@ u32 FieldEffectStart(u8 id);
 bool8 FieldEffectActiveListContains(u8 id);
 void FieldEffectActiveListClear(void);
 void ReturnToFieldFromFlyMapSelect(void);
+#if PLATFORM_3DS
+void FieldCallback_Fly(void);
+#endif
 u8 AddNewGameBirchObject(s16 x, s16 y, u8 subpriority);
 void FieldEffectStop(struct Sprite *sprite, u8 id);
 u8 CreateTrainerSprite(u8 trainerSpriteID, s16 x, s16 y, u8 subpriority, u8 *buffer);
@@ -24,6 +27,9 @@ void FieldEffectScript_LoadTiles(u8 **script);
 void FieldEffectScript_LoadFadedPalette(u8 **script);
 void FieldEffectScript_LoadPalette(u8 **script);
 void FieldEffectScript_CallNative(u8 **script, u32 *val);
+#if PLATFORM_3DS
+void FieldEffectFreeGraphicsResources(struct Sprite *sprite);
+#endif
 void FieldEffectFreeTilesIfUnused(u16 tileStart);
 void FieldEffectFreePaletteIfUnused(u8 paletteNum);
 bool8 FieldEffectCmd_loadtiles(u8 **script, u32 *val);

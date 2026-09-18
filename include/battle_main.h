@@ -61,6 +61,9 @@ void SpriteCB_FaintSlideAnim(struct Sprite *sprite);
 void DoBounceEffect(u8 battler, u8 which, s8 delta, s8 amplitude);
 void EndBounceEffect(u8 battler, u8 which);
 void SpriteCB_PlayerMonFromBall(struct Sprite *sprite);
+#if PLATFORM_3DS
+void SpriteCB_PlayerMonSlideIn(struct Sprite *sprite);
+#endif
 void SpriteCB_TrainerThrowObject(struct Sprite *sprite);
 void AnimSetCenterToCornerVecX(struct Sprite *sprite);
 void BeginBattleIntroDummy(void);

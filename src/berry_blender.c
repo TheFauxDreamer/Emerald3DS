@@ -944,6 +944,8 @@ static void UpdateHitPitch(void)
 
 static void VBlankCB_BerryBlender(void)
 {
+    VBLANK_REQUIRE(sBerryBlender);
+
     SetBgPos();
     SetBgAffine(2, sBerryBlender->bgAffineSrc.texX, sBerryBlender->bgAffineSrc.texY,
                 sBerryBlender->bgAffineSrc.scrX, sBerryBlender->bgAffineSrc.scrY,
@@ -2930,6 +2932,17 @@ static void CB2_CheckPlayAgainLink(void)
         break;
     }
 
+#ifdef UBFIX
+    // UB NULL: The switch above frees sBerryBlender on the way out of the game
+    // and hands over to the next screen, but this frame carries on. Everything
+    // below reads the pointer: the two calls directly, and AnimateSprites()
+    // through SpriteCB_PlayerArrow, which reads bg_X with no test of its own.
+    // The next screen's setup resets the sprites, so this frame has nothing
+    // more to draw. A GBA reads the BIOS at address 0. On the 3DS, address 0
+    // is not mapped.
+    if (sBerryBlender == NULL)
+        return;
+#endif
     ProcessLinkPlayerCmds();
     Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();
@@ -2985,6 +2998,17 @@ static void CB2_CheckPlayAgainLocal(void)
         break;
     }
 
+#ifdef UBFIX
+    // UB NULL: The switch above frees sBerryBlender on the way out of the game
+    // and hands over to the next screen, but this frame carries on. Everything
+    // below reads the pointer: the two calls directly, and AnimateSprites()
+    // through SpriteCB_PlayerArrow, which reads bg_X with no test of its own.
+    // The next screen's setup resets the sprites, so this frame has nothing
+    // more to draw. A GBA reads the BIOS at address 0. On the 3DS, address 0
+    // is not mapped.
+    if (sBerryBlender == NULL)
+        return;
+#endif
     ProcessLinkPlayerCmds();
     Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();

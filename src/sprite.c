@@ -54,7 +54,9 @@ static void AddSpritesToOamBuffer(void);
 static u8 CreateSpriteAt(u8 index, const struct SpriteTemplate *template, s16 x, s16 y, u8 subpriority);
 static void ResetOamMatrices(void);
 static void ResetSprite(struct Sprite *sprite);
+#if !PLATFORM_3DS
 static s16 AllocSpriteTiles(u16 tileCount);
+#endif
 static void RequestSpriteFrameImageCopy(u16 index, u16 tileNum, const struct SpriteFrameImage *images);
 static void ResetAllSprites(void);
 static void BeginAnim(struct Sprite *sprite);
@@ -1750,7 +1752,11 @@ bool8 AddSubspritesToOamBuffer(struct Sprite *sprite, struct OamData *destOam, u
             destOam[i].y = baseY + y;
             destOam[i].tileNum = tileNum + subspriteTable->subsprites[i].tileOffset;
 
+#if PLATFORM_3DS
+            if (sprite->subspriteMode < SUBSPRITES_IGNORE_PRIORITY)
+#else
             if (sprite->subspriteMode != SUBSPRITES_IGNORE_PRIORITY)
+#endif
                 destOam[i].priority = subspriteTable->subsprites[i].priority;
         }
     }

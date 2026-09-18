@@ -1978,6 +1978,8 @@ static void SpriteCB_ChooseBoxArrow(struct Sprite *sprite)
 
 static void VBlankCB_PokeStorage(void)
 {
+    VBLANK_REQUIRE(sStorage);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     UnkUtil_Run();
@@ -1988,6 +1990,12 @@ static void VBlankCB_PokeStorage(void)
 static void CB2_PokeStorage(void)
 {
     RunTasks();
+#if WASM || RP2350
+    // Task_ChangeScreen frees sStorage in this frame. The next screen's setup
+    // callback resets the sprites, so this frame has nothing more to draw.
+    if (sStorage == NULL)
+        return;
+#endif
     DoScheduledBgTilemapCopiesToVram();
     ScrollBackground();
     UpdateCloseBoxButtonFlash();
@@ -4469,6 +4477,12 @@ static void InitBoxMonSprites(u8 boxId)
     {
         for (boxPosition = 0; boxPosition < IN_BOX_COUNT; boxPosition++)
         {
+#ifdef UBFIX
+            // UB: An empty slot holds no item and has no icon. A GBA ignores
+            // the write. On the 3DS, address 0 is not mapped.
+            if (sStorage->boxMonsSprites[boxPosition] == NULL)
+                continue;
+#endif
             if (GetBoxMonDataAt(boxId, boxPosition, MON_DATA_HELD_ITEM) == ITEM_NONE)
                 sStorage->boxMonsSprites[boxPosition]->oam.objMode = ST_OAM_OBJ_BLEND;
         }
@@ -5078,7 +5092,12 @@ static bool8 ResetReleaseMonSpritePtr(void)
 
 static void SetMovingMonPriority(u8 priority)
 {
-    sStorage->movingMonSprite->oam.priority = priority;
+#ifdef UBFIX
+    // UB: The pointer is NULL when no Pokémon is held. A GBA ignores the
+    // write. On the 3DS, address 0 is not mapped.
+    if (sStorage->movingMonSprite != NULL)
+#endif
+        sStorage->movingMonSprite->oam.priority = priority;
 }
 
 static void SpriteCB_HeldMon(struct Sprite *sprite)

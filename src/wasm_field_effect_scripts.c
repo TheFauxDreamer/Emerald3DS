@@ -74,6 +74,11 @@ extern u32 FldEff_AshLaunch(void);
 extern u32 FldEff_AshPuff(void);
 extern u32 FldEff_BerryTreeGrowthSparkle(void);
 extern u32 FldEff_BikeTireTracks(void);
+#if PLATFORM_3DS
+extern u32 FldEff_TracksBug(void);
+extern u32 FldEff_TracksSlither(void);
+extern u32 FldEff_TracksSpot(void);
+#endif
 extern u32 FldEff_Bubbles(void);
 extern u32 FldEff_CutGrass(void);
 extern u32 FldEff_DeepSandFootprints(void);
@@ -177,6 +182,11 @@ SCRIPT_CALL_NATIVE(FlyIn, FldEff_FlyIn);
 SCRIPT_CALL_NATIVE(QuestionMarkIcon, FldEff_QuestionMarkIcon);
 SCRIPT_LOAD_FADED_PAL_CALL_NATIVE(FeetInFlowingWater, &gSpritePalette_GeneralFieldEffect0, FldEff_FeetInFlowingWater);
 SCRIPT_LOAD_FADED_PAL_CALL_NATIVE(BikeTireTracks, &gSpritePalette_GeneralFieldEffect0, FldEff_BikeTireTracks);
+#if PLATFORM_3DS
+SCRIPT_LOAD_FADED_PAL_CALL_NATIVE(TracksSlither, &gSpritePalette_GeneralFieldEffect0, FldEff_TracksSlither);
+SCRIPT_LOAD_FADED_PAL_CALL_NATIVE(TracksBug, &gSpritePalette_GeneralFieldEffect0, FldEff_TracksBug);
+SCRIPT_LOAD_FADED_PAL_CALL_NATIVE(TracksSpot, &gSpritePalette_GeneralFieldEffect0, FldEff_TracksSpot);
+#endif
 SCRIPT_CALL_NATIVE(SandDisguisePlaceholder, ShowSandDisguiseFieldEffect);
 SCRIPT_CALL_NATIVE(UseRockSmash, FldEff_UseRockSmash);
 SCRIPT_CALL_NATIVE(UseDig, FldEff_UseDig);
@@ -286,6 +296,11 @@ u8 *gFieldEffectScriptPointers[] = {
     [FLDEFF_RAYQUAZA_SPOTLIGHT] = SCRIPT_PTR(RayquazaSpotlight),
     [FLDEFF_DESTROY_DEOXYS_ROCK] = SCRIPT_PTR(DestroyDeoxysRock),
     [FLDEFF_MOVE_DEOXYS_ROCK] = SCRIPT_PTR(MoveDeoxysRock),
+#if PLATFORM_3DS
+    [FLDEFF_TRACKS_SLITHER] = SCRIPT_PTR(TracksSlither),
+    [FLDEFF_TRACKS_SPOT] = SCRIPT_PTR(TracksSpot),
+    [FLDEFF_TRACKS_BUG] = SCRIPT_PTR(TracksBug),
+#endif
 };
 
 #endif

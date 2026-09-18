@@ -241,7 +241,7 @@ produce a ~28 ms hiccup every second.
 ## Phase 4 — Audio
 
 The GBA's m4a sound engine lives in hand-written ARM assembly (`m4a_1.s`) that
-cannot be assembled for Cortex-M33. It is reimplemented in C in `rp2350/m4a_1.c`
+cannot be assembled for Cortex-M33. It is reimplemented in C in `rp2350/m4a_engine.c`
 — mixer, sequence interpreter, and note handling — feeding a PCM5102A over
 PIO-driven I²S at the game's native 13440 Hz, so no resampling is needed.
 
@@ -278,6 +278,47 @@ Collected gotchas, most of which cost hours.
   is how an `ObjAffineSet` stride bug survived — byte boundaries treated as
   halfwords, producing garbage matrices and stack corruption for every animated
   affine sprite.
+- **Diffing against `web/app.js` only finds ports that were *unfaithful*.** A
+  second `ObjAffineSet` bug lived in both for far longer, because `bios.c` copied
+  it exactly: the rotation angle was divided by 256 when a full turn is 0x10000
+  (GBATEK's "8bit = 360 degrees" means the BIOS indexes a 256-entry table with
+  `alpha >> 8`, not that the parameter is 0..255). Callers only ever pass
+  multiples of 256 — `sprite.c` does `(… + (frameCmd->rotation << 8)) & ~0xFF`,
+  `pokedex_cry_screen.c` writes `needle->rotation * 256` — so every angle came
+  out an exact whole number of turns: **sin 0, cos 1, a clean identity matrix
+  every frame.** No garbage, no crash, nothing to notice; affine *scaling* is a
+  separate term and kept working, so the Game Freak intro letters looked correct.
+  The visible cost was that no affine sprite ever rotated — the Poké Ball slid
+  sideways during a catch instead of rolling, and the cry meter needle never
+  moved. When the reference and the port agree and the result is still wrong,
+  check the reference against the hardware doc, not against the port.
+- **Two more came out of `web/app.js` the same way.** Window bounds wrapped
+  (`>= start || < end`) where GBATEK clamps an inverted range to the screen
+  edge. And within one BG priority both drew BGs in *ascending* order with last
+  write winning, which puts BG1 in front of BG0 — the GBA gives a tie to the
+  lower-numbered BG. Battles put BG0 (textbox) and BG1 (entry grass) both at
+  priority 0, so the intro's grass slid across the textbox instead of behind
+  it. Only four `BgTemplate` sets in the game share a priority: battle, contest,
+  contest results and the slot machine.
+- **And a fourth: the OBJ window was never implemented.** Neither renderer read
+  OAM attr0 bits 10-11, so a sprite in OBJ mode 2 was drawn like any other and
+  the window it defines had no region at all. On hardware that sprite is never
+  drawn; its opaque texels only mark where WINOUT's high byte applies. The
+  battle's metal shine and every stat-change effect stand on it:
+  `CreateInvisibleSpriteCopy` makes a priority-0, mode-2 copy of the battler so
+  the effect on BG1 shows only inside the mon. Drawn as a sprite, that copy put
+  the whole mon in front of the textbox (a double battle's right-hand battler
+  sits low enough to show it plainly) and the effect never appeared. Both
+  renderers now build the region (`objWinFill` in `ppu.c`, `buildObjWindow` in
+  `app.js`) and rank it WIN0 > WIN1 > OBJ > outside. The title screen's logo
+  shine, the Pokédex's rotating ball and the catch and contest effects use the
+  same window.
+  That makes four reference-inherited defects, and none of them could ever show
+  up in `ppu_validate.sh`, because it measures agreement with the reference.
+  **Byte-exact is not correct.** The first fix for the grass went to the window
+  clamp, because the intro's per-scanline writes look like window values; they
+  actually target `REG_BG3HOFS` (`sIntroScanlineParams16Bit`). Check which
+  register a scanline effect drives before reasoning about its values.
 - **Some intro frames legitimately retain the previous frame's pixels** via
   `winout` with no backdrop bit. A single-snapshot diff renders those black and
   reports a false failure. Use old-vs-new A/B there.

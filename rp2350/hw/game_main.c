@@ -23,7 +23,7 @@
 #include "audio.h"
 #include "i2s_audio.h"
 
-// m4a engine debug snapshot (rp2350/m4a_1.c, in the game archive).
+// m4a engine debug snapshot (rp2350/m4a_mix.c, in the game archive).
 void Rp2350AudioDebug(uint32_t *ident, int32_t *spvb, uint32_t *bgmStatus, uint32_t *zeroRet);
 
 extern void AgbMain(void);

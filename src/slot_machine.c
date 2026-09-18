@@ -1105,6 +1105,8 @@ static void CB2_SlotMachine(void)
 
 static void SlotMachine_VBlankCB(void)
 {
+    VBLANK_REQUIRE(sSlotMachine);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

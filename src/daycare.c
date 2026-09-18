@@ -23,6 +23,12 @@
 #include "constants/moves.h"
 #include "constants/region_map_sections.h"
 
+#if PLATFORM_3DS
+// The level cap from the badges, which the EXTRA tab of the bottom screen turns
+// on and off.
+#include "../3ds/tweaks.h"
+#endif
+
 extern const struct Evolution gEvolutionTable[][EVOS_PER_MON];
 
 static void ClearDaycareMonMail(struct DaycareMail *mail);
@@ -253,6 +259,12 @@ static u16 TakeSelectedPokemonFromDaycare(struct DaycareMon *daycareMon)
     if (GetMonData(&pokemon, MON_DATA_LEVEL) != MAX_LEVEL)
     {
         experience = GetMonData(&pokemon, MON_DATA_EXP) + daycareMon->steps;
+#if PLATFORM_3DS
+        // Here the level cap applies fully, for SOFT and for HARD. Day-care EXP
+        // comes in small steps, and a smaller step would make no real
+        // difference.
+        experience = Ctr3dsClampCappedExp(species, experience);
+#endif
         SetMonData(&pokemon, MON_DATA_EXP, &experience);
         ApplyDaycareExperience(&pokemon);
     }
@@ -288,6 +300,11 @@ static u8 GetLevelAfterDaycareSteps(struct BoxPokemon *mon, u32 steps)
     struct BoxPokemon tempMon = *mon;
 
     u32 experience = GetBoxMonData(mon, MON_DATA_EXP) + steps;
+#if PLATFORM_3DS
+    // The preview must clamp also. If not, the day-care man shows levels that
+    // the write path above does not give.
+    experience = Ctr3dsClampCappedExp(GetBoxMonData(mon, MON_DATA_SPECIES), experience);
+#endif
     SetBoxMonData(&tempMon, MON_DATA_EXP,  &experience);
     return GetLevelFromBoxMonExp(&tempMon);
 }
@@ -1076,7 +1093,13 @@ static u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
 
 static u8 GetDaycareCompatibilityScoreFromSave(void)
 {
+#if PLATFORM_3DS
+    // The Day Care yard script on Route 117 reads the score from VAR_RESULT.
+    gSpecialVar_Result = GetDaycareCompatibilityScore(&gSaveBlock1Ptr->daycare);
+    return gSpecialVar_Result;
+#else
     return GetDaycareCompatibilityScore(&gSaveBlock1Ptr->daycare);
+#endif
 }
 
 void SetDaycareCompatibilityString(void)

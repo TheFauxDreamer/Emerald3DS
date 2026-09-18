@@ -25,9 +25,9 @@
 #define tWindowFrameType data[6]
 
 #if PLATFORM_3DS
-// Mirrors the frame the player is scrolling through, so the bottom screen can
-// preview it alongside the top one. -1 means the options menu is not open and
-// gSaveBlock2Ptr is authoritative again.
+// A copy of the frame that the player scrolls through, so the bottom screen can
+// show it next to the top screen. The value -1 means that the options menu is
+// not open, and gSaveBlock2Ptr has the correct value again.
 static s16 sCtr3dsLiveFrameType = -1;
 
 s16 Ctr3dsLiveWindowFrameType(void)
@@ -378,8 +378,8 @@ static void Task_OptionMenuSave(u8 taskId)
     gSaveBlock2Ptr->optionsWindowFrameType = gTasks[taskId].tWindowFrameType;
 
 #if PLATFORM_3DS
-    // Saved now, so the save block is authoritative again. Both ways out of the
-    // menu (A on CANCEL, and B) come through here.
+    // Saved now, so the save block has the correct value again. Both ways out
+    // of the menu (A on CANCEL, and B) come through here.
     sCtr3dsLiveFrameType = -1;
 #endif
 

@@ -2506,6 +2506,14 @@ void SetLinkContestPlayerGfx(void)
     }
 }
 
+#if PLATFORM_3DS
+// copied from event_object_movement
+#define OBJ_EVENT_PAL_TAG_BRENDAN                 0x1100
+#define OBJ_EVENT_PAL_TAG_MAY                     0x1110
+#define OBJ_EVENT_PAL_TAG_RS_BRENDAN              0x1122
+#define OBJ_EVENT_PAL_TAG_RS_MAY                  0x1123
+
+#endif
 void LoadLinkContestPlayerPalettes(void)
 {
     int i;
@@ -2519,28 +2527,51 @@ void LoadLinkContestPlayerPalettes(void)
         LOCALID_CONTESTANT_4,
     };
 
+#if PLATFORM_3DS
+    // gReservedSpritePaletteCount = 12;
+    // TODO: Does dynamically allocating link player palettes break link contests?
+#else
     gReservedSpritePaletteCount = 12;
+#endif
     if (gLinkContestFlags & LINK_CONTEST_FLAG_IS_LINK)
     {
         for (i = 0; i < gNumLinkContestPlayers; i++)
         {
             objectEventId = GetObjectEventIdByLocalIdAndMap(sContestantLocalIds[i], gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup);
             sprite = &gSprites[gObjectEvents[objectEventId].spriteId];
+#if !PLATFORM_3DS
             sprite->oam.paletteNum = 6 + i;
+#endif
             version = (u8)gLinkPlayers[i].version;
             if (version == VERSION_RUBY || version == VERSION_SAPPHIRE)
             {
                 if (gLinkPlayers[i].gender == MALE)
+#if PLATFORM_3DS
+                    sprite->oam.paletteNum = LoadObjectEventPalette(OBJ_EVENT_PAL_TAG_RS_BRENDAN);
+#else
                     LoadPalette(gObjectEventPal_RubySapphireBrendan, OBJ_PLTT_ID(6 + i), PLTT_SIZE_4BPP);
+#endif
                 else
+#if PLATFORM_3DS
+                    sprite->oam.paletteNum = LoadObjectEventPalette(OBJ_EVENT_PAL_TAG_RS_MAY);
+#else
                     LoadPalette(gObjectEventPal_RubySapphireMay, OBJ_PLTT_ID(6 + i), PLTT_SIZE_4BPP);
+#endif
             }
             else
             {
                 if (gLinkPlayers[i].gender == MALE)
+#if PLATFORM_3DS
+                    sprite->oam.paletteNum = LoadObjectEventPalette(OBJ_EVENT_PAL_TAG_BRENDAN);
+#else
                     LoadPalette(gObjectEventPal_Brendan, OBJ_PLTT_ID(6 + i), PLTT_SIZE_4BPP);
+#endif
                 else
+#if PLATFORM_3DS
+                    sprite->oam.paletteNum = LoadObjectEventPalette(OBJ_EVENT_PAL_TAG_MAY);
+#else
                     LoadPalette(gObjectEventPal_May, OBJ_PLTT_ID(6 + i), PLTT_SIZE_4BPP);
+#endif
             }
         }
     }

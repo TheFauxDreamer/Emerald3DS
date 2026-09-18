@@ -965,12 +965,20 @@ static bool8 PlayerCheckIfAnimFinishedOrInactive(void)
 
 static void PlayerSetCopyableMovement(u8 movement)
 {
+#if PLATFORM_3DS
+    gObjectEvents[gPlayerAvatar.objectEventId].extra.playerCopyableMovement = movement;
+#else
     gObjectEvents[gPlayerAvatar.objectEventId].playerCopyableMovement = movement;
+#endif
 }
 
 u8 PlayerGetCopyableMovement(void)
 {
+#if PLATFORM_3DS
+    return gObjectEvents[gPlayerAvatar.objectEventId].extra.playerCopyableMovement;
+#else
     return gObjectEvents[gPlayerAvatar.objectEventId].playerCopyableMovement;
+#endif
 }
 
 static void PlayerForceSetHeldMovement(u8 movementActionId)

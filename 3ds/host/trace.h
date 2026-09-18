@@ -1,63 +1,38 @@
 // Boot tracing for a port that has no console.
 //
-// Both screens belong to the game (top) and the touch UI (bottom), so there is
-// nowhere to consoleInit() to. svcOutputDebugString goes to the emulator's log
-// instead (Azahar/Citra print it at Debug level) and is a no-op on hardware.
-// SystemCallAccess in 3ds/emerald3ds.rsf already grants OutputDebugString (61).
+// The game uses the top screen and the touch UI uses the bottom screen, so
+// there is no console. Everything here goes through CtrLog() (3ds/host/log.c).
+// It writes to svcOutputDebugString (the emulator's log; a console discards
+// it). In a debug build, it also writes to sdmc:/3ds/emerald3ds/log.txt, which
+// a real 3DS keeps. SystemCallAccess in 3ds/emerald3ds.rsf grants
+// OutputDebugString (61).
 //
-// Set CTR_BOOT_DIAG=0 in 3ds/Makefile to compile all of this away.
+// Two separate switches:
+// - CTR_BOOT_DIAG (3ds/Makefile) removes the per-step tracing. CtrLog stays, so
+//   the real failures still report.
+// - CTR_DEBUG_MENU (3ds/bridge.h) decides if anything reaches the SD card. At
+//   0, there is no log file, because a shared build must not write to the
+//   player's card.
 
 #ifndef CTR_TRACE_H
 #define CTR_TRACE_H
+
+#include <3ds.h>
+
+// Defined in 3ds/host/log.c, not inline, because that file owns the log file
+// handle and its one-attempt-per-boot state.
+void CtrLog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 #ifndef CTR_BOOT_DIAG
 #define CTR_BOOT_DIAG 1
 #endif
 
 #if CTR_BOOT_DIAG
-
-#include <3ds.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-
-static inline void CtrTrace(const char *fmt, ...)
-{
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    if (n < 0)
-        return;
-    if (n > (int)sizeof(buf) - 1)
-        n = (int)sizeof(buf) - 1;
-    svcOutputDebugString(buf, n);
-}
-
+// The same destination as CtrLog, the SD file too. A bring-up trace must
+// survive a crash or a power-off, so that you can read it later.
+#define CtrTrace(...) CtrLog(__VA_ARGS__)
 #else
 #define CtrTrace(...) ((void)0)
 #endif
-
-// Always compiled, unlike CtrTrace. For the handful of conditions a user needs
-// to know about even in a release build -- printf() is not an option here, so
-// without this they fail silently and look like bugs in the game.
-#include <3ds.h>
-#include <stdarg.h>
-#include <stdio.h>
-
-static inline void CtrLog(const char *fmt, ...)
-{
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    if (n < 0)
-        return;
-    if (n > (int)sizeof(buf) - 1)
-        n = (int)sizeof(buf) - 1;
-    svcOutputDebugString(buf, n);
-}
 
 #endif // CTR_TRACE_H

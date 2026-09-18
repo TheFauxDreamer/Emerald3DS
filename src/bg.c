@@ -1239,11 +1239,12 @@ bool32 IsInvalidBg32(u8 bg)
 bool32 IsTileMapOutsideWram(u8 bg)
 {
 #if PLATFORM_3DS
-    // The original test leans on the GBA address map: everything above IWRAM's
-    // end is VRAM or ROM, everything below is work RAM. On the 3DS the regions
-    // are a .bss array, so that ordering says nothing about where a pointer
-    // actually lives -- the game's own heap could land either side of it.
-    // Ask the question the caller actually means instead.
+    // The original test uses the GBA address map. On a GBA, all memory above
+    // the end of IWRAM is VRAM or ROM, and all memory below it is work RAM. On
+    // the 3DS, the regions are a .bss array, so that order tells nothing about
+    // where a pointer is. The game's own heap could be on either side of it.
+    // Thus this asks the question that the caller means: is the tilemap in
+    // VRAM?
     uintptr_t tilemap = (uintptr_t)sGpuBgConfigs2[bg].tilemap;
 
     if (tilemap == 0)

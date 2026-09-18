@@ -55,6 +55,9 @@ AncientTomb_EventScript_CaveEntranceSide::
 	end
 
 AncientTomb_EventScript_Registeel::
+#if PLATFORM_3DS
+	bufferspeciesname 0, SPECIES_REGISTEEL
+#endif
 	lock
 	faceplayer
 	waitse

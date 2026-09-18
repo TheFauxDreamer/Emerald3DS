@@ -5,6 +5,9 @@ FortreeCity_Gym_MapScripts::
 
 FortreeCity_Gym_OnTransition:
 	special RotatingGate_InitPuzzle
+#if PLATFORM_3DS
+	setflag FLAG_TEMP_HIDE_FOLLOWER @ Hide follower bc of rotating gates
+#endif
 	end
 
 FortreeCity_Gym_OnWarp:

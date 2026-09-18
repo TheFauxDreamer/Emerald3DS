@@ -817,6 +817,42 @@ static void Task_UpdatePage(u8 taskId)
         return;
     case 10:
         gTasks[gTasks[taskId].tMainTaskId].tEndCredits = TRUE;
+#if PLATFORM_3DS
+        // Destroy Task_ShowMons before the struct that it reads is freed.
+        //
+        // This task destroys only itself, then frees sCreditsData.
+        // Task_ShowMons is a separate task that still runs. Its first statement
+        // is:
+        //
+        //     if (sCreditsData->nextImgPos == POS_LEFT && ...)
+        //
+        // Thus it reads through the freed pointer the next time RunTasks() gets
+        // to it. Its own exit test (gTasks[main].func != Task_CreditsMain) is
+        // on the line after that read, so it does not prevent it. The main task
+        // removes its child tasks, but only when it runs next and sees
+        // tEndCredits. That is one frame too late.
+        //
+        // On a GBA, the stale read has no effect. There is no MMU, and address
+        // 0 is the BIOS. The junk goes to a Pokemon sprite on a screen that
+        // fades out. On the ARM11, address 0 is not mapped, and the read is a
+        // data abort.
+        //
+        // This does not use ResetCreditsTasks(), on purpose. That call also
+        // destroys tTaskId_BikeScene and sets the id to zero. Task_CreditsMain
+        // needs that task on the next frame, to set its state to 30 for the
+        // ending. Only Task_ShowMons reads sCreditsData. The TheEnd chain, the
+        // bike scene and the scenery palette task do not. Thus only
+        // Task_ShowMons must go.
+        {
+            u8 mainTaskId = gTasks[taskId].tMainTaskId;
+
+            if (gTasks[mainTaskId].tTaskId_ShowMons != 0)
+            {
+                DestroyTask(gTasks[mainTaskId].tTaskId_ShowMons);
+                gTasks[mainTaskId].tTaskId_ShowMons = 0;
+            }
+        }
+#endif
         DestroyTask(taskId);
         FreeCreditsBgsAndWindows();
         FREE_AND_SET_NULL(sCreditsData);

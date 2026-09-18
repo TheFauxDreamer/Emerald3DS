@@ -688,6 +688,9 @@ static u32 FreeFrontierPassGfx(void)
 
 static void VBlankCB_FrontierPass(void)
 {
+    VBLANK_REQUIRE(sPassGfx);
+    VBLANK_REQUIRE(sPassData);
+
     if (sPassGfx->zooming)
     {
         SetBgAffine(2,

@@ -38,6 +38,9 @@
 #include "constants/metatile_behaviors.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#if PLATFORM_3DS
+#include "constants/event_objects.h"
+#endif
 
 #define TAG_SCROLL_ARROW   2100
 #define TAG_ITEM_ICON_BASE 2110
@@ -866,7 +869,15 @@ static void BuyMenuCollectObjectEventData(void)
         {
             u8 objEventId = GetObjectEventIdByXY(facingX - 4 + x, facingY - 2 + y);
 
+#if PLATFORM_3DS
+            // skip if invalid or an overworld pokemon that is not following the player
+            if (objEventId != OBJECT_EVENTS_COUNT
+            && !(gObjectEvents[objEventId].active 
+                && gObjectEvents[objEventId].graphicsId == OBJ_EVENT_GFX_OW_MON
+                && gObjectEvents[objEventId].localId != OBJ_EVENT_ID_FOLLOWER))
+#else
             if (objEventId != OBJECT_EVENTS_COUNT)
+#endif
             {
                 sShopData->viewportObjects[numObjects][OBJ_EVENT_ID] = objEventId;
                 sShopData->viewportObjects[numObjects][X_COORD] = x;
@@ -900,7 +911,16 @@ static void BuyMenuDrawObjectEvents(void)
     u8 i;
     u8 spriteId;
     const struct ObjectEventGraphicsInfo *graphicsInfo;
+#if PLATFORM_3DS
+    u8 weatherTemp = gWeatherPtr->palProcessingState;
+#endif
 
+#if PLATFORM_3DS
+    // This function runs during fadeout, so the weather palette processing state must be temporarily changed,
+    // so that time-blending will work properly
+    if (weatherTemp == WEATHER_PAL_STATE_SCREEN_FADING_OUT)
+        gWeatherPtr->palProcessingState = WEATHER_PAL_STATE_IDLE;
+#endif
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         if (sShopData->viewportObjects[i][OBJ_EVENT_ID] == OBJECT_EVENTS_COUNT)
@@ -923,6 +943,11 @@ static void BuyMenuDrawObjectEvents(void)
 
         StartSpriteAnim(&gSprites[spriteId], sShopData->viewportObjects[i][ANIM_NUM]);
     }
+#if PLATFORM_3DS
+
+    gWeatherPtr->palProcessingState = weatherTemp; // restore weather state
+    CpuFastCopy(gPlttBufferFaded + 16*16, gPlttBufferUnfaded + 16*16, PLTT_BUFFER_SIZE);
+#endif
 }
 
 static bool8 BuyMenuCheckIfObjectEventOverlapsMenuBg(s16 *object)

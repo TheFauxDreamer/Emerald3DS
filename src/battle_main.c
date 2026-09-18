@@ -533,6 +533,12 @@ const struct TrainerMoney gTrainerMoneyTable[] =
 
 #include "data/text/abilities.h"
 
+#if PLATFORM_3DS
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
+#include "../3ds/tweaks.h"
+#endif
+
 static void (*const sTurnActionsFuncsTable[])(void) =
 {
     [B_ACTION_USE_MOVE]               = HandleAction_UseMove,
@@ -2011,7 +2017,18 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The four TRAINER_MON_* party types are different structs, so
+                // each case has the same change. The change is on the call, not
+                // on the nameHash loop above. The hash sets personalityValue,
+                // and it stays on the original name. Thus a trainer's Pokemon
+                // keeps its nature and gender with the randomizer on or off.
+                // CreateMon gets a fixed personality, so no gender loop can
+                // fail on a genderless species.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
                 break;
             }
             case F_TRAINER_PARTY_CUSTOM_MOVESET:
@@ -2023,7 +2040,12 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The same change as in the first case above.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 for (j = 0; j < MAX_MON_MOVES; j++)
                 {
@@ -2041,7 +2063,12 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The same change as in the first case above.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 SetMonData(&party[i], MON_DATA_HELD_ITEM, &partyData[i].heldItem);
                 break;
@@ -2055,7 +2082,12 @@ static u8 CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum, bool8 fir
 
                 personalityValue += nameHash << 8;
                 fixedIV = partyData[i].iv * MAX_PER_STAT_IVS / 255;
+#if PLATFORM_3DS
+                // The same change as in the first case above.
+                CreateMon(&party[i], Ctr3dsMapSpecies(partyData[i].species), partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#else
                 CreateMon(&party[i], partyData[i].species, partyData[i].lvl, fixedIV, TRUE, personalityValue, OT_ID_RANDOM_NO_SHINY, 0);
+#endif
 
                 SetMonData(&party[i], MON_DATA_HELD_ITEM, &partyData[i].heldItem);
 
@@ -2990,6 +3022,31 @@ void SpriteCB_PlayerMonFromBall(struct Sprite *sprite)
         BattleAnimateBackSprite(sprite, sprite->sSpeciesId);
 }
 
+#if PLATFORM_3DS
+void SpriteCB_PlayerMonSlideIn(struct Sprite *sprite) {
+    if (sprite->data[3] == 0) {
+        PlaySE(SE_BALL_TRAY_ENTER);
+        sprite->data[3]++;
+    } else if (sprite->data[3] == 1) {
+        if (sprite->animEnded)
+            return;
+        sprite->data[4] = sprite->x;
+        sprite->x = -33;
+        sprite->invisible = FALSE;
+        sprite->data[3]++;
+    } else if (sprite->data[3] < 27) {
+        sprite->x += 4;
+        sprite->data[3]++;
+    } else {
+        sprite->data[3] = 0;
+        sprite->x = sprite->data[4];
+        sprite->data[4] = 0;
+        sprite->callback = SpriteCB_PlayerMonFromBall;
+        PlayCry_ByMode(sprite->sSpeciesId, -25, CRY_MODE_NORMAL);
+    }
+}
+
+#endif
 static void SpriteCB_TrainerThrowObject_Main(struct Sprite *sprite)
 {
     AnimSetCenterToCornerVecX(sprite);
@@ -5154,6 +5211,57 @@ static void HandleEndTurn_FinishBattle(void)
 
 static void FreeResetData_ReturnToOvOrDoEvolutions(void)
 {
+#if PLATFORM_3DS
+    // Changed order: nothing is freed until the sprites that read it are gone.
+    //
+    // The vanilla version below runs the frees on each frame of the
+    // end-of-battle fade, and calls ResetSpriteData() only when the fade ends.
+    // Thus, during the fade, the battle sprites run on freed data, and
+    // FreeBattleSpritesData() has set gBattleSpritesDataPtr to NULL.
+    //
+    // On a GBA, address 0 is the BIOS, and a read through a NULL pointer gives
+    // junk that nothing uses. On the ARM11, address 0 is not mapped, so the
+    // same read is a data abort that stops the process.
+    //
+    // For example, SpriteCB_EnemyShadow (src/battle_gfx_sfx_util.c) ends with
+    // this read, with no guard:
+    //
+    //     gBattleSpritesDataPtr->battlerData[battler].behindSubstitute
+    //
+    // The battlerData field is the first member of struct BattleSpriteData, so
+    // with a NULL pointer the load is at address 0. This callback runs only for
+    // the 61 species that hover (gEnemyMonElevation). It reads the pointer only
+    // when the opponent stays on the field, for example after the player runs.
+    //
+    // The fix is here, not in that one callback. Sixteen sprite and task
+    // callbacks read a pointer that this function sets to NULL, and a guard in
+    // each could miss one. When the frees come after ResetSpriteData(), no
+    // callback can run on freed data.
+    //
+    // The only difference on this platform: the four frees occur once, on the
+    // frame when the fade ends, not on each frame of it. They are all
+    // idempotent and check for NULL, and nothing runs between them. Thus the
+    // only change is that the memory stays allocated during the fade. All later
+    // code still sees it freed. This includes TryEvolvePokemon, because the
+    // frees occur before the next gBattleMainFunc call.
+    if (gPaletteFade.active)
+        return;
+
+    ResetSpriteData();
+
+    FreeAllWindowBuffers();
+    if (!(gBattleTypeFlags & BATTLE_TYPE_LINK))
+    {
+        FreeMonSpritesGfx();
+        FreeBattleResources();
+        FreeBattleSpritesData();
+    }
+
+    if (gLeveledUpInBattle == 0 || gBattleOutcome != B_OUTCOME_WON)
+        gBattleMainFunc = ReturnFromBattleToOverworld;
+    else
+        gBattleMainFunc = TryEvolvePokemon;
+#else
     if (!gPaletteFade.active)
     {
         ResetSpriteData();
@@ -5175,6 +5283,7 @@ static void FreeResetData_ReturnToOvOrDoEvolutions(void)
         FreeBattleResources();
         FreeBattleSpritesData();
     }
+#endif
 }
 
 static void TryEvolvePokemon(void)

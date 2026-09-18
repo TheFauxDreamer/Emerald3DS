@@ -24,6 +24,9 @@ UnionRoom_OnResume:
 	end
 
 UnionRoom_OnTransition:
+#if PLATFORM_3DS
+	setflag FLAG_TEMP_HIDE_FOLLOWER
+#endif
 	end
 
 UnionRoom_EventScript_Player1::

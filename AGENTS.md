@@ -2,9 +2,9 @@
 
 This repo is a pokeemerald decompilation carrying two ports:
 
-- **RP2350** (`rp2350/`) — the primary project. Runs the game natively on a
+- **RP2350** (`rp2350/`): the primary project. Runs the game natively on a
   Cortex-M33 microcontroller with an HDMI display. See `docs/PORTING.md`.
-- **WebAssembly** (`web/`, `tools/wasm_*`) — inherited from upstream and
+- **WebAssembly** (`web/`, `tools/wasm_*`): inherited from upstream and
   retained because it is the PPU's byte-exact reference implementation.
 
 Both preserve the original source tree and behavior as much as possible.

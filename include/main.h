@@ -63,6 +63,36 @@ void SetVBlankCallback(IntrCallback callback);
 void SetHBlankCallback(IntrCallback callback);
 void SetVCountCallback(IntrCallback callback);
 void SetSerialCallback(IntrCallback callback);
+
+// The VBlank callback of a scene can run after the state of the scene is freed.
+// When a scene with heap state exits, it does three things together:
+// - SetMainCallback2(returnCallback)
+// - DestroyTask()
+// - FREE_AND_SET_NULL(state)
+//
+// The callback stays installed until the first setup state of the next scene
+// runs. Thus VBlankIntr() calls it again on this frame, and the pointer that it
+// reads is already NULL.
+//
+// On a GBA, nobody sees this. Address 0 is BIOS space, and a read there gives
+// an old opcode, not a fault. Thus the callback writes a junk scroll offset for
+// one frame. In wasm, address 0 is inside the linear memory, so the result is
+// the same. On the ARM11 of the 3DS, nothing is mapped below the code segment,
+// and the same read is a data abort. For example, VBlankCB_NamingScreen read
+// 0x1E18 (NULL + offsetof(struct NamingScreenData, bg1vOffset)) after a name
+// confirm.
+//
+// The guard is in the callback, not at the places that free the state. Only the
+// callback knows which pointer it needs. Also, code can get to an old callback
+// on more frames than the frame that freed it. The skip does what the GBA does
+// in effect: the scene is gone, so there are no scroll offsets or window bounds
+// to write.
+#if WASM || RP2350
+#define VBLANK_REQUIRE(ptr) do { if ((ptr) == NULL) return; } while (0)
+#else
+#define VBLANK_REQUIRE(ptr) ((void)0)
+#endif
+
 void InitFlashTimer(void);
 void SetTrainerHillVBlankCounter(u32 *counter);
 void ClearTrainerHillVBlankCounter(void);

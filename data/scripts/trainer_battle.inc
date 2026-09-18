@@ -9,8 +9,14 @@ EventScript_TrainerApproach::
 EventScript_TryDoNormalTrainerBattle::
 	lock
 	faceplayer
+#if PLATFORM_3DS
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	applymovement VAR_LAST_TALKED, Movement_RevealTrainer
 	waitmovement 0
+#if PLATFORM_3DS
+	clearflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	specialvar VAR_RESULT, GetTrainerFlag
 	goto_if_ne VAR_RESULT, FALSE, EventScript_NoNormalTrainerBattle
 	special PlayTrainerEncounterMusic
@@ -43,8 +49,14 @@ EventScript_NoDoubleTrainerBattle::
 	gotopostbattlescript
 
 EventScript_DoNoIntroTrainerBattle::
+#if PLATFORM_3DS
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	applymovement VAR_LAST_TALKED, Movement_RevealTrainer
 	waitmovement 0
+#if PLATFORM_3DS
+	clearflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	special PlayTrainerEncounterMusic
 	dotrainerbattle
 	gotopostbattlescript
@@ -90,8 +102,14 @@ EventScript_NotEnoughMonsForDoubleRematchBattle::
 	end
 
 EventScript_RevealTrainer::
+#if PLATFORM_3DS
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	applymovement VAR_LAST_TALKED, Movement_RevealTrainer
 	waitmovement 0
+#if PLATFORM_3DS
+	clearflag FLAG_SAFE_FOLLOWER_MOVEMENT
+#endif
 	return
 
 Movement_RevealTrainer:

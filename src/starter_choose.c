@@ -24,6 +24,12 @@
 #include "constants/songs.h"
 #include "constants/rgb.h"
 
+#if PLATFORM_3DS
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
+#include "../3ds/tweaks.h"
+#endif
+
 #define STARTER_MON_COUNT   3
 
 // Position of the sprite of the selected starter Pokémon
@@ -352,7 +358,15 @@ u16 GetStarterPokemon(u16 chosenStarterId)
 {
     if (chosenStarterId > STARTER_MON_COUNT)
         chosenStarterId = 0;
+#if PLATFORM_3DS
+    // This remaps the return value, not the table, so all users get the same
+    // species. The sprite and cry on the selection screen, the Pokemon that
+    // CB2_GiveStarter gives, IsStarterInParty() in src/field_specials.c and the
+    // credits all call this function.
+    return Ctr3dsMapSpecies(sStarterMon[chosenStarterId]);
+#else
     return sStarterMon[chosenStarterId];
+#endif
 }
 
 static void VblankCB_StarterChoose(void)

@@ -1119,7 +1119,11 @@ const u8 gMonIcon_Feraligatr[] = INCGFX_U8("graphics/pokemon/feraligatr/icon.png
 const u8 gMonFootprint_Feraligatr[] = INCGFX_U8("graphics/pokemon/feraligatr/footprint.png", ".1bpp");
 
 const u32 gMonStillFrontPic_Sentret[] = INCGFX_U32("graphics/pokemon/sentret/front.png", ".4bpp.lz");
+#if PLATFORM_3DS
+const u32 gMonPalette_Sentret[] = INCGFX_U32("graphics/followers/pokemon/sentret/normal.pal", ".gbapal.lz");
+#else
 const u32 gMonPalette_Sentret[] = INCGFX_U32("graphics/pokemon/sentret/normal.pal", ".gbapal.lz");
+#endif
 const u32 gMonBackPic_Sentret[] = INCGFX_U32("graphics/pokemon/sentret/back.png", ".4bpp.lz");
 const u32 gMonShinyPalette_Sentret[] = INCGFX_U32("graphics/pokemon/sentret/shiny.pal", ".gbapal.lz");
 const u8 gMonIcon_Sentret[] = INCGFX_U8("graphics/pokemon/sentret/icon.png", ".4bpp");
@@ -1224,7 +1228,11 @@ const u8 gMonIcon_Togepi[] = INCGFX_U8("graphics/pokemon/togepi/icon.png", ".4bp
 const u8 gMonFootprint_Togepi[] = INCGFX_U8("graphics/pokemon/togepi/footprint.png", ".1bpp");
 
 const u32 gMonStillFrontPic_Togetic[] = INCGFX_U32("graphics/pokemon/togetic/front.png", ".4bpp.lz");
+#if PLATFORM_3DS
+const u32 gMonPalette_Togetic[] = INCGFX_U32("graphics/followers/pokemon/togetic/normal.pal", ".gbapal.lz");
+#else
 const u32 gMonPalette_Togetic[] = INCGFX_U32("graphics/pokemon/togetic/normal.pal", ".gbapal.lz");
+#endif
 const u32 gMonBackPic_Togetic[] = INCGFX_U32("graphics/pokemon/togetic/back.png", ".4bpp.lz");
 const u32 gMonShinyPalette_Togetic[] = INCGFX_U32("graphics/pokemon/togetic/shiny.pal", ".gbapal.lz");
 const u8 gMonIcon_Togetic[] = INCGFX_U8("graphics/pokemon/togetic/icon.png", ".4bpp");
@@ -2467,7 +2475,11 @@ const u8 gMonIcon_Shuppet[] = INCGFX_U8("graphics/pokemon/shuppet/icon.png", ".4
 const u8 gMonFootprint_Shuppet[] = INCGFX_U8("graphics/pokemon/shuppet/footprint.png", ".1bpp");
 
 const u32 gMonStillFrontPic_Banette[] = INCGFX_U32("graphics/pokemon/banette/front.png", ".4bpp.lz");
+#if PLATFORM_3DS
+const u32 gMonPalette_Banette[] = INCGFX_U32("graphics/followers/pokemon/banette/normal.pal", ".gbapal.lz");
+#else
 const u32 gMonPalette_Banette[] = INCGFX_U32("graphics/pokemon/banette/normal.pal", ".gbapal.lz");
+#endif
 const u32 gMonBackPic_Banette[] = INCGFX_U32("graphics/pokemon/banette/back.png", ".4bpp.lz");
 const u32 gMonShinyPalette_Banette[] = INCGFX_U32("graphics/pokemon/banette/shiny.pal", ".gbapal.lz");
 const u8 gMonIcon_Banette[] = INCGFX_U8("graphics/pokemon/banette/icon.png", ".4bpp");

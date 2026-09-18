@@ -13,6 +13,9 @@
 #include "gba/flash_internal.h"
 #include "decoration_inventory.h"
 #include "agb_flash.h"
+#if PLATFORM_3DS
+#include "constants/event_objects.h"
+#endif
 
 static void ApplyNewEncryptionKeyToAllEncryptedData(u32 encryptionKey);
 
@@ -181,16 +184,38 @@ void SaveObjectEvents(void)
 {
     int i;
 
+#if PLATFORM_3DS
+    for (i = 0; i < OBJECT_EVENTS_COUNT; i++) {
+#else
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
+#endif
         gSaveBlock1Ptr->objectEvents[i] = gObjectEvents[i];
+#if PLATFORM_3DS
+        // To avoid crash on vanilla, save follower as inactive
+        if (gObjectEvents[i].localId == OBJ_EVENT_ID_FOLLOWER) 
+            gSaveBlock1Ptr->objectEvents[i].active = FALSE;
+    }
+#endif
 }
 
 void LoadObjectEvents(void)
 {
     int i;
 
+#if PLATFORM_3DS
+    for (i = 0; i < OBJECT_EVENTS_COUNT; i++) {
+#else
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
+#endif
         gObjectEvents[i] = gSaveBlock1Ptr->objectEvents[i];
+#if PLATFORM_3DS
+        // Try to restore saved inactive follower
+        if (gObjectEvents[i].localId == OBJ_EVENT_ID_FOLLOWER &&
+            !gObjectEvents[i].active &&
+            gObjectEvents[i].extra.asU16)
+            gObjectEvents[i].active = TRUE;
+    }
+#endif
 }
 
 void CopyPartyAndObjectsToSave(void)

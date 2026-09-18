@@ -62,23 +62,23 @@
 
 #if PLATFORM_3DS
 
-// A 3DS has no cartridge, so there is no S-3511A to bit-bang and no GPIO to
-// bit-bang it over. The equivalent hardware is the console's own real-time
-// clock, so this is the same driver interface backed by that instead.
+// A 3DS has no cartridge, so there is no S-3511A chip and no GPIO port to drive
+// it. The same hardware on the console is its own real-time clock. Thus this is
+// the same driver interface, with that clock behind it.
 //
-// Substituting at THIS layer is the point: src/rtc.c, berry growth, the
-// time-of-day events, the bedroom wall clock and the reset-RTC screen are all
-// untouched, because as far as they can tell the cart clock is present and
-// running. It is the same kind of substitution the port already makes for the
-// LCD, the flash save chip and GBA memory.
+// The substitution is at this layer on purpose. The code in src/rtc.c, berry
+// growth, the time-of-day events, the bedroom wall clock and the reset-RTC
+// screen do not change. For them, the cartridge clock is present and runs. The
+// port does the same kind of substitution for the LCD, the flash save chip and
+// the GBA memory.
 //
-// Ctr3dsGetClock() is host-side. bridge.h lists src/** as a game-side TU and
-// contains no libctru, which is why including it here is safe; 3ds/ui/*.c
-// already do the same.
+// Ctr3dsGetClock() is host-side. The header bridge.h lists src/** as game-side
+// and contains no libctru, so this include is safe. The files 3ds/ui/*.c do the
+// same.
 #include "../3ds/bridge.h"
 
-// Every field of the real chip is two BCD digits, and ConvertBcdToBinary()
-// (src/rtc.c) is what reads them back, so the encoding has to happen here.
+// Each field of the real chip is two BCD digits, and ConvertBcdToBinary()
+// (src/rtc.c) reads them back. Thus the encoding must occur here.
 static u8 ToBcd(u8 value)
 {
     return (u8)(((value / 10) << 4) | (value % 10));
@@ -103,22 +103,24 @@ static void ReadHostClock(struct SiiRtcInfo *rtc)
 void SiiRtcUnprotect(void) {}
 void SiiRtcProtect(void) {}
 
-// RtcInit() reads (result & 0xF) != 1 as a dead clock and any of 0xF0 as a
-// warning, so 1 is "present, running, 24-hour, not in test mode".
+// RtcInit() reads (result & 0xF) != 1 as a dead clock, and any bit of 0xF0 as a
+// warning. Thus 1 means "present, running, 24-hour, not in test mode".
 u8 SiiRtcProbe(void)
 {
     return 1;
 }
 
-// The console clock belongs to the system, not to the game, so writes are
-// accepted and ignored rather than applied.
+// The console clock belongs to the system, not to the game. Thus this accepts
+// writes and ignores them.
 //
-// This is deliberate, not a shortcut. Emerald never needs to write the chip:
-// the time the player dials in on the wall clock is stored as an offset in the
-// save (RtcCalcLocalTimeOffset), and local time is always the chip minus that
-// offset. A writable clock here would also have to persist across launches, or
-// RtcReset() would zero it, the save would keep an offset measured against
-// 2000-01-01, and the next launch would read the real date and land the player
+// This is on purpose. Emerald never needs to write the chip. The save stores
+// the time that the player sets on the wall clock as an offset
+// (RtcCalcLocalTimeOffset). The local time is always the chip time minus that
+// offset.
+//
+// A writable clock here would also have to persist between launches. If not,
+// RtcReset() would set it to zero, and the save would keep an offset from
+// 2000-01-01. The next launch would then read the real date and put the player
 // decades in the future.
 bool8 SiiRtcReset(void)
 {
@@ -145,9 +147,9 @@ bool8 SiiRtcSetTime(struct SiiRtcInfo *rtc)
 
 bool8 SiiRtcGetStatus(struct SiiRtcInfo *rtc)
 {
-    // The two bits RtcCheckInfo() tests: 24-hour mode set, power-failure clear.
-    // Getting either wrong is what produces the "internal battery has run dry"
-    // path in the main menu.
+    // The two bits that RtcCheckInfo() tests: 24-hour mode set, power failure
+    // clear. If either is wrong, the main menu shows the "internal battery has
+    // run dry" message.
     rtc->status = SIIRTCINFO_24HOUR;
     return TRUE;
 }
@@ -162,8 +164,8 @@ bool8 SiiRtcGetTime(struct SiiRtcInfo *rtc)
 {
     struct SiiRtcInfo now;
 
-    // Time only: the real command leaves the date fields of the caller's struct
-    // alone, and SiiRtcProbe() relies on that.
+    // Time only. The real command does not change the date fields of the
+    // caller's struct, and SiiRtcProbe() needs that.
     ReadHostClock(&now);
     rtc->hour   = now.hour;
     rtc->minute = now.minute;

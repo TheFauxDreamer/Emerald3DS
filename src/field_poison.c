@@ -16,6 +16,9 @@
 #include "trainer_hill.h"
 #include "constants/field_poison.h"
 #include "constants/party_menu.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
 
 static bool32 IsMonValidSpecies(struct Pokemon *pokemon)
 {
@@ -101,6 +104,9 @@ static void Task_TryFieldPoisonWhiteOut(u8 taskId)
         else
         {
             gSpecialVar_Result = FLDPSN_NO_WHITEOUT;
+#if PLATFORM_3DS
+            UpdateFollowingPokemon();
+#endif
         }
         ScriptContext_Enable();
         DestroyTask(taskId);

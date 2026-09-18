@@ -778,6 +778,14 @@ u8 TrySavingData(u8 saveType)
     }
 
     HandleSavingData(saveType);
+#if PLATFORM_3DS
+    // The sectors are written, so send the image to the SD card now. If not,
+    // the host waits until the writes stop. If the player closes the emulator
+    // window, the process stops without its exit path. Then a save could be
+    // lost after the game said that it succeeded. This commit makes the save
+    // durable.
+    CtrSaveCommit();
+#endif
     if (!gDamagedSaveSectors)
     {
         gSaveAttemptStatus = SAVE_STATUS_OK;
@@ -973,6 +981,9 @@ u32 TryWriteSpecialSaveSector(u8 sector, u8 *src)
         savData[i] = src[i];
     if (ProgramFlashSectorAndVerify(sector, savDataBuffer) != 0)
         return SAVE_STATUS_ERROR;
+#if PLATFORM_3DS
+    CtrSaveCommit();
+#endif
     return SAVE_STATUS_OK;
 }
 
@@ -1037,6 +1048,11 @@ void Task_LinkFullSave(u8 taskId)
         if (IsLinkTaskFinished())
         {
             LinkFullSave_SetLastSectorSignature();
+#if PLATFORM_3DS
+            // The signature is the last write of a link save, and this path
+            // never goes through TrySavingData.
+            CtrSaveCommit();
+#endif
             tState = 9;
         }
         break;
