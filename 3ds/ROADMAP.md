@@ -763,6 +763,28 @@ Two Azahar instances in one multiplayer room, both on the same build:
 - Kill one instance mid-trade and confirm the other shows Emerald's own link
   error and returns to the overworld rather than hanging.
 
+## C: Known, found while merging
+
+Neither is merge damage. Both were in the branch as first written, and both
+want a decision after the first run, not before it.
+
+- **The bounded wait is a busy spin, not a sleep.** `Ctr3dsLinkExchange`
+  (`3ds/host/link.c:383`) calls `udsWaitDataAvailable(&sBind, false, false)`.
+  The third argument is `wait`, so passing `false` makes the call return at
+  once instead of blocking, and the loop around it spins on
+  `svcGetSystemTick()` for up to `LINK_WAIT_US` (8 ms, about half a frame).
+  It is correct and it is bounded, but it burns a core while it waits rather
+  than yielding. Passing `true` is the obvious fix. Measure first: this port
+  has no interrupts, and the busy-wait hazard at the end of this file is why.
+- **`Ctr3dsLinkScan()` blocks for the whole beacon sweep.** `udsScanBeacons`
+  (`3ds/host/link.c:138`) takes in the order of hundreds of ms, which stalls
+  the frame and the audio. `ui_link.c` says so at its SCAN button and accepts
+  it for a deliberate press. If it is worse than it reads on paper, the sweep
+  can move to the I/O thread (`3ds/host/io_thread.c`), which did not exist
+  when this branch was written. Note the transport is single threaded and
+  unlocked today, which is what makes that move a real change rather than a
+  small one.
+
 ## C: Risks
 
 - **Lockstep drift is the thing most likely to bite.** Blocking on a peer stalls
