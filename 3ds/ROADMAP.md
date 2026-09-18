@@ -672,11 +672,19 @@ bridge functions in game types in `include/link.h`, the way
   `CheckMasterOrSlave` become UDS equivalents or no-ops. `SerialCB` and
   `Timer3Intr` keep their signatures, because `gIntrTable` still references them,
   but do nothing.
-- **Failure path**: on disconnect or a missed deadline, set `gLink.lag` to
-  `LAG_MASTER` / `LAG_SLAVE`. That is the existing route to
-  `LINK_STAT_ERROR_LAG_*` (`include/link.h:34-39`), so a dropped connection
-  surfaces as Emerald's own link error screen and recovers, rather than hanging
-  mid-trade.
+- **Failure path**: on disconnect or a missed deadline, count the miss, and set
+  `gLink.lag` to `LAG_MASTER` / `LAG_SLAVE` only once a run of them passes
+  `CTR_LINK_MISS_LIMIT`. That is the existing route to `LINK_STAT_ERROR_LAG_*`
+  (`include/link.h:34-39`), so a genuinely dropped connection surfaces as
+  Emerald's own link error screen rather than hanging mid-trade.
+
+  **The tolerance is not optional, and this was got wrong first time.** One
+  `gLink.lag` frame is fatal: `LinkMain1` turns it straight into an error bit
+  and `CheckLinkErrors` (`src/link.c:1569`) shows the error and closes the link
+  on the first one. The cable path never behaves that way, because its slave
+  waits for more than 10 VBlanks with no serial interrupt before calling it
+  lag. Reporting the first missed wireless frame ended every session within
+  seconds of entering the Cable Club.
 
 The checksum logic in `DoRecv` is a cable artefact: it validates the shared bus.
 UDS frames are already checked, so leave `gLink.badChecksum` clear rather than
@@ -767,6 +775,14 @@ Two Azahar instances in one multiplayer room, both on the same build:
 
 Neither is merge damage. Both were in the branch as first written, and both
 want a decision after the first run, not before it.
+
+The first hardware run has since happened, New 3DS against Old 3DS. Pairing
+worked and the panel reported both consoles. Entering the Cable Club then gave
+Emerald's communication error within seconds, from two separate faults: the
+frame counter in `Ctr3dsLinkExchange` advanced on every call, so consoles at
+different frame rates drifted apart permanently, and the pump reported lag on
+the first missed frame, which the game treats as fatal. Both are fixed; neither
+fix is confirmed on hardware yet.
 
 - **The bounded wait is a busy spin, not a sleep.** `Ctr3dsLinkExchange`
   (`3ds/host/link.c:383`) calls `udsWaitDataAvailable(&sBind, false, false)`.
