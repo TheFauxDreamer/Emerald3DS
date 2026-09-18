@@ -753,6 +753,15 @@ void SetContinueGameWarpToDynamicWarp(int unused)
 const struct MapConnection *GetMapConnection(u8 dir)
 {
     s32 i;
+#ifdef UBFIX
+    // UB NULL: gMapHeader.connections is NULL on a map that has no
+    // connections, which is most maps. The test below reads the inner pointer,
+    // two lines too late to help. GetIncomingConnection (src/fieldmap.c) has
+    // this guard already. A GBA reads the BIOS at address 0. On the 3DS,
+    // address 0 is not mapped.
+    if (gMapHeader.connections == NULL)
+        return NULL;
+#endif
     s32 count = gMapHeader.connections->count;
     const struct MapConnection *connection = gMapHeader.connections->connections;
 

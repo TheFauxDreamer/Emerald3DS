@@ -2742,6 +2742,11 @@ static void SetTradeGpuRegs(void)
 
 static void VBlankCB_TradeAnim(void)
 {
+    // UB NULL: Each of the three paths that frees sTradeAnim leaves this
+    // callback installed, so it runs once more with the pointer at NULL.
+    // SetTradeGpuRegs reads bg1vofs through it.
+    VBLANK_REQUIRE(sTradeAnim);
+
     SetTradeGpuRegs();
     LoadOam();
     ProcessSpriteCopyRequests();
