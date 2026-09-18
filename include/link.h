@@ -290,10 +290,18 @@ void ResetSerial(void);
 #define CTR_LINK_CMD_BYTES 16   // CMD_LENGTH * sizeof(u16)
 #endif
 
+// Ctr3dsLinkIsConnected() refreshes the host-side status cache, and the two
+// scalars below then read what it found. Call it first on each frame: it is
+// what turns four UDS round trips a frame into one.
 int Ctr3dsLinkIsConnected(void);
 int Ctr3dsLinkPlayerCount(void);
 int Ctr3dsLinkLocalId(void);
 int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+
+// Report a link error to the port's log. Emerald's own error screen and a real
+// fault otherwise look the same afterwards: the game stops talking and nothing
+// says why.
+void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 #endif
 
 u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENGTH]);

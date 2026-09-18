@@ -6,7 +6,7 @@ built and why it is structured the way it is.
 
 ## Status
 
-Checked against `67090b3` on 2026-09-16.
+Checked against `6a3336c` on 2026-09-18.
 
 | Part | State |
 |---|---|
@@ -15,7 +15,7 @@ Checked against `67090b3` on 2026-09-16.
 | D: Gameplay tweaks | **Done.** |
 | Save durability | **Done.** |
 | The busy-wait audit | **Done.** |
-| C: Local wireless | **Merged with main, not yet built.** On the `local-wireless` branch. |
+| C: Local wireless | **Pairs and links on hardware; a trade still errors.** On the `local-wireless` branch. |
 | E: Achievements | **Built in.** Two items are left. |
 
 The done parts stay in this file because their facts are recorded nowhere else.
@@ -32,8 +32,11 @@ The large pieces:
   icons, day and night lighting, a key item wheel and others, with the port
   rules from the follower work. Item 1, the follower options, is done.
 - **Part C, the Cable Club over local wireless.** The `local-wireless` branch
-  now carries main. C.3 is decided: LINK is page 5 of EXTRA. Nothing has been
-  built or run yet, so the transport is still unproven.
+  now carries main. C.3 is decided: LINK is page 5 of EXTRA. Pairing and the
+  transport both run on hardware. A direct-connect trade still ends in
+  Emerald's communication error, and the cause is not yet known: the port now
+  logs the status bits and the queue counts at `TrySetLinkErrorBuffer`, which
+  is what the next run must capture.
 - **Part E:** the trade-dependent achievements, and a RetroAchievements
   provider.
 - **[NULL_CRASHES_PLAN.md](NULL_CRASHES_PLAN.md):** the crash class that keeps
@@ -47,9 +50,24 @@ The small ones:
   path (cheatsheet section 5, "Single core"). The second-core path repaints for
   it. One full repaint when the slide ends would fix the single-core path, for
   the cost of that repaint.
-- **The Old 3DS is not measured.** It runs the rasterizer on core 1, with 80%
-  of that core (`PPU_SYSCORE_PERCENT`), and takes the second-core path. Read its
-  log before calling it supported. ZL and ZR cannot be tested there.
+- **The Old 3DS did not get its second core.** Measured at last, and the
+  assumption was wrong: `APT_SetAppCpuTimeLimit` returned `0xD8E05BF4` (PM,
+  permanent, not implemented) and the rasterizer fell back to running inline on
+  core 0. The exheader had `AffinityMask : 1`, which bars core 1 outright, and
+  New 3DS core 2 comes from `CanAccessCore2` instead, so the New 3DS path
+  worked and hid it. The mask is now 3 and `ppu_thread_start()` asks for 80, 70
+  then 50 percent before giving up. Unconfirmed on hardware. ZL and ZR cannot
+  be tested there.
+- **A base 3DS renders some scenes at 13.6 ms.** Against 3.1 ms in the
+  overworld, which puts a frame over budget on one core and locks the port to
+  30 fps. The shape is known but not the scene: `passWinRow()`
+  (`rp2350/ppu.c:204`) drops every background, sprite and backdrop pass onto the
+  per-pixel `emitMasked()` path for any line whose window mask is not uniform,
+  and a window partial in x makes every line so. The fix is to render such a
+  line as runs of constant mask and use the existing span loop inside each run:
+  the mask has at most a few runs unless OBJWIN is on. Not started, because it
+  touches every scene. `log_slow_scene()` (`3ds/host/video.c`) now reports the
+  deciding registers once for each boot, so do that first.
 - **MAP extras not built:** the city zoom, the indoor icon blink and the
   fly-destination icons (Part B, stage 4).
 - **Only if core 0 needs time back.** None of these is necessary at the
@@ -784,22 +802,27 @@ different frame rates drifted apart permanently, and the pump reported lag on
 the first missed frame, which the game treats as fatal. Both are fixed; neither
 fix is confirmed on hardware yet.
 
-- **The bounded wait is a busy spin, not a sleep.** `Ctr3dsLinkExchange`
-  (`3ds/host/link.c:383`) calls `udsWaitDataAvailable(&sBind, false, false)`.
-  The third argument is `wait`, so passing `false` makes the call return at
-  once instead of blocking, and the loop around it spins on
-  `svcGetSystemTick()` for up to `LINK_WAIT_US` (8 ms, about half a frame).
-  It is correct and it is bounded, but it burns a core while it waits rather
-  than yielding. Passing `true` is the obvious fix. Measure first: this port
-  has no interrupts, and the busy-wait hazard at the end of this file is why.
-- **`Ctr3dsLinkScan()` blocks for the whole beacon sweep.** `udsScanBeacons`
-  (`3ds/host/link.c:138`) takes in the order of hundreds of ms, which stalls
-  the frame and the audio. `ui_link.c` says so at its SCAN button and accepts
-  it for a deliberate press. If it is worse than it reads on paper, the sweep
-  can move to the I/O thread (`3ds/host/io_thread.c`), which did not exist
-  when this branch was written. Note the transport is single threaded and
-  unlocked today, which is what makes that move a real change rather than a
-  small one.
+Both are now fixed, after a base 3DS log showed how bad each one is. Neither
+fix is confirmed on hardware.
+
+- **The bounded wait was a busy spin, not a sleep.** `Ctr3dsLinkExchange`
+  called `udsWaitDataAvailable(&sBind, false, false)` in a loop. The third
+  argument is `wait`, so `false` made it a zero-timeout poll and the loop spun
+  on `svcGetSystemTick()` for up to `LINK_WAIT_US` (8 ms, about half a frame),
+  burning core 0 and flooding nwm with IPC. It now waits on the bind event with
+  `svcWaitSynchronization` and a real timeout, so the thread sleeps and wakes
+  the moment a packet lands. The same pass cut the pump from four
+  `udsGetConnectionStatus` round trips a frame to one, behind a cache that no
+  caller may refresh more than once every 8 ms.
+- **`Ctr3dsLinkScan()` blocked for the whole beacon sweep.** It ran in the
+  bottom screen's touch handler, which is inside the frame loop, so a tap on
+  SCAN stopped the game and the sound. A base 3DS log showed
+  `slow bottom.update 1213 ms` and a matching `prof frame worst 1237275 us`.
+  The pairing calls now run on a worker thread one priority step below the main
+  thread, and the panel shows SCANNING, JOINING or WORKING while one runs. The
+  rule that keeps the two apart, and keeps the per-frame path lock free: while
+  `sBusy` is set the worker owns UDS and the main thread makes no UDS call at
+  all.
 
 ## C: Risks
 

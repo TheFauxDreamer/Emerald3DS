@@ -1568,6 +1568,13 @@ static void TrySetLinkErrorBuffer(void)
     // Check if a link error has occurred
     if (sLinkOpen && EXTRACT_LINK_ERRORS(gLinkStatus))
     {
+#if PLATFORM_3DS
+        // Every link error passes here, so this is the one place that can name
+        // the cause. The status bits tell lag from a full queue from a bad
+        // checksum, and the queue counts say how far a transfer had got.
+        Ctr3dsLinkLogError((unsigned int)gLinkStatus, gLastSendQueueCount,
+                           gLastRecvQueueCount);
+#endif
         // Link error has occurred, handle message details if
         // necessary, then stop the link.
         if (!gSuppressLinkErrorMessage)
@@ -2144,6 +2151,9 @@ static void Ctr3dsLinkPump(void)
     u8 index;
     u16 nonzero = 0;
 
+    // First, and once: this refreshes the host-side status cache that
+    // Ctr3dsLinkPlayerCount(), Ctr3dsLinkLocalId() and Ctr3dsLinkExchange()
+    // then read. Each of them used to make its own UDS round trip.
     if (!Ctr3dsLinkIsConnected())
     {
         // Losing the link mid-session is the game's own lag case. Give it the
