@@ -4,6 +4,12 @@
 #include "random.h"
 #include "roamer.h"
 
+#if PLATFORM_3DS
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
+#include "../3ds/tweaks.h"
+#endif
+
 // Despite having a variable to track it, the roamer is
 // hard-coded to only ever be in map group 0
 #define ROAMER_MAP_GROUP 0
@@ -87,6 +93,14 @@ static void CreateInitialRoamerMon(bool16 createLatios)
         ROAMER->species = SPECIES_LATIAS;
     else
         ROAMER->species = SPECIES_LATIOS;
+
+#if PLATFORM_3DS
+    // Mapped once, at creation. ROAMER->species is saved, and
+    // CreateRoamerMonInstance makes the Pokemon again from it at each
+    // encounter. A remap there would give the player a different species at
+    // each meeting with the same roamer.
+    ROAMER->species = Ctr3dsMapSpecies(ROAMER->species);
+#endif
 
     CreateMon(&gEnemyParty[0], ROAMER->species, 40, USE_RANDOM_IVS, FALSE, 0, OT_ID_PLAYER_ID, 0);
     ROAMER->level = 40;

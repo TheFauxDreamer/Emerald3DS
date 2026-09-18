@@ -1,17 +1,17 @@
 # ROM spec for packaging the 3DS port as a CIA / CCI.
 #
-# Why this exists at all: a .3dsx is loaded at a variable address, so every
-# absolute pointer needs a load-time relocation, and the 3DSX relocation table
-# is indexed in 4-byte words. Emerald's script bytecode packs a 4-byte pointer
-# directly after a 1-byte opcode (see .macro goto in asm/macros/event.inc), so
-# thousands of those relocations are unaligned and simply cannot be encoded --
-# 3dsxtool aborts with "Unaligned relocation!".
+# The reason for this file: a .3dsx loads at a variable address, so each
+# absolute pointer needs a relocation at load time. The 3DSX relocation table
+# uses 4-byte words. The script bytecode of Emerald puts a 4-byte pointer
+# directly after a 1-byte opcode (see .macro goto in asm/macros/event.inc).
+# Thus thousands of these relocations are unaligned, and the table cannot
+# encode them. The tool 3dsxtool stops with "Unaligned relocation!".
 #
-# A CXI is loaded at a fixed address (0x00100000) and is never relocated, so the
-# unaligned pointers are baked in at link time and left alone. That is the whole
-# reason this port ships as a CIA/CCI rather than a 3dsx.
+# A CXI loads at a fixed address (0x00100000) with no relocation. Thus the link
+# sets the unaligned pointers, and they do not change. That is why this port
+# ships as a CIA or CCI, not as a 3dsx.
 #
-# Adapted from the standard homebrew template:
+# This file comes from the standard homebrew template:
 #   https://github.com/TricksterGuy/3ds-template/blob/master/resources/template.rsf
 
 BasicInfo:
@@ -185,6 +185,9 @@ AccessControlInfo:
    - news:u
    - nwm::UDS
    - ptm:u
+   # Both osSetSpeedupEnable and libctru, which sets the New 3DS clock again
+   # after each return from the HOME menu, go through ptm:sysm.
+   - ptm:sysm
    - pxi:dev
    - soc:U
    - ssl:C

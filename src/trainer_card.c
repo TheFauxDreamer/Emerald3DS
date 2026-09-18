@@ -329,6 +329,8 @@ static bool8 (*const sTrainerCardFlipTasks[])(struct Task *) =
 
 static void VblankCb_TrainerCard(void)
 {
+    VBLANK_REQUIRE(sData);
+
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();

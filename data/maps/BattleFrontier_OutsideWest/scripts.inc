@@ -10,6 +10,10 @@ BattleFrontier_OutsideWest_OnTransition:
 BattleFrontier_OutsideWest_EventScript_FerryAttendant::
 	lock
 	faceplayer
+#if PLATFORM_3DS
+	@ The four event items (data/scripts/ctr3ds_event_tickets.inc).
+	call Ctr3ds_EventScript_EventTicketsAtOtherPort
+#endif
 	msgbox BattleFrontier_OutsideWest_Text_MayISeeYourTicket, MSGBOX_DEFAULT
 	checkitem ITEM_SS_TICKET
 	goto_if_eq VAR_RESULT, FALSE, BattleFrontier_OutsideWest_EventScript_NoSSTicket

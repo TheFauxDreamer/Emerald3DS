@@ -61,9 +61,19 @@ static void Task_DoFieldMove_Init(u8 taskId)
     if (!ObjectEventIsMovementOverridden(&gObjectEvents[objEventId])
      || ObjectEventClearHeldMovementIfFinished(&gObjectEvents[objEventId]))
     {
+#if PLATFORM_3DS
+        if (gMapHeader.mapType == MAP_TYPE_UNDERWATER || gFieldEffectArguments[3])
+#else
         if (gMapHeader.mapType == MAP_TYPE_UNDERWATER)
+#endif
         {
+#if PLATFORM_3DS
+            // Skip field move pose underwater, or if arg3 is nonzero
+            if (gFieldEffectArguments[3])
+                gFieldEffectArguments[3] = 0;
+#else
             // Skip field move pose underwater
+#endif
             FieldEffectStart(FLDEFF_FIELD_MOVE_SHOW_MON_INIT);
             gTasks[taskId].func = Task_DoFieldMove_WaitForMon;
         }

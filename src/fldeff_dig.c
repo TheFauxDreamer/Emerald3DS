@@ -8,6 +8,10 @@
 #include "party_menu.h"
 #include "sprite.h"
 #include "constants/field_effects.h"
+#if PLATFORM_3DS
+#include "event_scripts.h"
+#include "script.h"
+#endif
 
 // static functions
 static void FieldCallback_Dig(void);
@@ -31,8 +35,13 @@ bool8 SetUpFieldMove_Dig(void)
 static void FieldCallback_Dig(void)
 {
     Overworld_ResetStateAfterDigEscRope();
+#if !PLATFORM_3DS
     FieldEffectStart(FLDEFF_USE_DIG);
+#endif
     gFieldEffectArguments[0] = GetCursorSelectionMonId();
+#if PLATFORM_3DS
+    ScriptContext_SetupScript(EventScript_UseDig);
+#endif
 }
 
 bool8 FldEff_UseDig(void)
@@ -53,7 +62,12 @@ static void StartDigFieldEffect(void)
     FieldEffectActiveListRemove(FLDEFF_USE_DIG);
     if (ShouldDoBrailleDigEffect())
     {
+#if PLATFORM_3DS
+        // EventScript_DigSealedChamber handles DoBrailleDigEffect call
+        ScriptContext_Enable();
+#else
         DoBrailleDigEffect();
+#endif
     }
     else
     {

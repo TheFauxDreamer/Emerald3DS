@@ -117,4 +117,33 @@ void SetRegionMapDataForZoom(void);
 
 extern const struct RegionMapLocation gRegionMapEntries[];
 
+#if PLATFORM_3DS
+// The second screen draws this map itself. It needs the art and the player's
+// position, but none of the BG and sprite code around them. See the
+// PLATFORM_3DS block in src/region_map.c.
+void Ctr3dsGetRegionMapGfx(const u32 **gfxLZ, const u32 **tilemapLZ, const u16 **pal);
+void Ctr3dsGetRegionMapPlayerIcon(const u8 **gfx, const u16 **pal);
+
+// Absolute map-tile coordinates, the same as GetRegionMapSecIdAt takes.
+void Ctr3dsGetRegionMapPlayerPos(u16 *x, u16 *y, mapsec_u16_t *mapSecId,
+                                 u8 *posWithinMapSec, bool8 *inCave);
+
+// MAPSECTYPE_*, which is how the game tells if the player can fly to a place.
+// It turns the FLAG_VISITED_* flags into CANFLY or CANTFLY.
+u8 Ctr3dsGetMapSecType(mapsec_u16_t mapSecId);
+
+// Sets the pending warp for a fly, for a destination that the player touched.
+// It takes the touched tile, not only the mapsec. Ever Grande needs the
+// position to find if it is the Pokemon League or the city. FALSE means that it
+// set nothing, and the caller must not start the warp.
+bool8 Ctr3dsSetFlyWarpDestination(mapsec_u16_t mapSecId, u16 x, u16 y);
+
+// The map's own bounds, so the second screen can use it without a copy of the
+// numbers in src/region_map.c.
+#define CTR_MAPCURSOR_X_MIN 1
+#define CTR_MAPCURSOR_Y_MIN 2
+#define CTR_MAP_WIDTH       28
+#define CTR_MAP_HEIGHT      15
+#endif
+
 #endif //GUARD_REGION_MAP_H

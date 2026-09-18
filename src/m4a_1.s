@@ -801,6 +801,30 @@ ldrb_r3_r2:
 @ It assumes that the jump table template is located at the end of the ROM.
 	.thumb_func
 chk_adr_r2:
+#if PLATFORM_3DS
+@ On the 3DS, the guard must go, because it expects the GBA memory map.
+@
+@ It rejects (returns r3 = 0 for) each address below 0x02000000, except the
+@ addresses at or above gMPlayJumpTableTemplate in the first 16 KB. On a GBA,
+@ only the BIOS ROM is at those addresses. All data that the engine reads is in
+@ EWRAM, IWRAM or the cartridge, at 0x02000000 and above.
+@
+@ A CXI loads at 0x00100000 with no relocation (see 3ds/emerald3ds.rsf). Thus
+@ all of the game is below that line: gMPlayJumpTableTemplate, each song and
+@ each voicegroup. With the guard, each read through here gives 0.
+@
+@ Then MPlayJumpTableCopy, which runs this on all 36 template entries, fills
+@ gMPlayJumpTable with NULL pointers. The first Clear64byte() from MPlayOpen
+@ (src/m4a.c) calls through entry 35 to address 0, during m4aSoundInit. Also,
+@ ld_r3_tp_adr_i branches here, so MPlayMain would read each song command byte
+@ as 0.
+@
+@ This target has no BIOS ROM for the guard to protect. Thus, to accept all
+@ addresses gives the same result that the GBA gets for each address that the
+@ engine uses. For the same reason, rp2350/m4a_engine.c does not have the
+@ guard. See the comment on MPlayJumpTableCopy there.
+	bx lr
+#else
 	push {r0}
 	lsrs r0, r2, 25
 	bne chk_adr_r2_done @ if adr >= 0x2000000 (i.e. not in BIOS ROM), accept it
@@ -814,6 +838,7 @@ chk_adr_r2_reject:
 chk_adr_r2_done:
 	pop {r0}
 	bx lr
+#endif
 
 	.align 2, 0
 lt_MPlayJumpTableTemplate: .word gMPlayJumpTableTemplate

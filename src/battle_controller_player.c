@@ -35,6 +35,9 @@
 #include "constants/songs.h"
 #include "constants/trainers.h"
 #include "constants/rgb.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
 
 static void PlayerHandleGetMonData(void);
 static void PlayerHandleSetMonData(void);
@@ -114,7 +117,11 @@ static void Task_UpdateLvlInHealthbox(u8);
 static void PrintLinkStandbyMsg(void);
 static u32 CopyPlayerMonData(u8, u8 *);
 static void SetPlayerMonData(u8);
+#if PLATFORM_3DS
+static void StartSendOutAnim(u8, bool8, bool8);
+#else
 static void StartSendOutAnim(u8, bool8);
+#endif
 static void DoSwitchOutAnimation(void);
 static void PlayerDoMoveAnimation(void);
 static void Task_StartSendOutAnim(u8);
@@ -123,48 +130,200 @@ static void EndDrawPartyStatusSummary(void);
 #if PLATFORM_3DS
 // ---- second-screen battle items --------------------------------------------
 //
-// The touch screen is an ALTERNATIVE route to the same battle action, never a
-// replacement. Every hook below is a pure early return, so with nothing queued
-// the d-pad path through the bag and party menus behaves exactly as it always
-// did.
+// The touch screen is a second way to the same battle action. It never replaces
+// the usual way. Each hook below is only an early return. Thus, with nothing in
+// the queue, the d-pad path through the bag and party menus does not change.
 //
-// Using an item takes three separate questions from the engine: choose an
-// action, then an item, then a target. Queueing all three up front lets the
-// touch screen answer them without the top-screen menus opening at all.
+// To use an item, the engine asks only two questions: choose an action, then
+// choose an item. The engine never asks the player which Pokemon an item is
+// for. In HandleTurnActionSelectionState (src/battle_main.c), B_ACTION_USE_ITEM
+// only sends BtlController_EmitChooseItem. The target is a client-side matter.
+// The party menu applies the heal through ItemUseCB_Medicine (src/party_menu.c)
+// before it returns the item id. The engine's own script for a player item does
+// nothing:
+//
+//     BattleScript_PlayerUsesItem::      @ data/battle_scripts_2.s
+//         moveendcase MOVEEND_MIRROR_MOVE
+//         end
+//
+// Thus the two answers are not sufficient. Ctr3dsQueueBattleItem must also do
+// what the bag and party menu do: apply the effect and remove the item. If not,
+// the turn passes and nothing occurs.
 static void HandleInputChooseAction(void);
 static void PlayerBufferExecCompleted(void);
 
-static u16   sCtr3dsPendingItem;
-static u8    sCtr3dsPendingTarget;
-static bool8 sCtr3dsHasTarget;
+static u16 sCtr3dsPendingItem;
 
 static void Ctr3dsClearPending(void)
 {
     sCtr3dsPendingItem = ITEM_NONE;
-    sCtr3dsPendingTarget = 0;
-    sCtr3dsHasTarget = FALSE;
 }
 
-// "Only at certain times" means exactly this: the player's controller is
-// sitting in action selection, which is when the d-pad could pick BAG too.
+// Which battler is the player. This is not gActiveBattler, on purpose.
+//
+// The global gActiveBattler is the loop variable of the controller dispatch in
+// BattleMainCB1 (src/battle_main.c):
+//
+//   for (gActiveBattler = 0; gActiveBattler < gBattlersCount; gActiveBattler++)
+//       gBattlerControllerFuncs[gActiveBattler]();
+//
+// When that loop returns, it holds gBattlersCount, which is not a battler. All
+// of this block runs from the per-frame hook of the second screen, after
+// BattleMainCB1 returns. Thus gActiveBattler is never valid here. In a double
+// battle, gBattlersCount is 4, which is out of bounds for a MAX_BATTLERS_COUNT
+// array.
+static u8 Ctr3dsPlayerBattler(void)
+{
+    return GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+}
+
+// "Only at certain times" means this: the player's controller is in action
+// selection. At that time, the d-pad can also choose BAG.
 bool8 Ctr3dsPlayerIsChoosingAction(void)
 {
-    return gMain.inBattle
-        && gBattlerControllerFuncs[gActiveBattler] == HandleInputChooseAction;
+    u8 battler;
+
+    if (!gMain.inBattle)
+        return FALSE;
+
+    battler = Ctr3dsPlayerBattler();
+    if (battler >= MAX_BATTLERS_COUNT)
+        return FALSE;
+
+    return gBattlerControllerFuncs[battler] == HandleInputChooseAction;
 }
 
-void Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
+// PokemonUseItemEffects writes gBattleMons[].hp, and HealStatusConditions
+// updates the status. But nothing draws the sprite again. The d-pad path gets
+// this when the battle screen shows again after the party menu closes, and this
+// path has no such step. Without this function, the bar on the top screen keeps
+// the old value until the next damage.
+static void Ctr3dsRefreshHealthbox(u8 partySlot)
 {
+    u32 i;
+
+    for (i = 0; i < gBattlersCount; i++)
+        if (GetBattlerSide(i) == B_SIDE_PLAYER && gBattlerPartyIndexes[i] == partySlot)
+            UpdateHealthboxAttribute(gHealthboxSpriteIds[i],
+                                     &gPlayerParty[partySlot], HEALTHBOX_ALL);
+}
+
+// Changes the state that each ItemUseInBattle_* handler in src/item_use.c
+// changes, with none of its top-screen UI. Returns one of the CTR3DS_ITEM_*
+// codes. Only QUEUED means that the caller must continue and use the turn.
+//
+// The partySlot value is an index into gPlayerParty, with no translation.
+// Outside the party menu, gPlayerParty is in field order and
+// gBattlerPartyIndexes holds field ids. ExecuteTableBasedItemEffect_
+// (src/party_menu.c) calls GetPartyIdFromBattleSlot only because
+// UpdatePartyToBattleOrder changed the order of the array for a short time. The
+// second screen never does that.
+static u8 Ctr3dsApplyBattleItem(u16 item, u8 partySlot)
+{
+    switch (GetItemBattleUsage(item))
+    {
+    case ITEM_B_USE_MEDICINE:
+        // Inverted return: TRUE means that it would do nothing. Here the
+        // vanilla bag goes back to the item list, and does not use the turn
+        // (ItemUseCB_Medicine clears gPartyMenuUseExitCallback). This code does
+        // the same.
+        if (PokemonUseItemEffects(&gPlayerParty[partySlot], item, partySlot, 0, FALSE))
+            return CTR3DS_ITEM_NO_EFFECT;
+
+        RemoveBagItem(item, 1);
+        Ctr3dsRefreshHealthbox(partySlot);
+        return CTR3DS_ITEM_QUEUED;
+
+    case ITEM_B_USE_OTHER:
+        // A ball applies nothing, because gBattlescriptsForBallThrow does the
+        // throw. As ItemUseInBattle_PokeBall does, this removes the ball from
+        // the bag, and refuses when there is no space for the catch.
+        if (item <= LAST_BALL)
+        {
+            if (IsPlayerPartyAndPokemonStorageFull())
+                return CTR3DS_ITEM_NOT_NOW;
+
+            RemoveBagItem(item, 1);
+            return CTR3DS_ITEM_QUEUED;
+        }
+
+        // Poke Doll and Fluffy Tail: gBattlescriptsForRunningByItem does the
+        // escape. As ItemUseInBattle_Escape does, this refuses them in a
+        // trainer battle.
+        if (item == ITEM_POKE_DOLL || item == ITEM_FLUFFY_TAIL)
+        {
+            if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)
+                return CTR3DS_ITEM_NOT_NOW;
+
+            RemoveBagItem(item, 1);
+            return CTR3DS_ITEM_QUEUED;
+        }
+
+        // X items, Dire Hit and Guard Spec. These ignore partySlot and act on
+        // the Pokemon that is out, as ItemUseInBattle_StatIncrease does.
+        {
+            u8 outSlot = gBattlerPartyIndexes[gBattlerInMenuId];
+
+            if (PokemonUseItemEffects(&gPlayerParty[outSlot], item, outSlot, 0, FALSE))
+                return CTR3DS_ITEM_NO_EFFECT;
+
+            RemoveBagItem(item, 1);
+            return CTR3DS_ITEM_QUEUED;
+        }
+
+    default:
+        return CTR3DS_ITEM_NOT_NOW;
+    }
+}
+
+u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
+{
+    u8 savedBattler, savedInMenu, result;
+
     if (!Ctr3dsPlayerIsChoosingAction())
-        return;
+        return CTR3DS_ITEM_NOT_NOW;
 
-    sCtr3dsPendingItem = item;
-    sCtr3dsPendingTarget = partySlot;
-    sCtr3dsHasTarget = TRUE;
+    // The same battle types in which HandleTurnActionSelectionState refuses the
+    // action (src/battle_main.c, B_ACTION_USE_ITEM,
+    // BattleScript_ActionSelectionItemsCantBeUsed). A check there and not here
+    // would use the item for an action that the engine then discards.
+    if (gBattleTypeFlags & (BATTLE_TYPE_LINK
+                            | BATTLE_TYPE_FRONTIER_NO_PYRAMID
+                            | BATTLE_TYPE_EREADER_TRAINER
+                            | BATTLE_TYPE_RECORDED_LINK))
+        return CTR3DS_ITEM_NOT_NOW;
 
-    // Identical to picking BAG with the d-pad; see HandleInputChooseAction.
-    BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_ITEM, 0);
-    PlayerBufferExecCompleted();
+    // All code below uses gBattlerControllerFuncs, gBattleBufferB and gBitTable
+    // through gActiveBattler, and none of it has a version that takes a
+    // battler. Thus the only way to use them from outside the dispatch loop is
+    // to set gActiveBattler to the player while they run. The restore is
+    // necessary, because the engine continues its loop with the value that it
+    // finds.
+    //
+    // The gBattlerInMenuId value changes for the same reason.
+    // PokemonUseItemEffects reads it and sets gActiveBattler from it
+    // (src/pokemon.c). Thus, here, it is the only thing that tells the effect
+    // which battler uses the item.
+    savedBattler = gActiveBattler;
+    savedInMenu = gBattlerInMenuId;
+    gActiveBattler = gBattlerInMenuId = Ctr3dsPlayerBattler();
+
+    result = Ctr3dsApplyBattleItem(item, partySlot);
+
+    if (result == CTR3DS_ITEM_QUEUED)
+    {
+        sCtr3dsPendingItem = item;
+
+        // The same as when the player chooses BAG with the d-pad. See
+        // HandleInputChooseAction.
+        BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_ITEM, 0);
+        PlayerBufferExecCompleted();
+    }
+
+    gActiveBattler = savedBattler;
+    gBattlerInMenuId = savedInMenu;
+
+    return result;
 }
 #endif // PLATFORM_3DS
 
@@ -2237,11 +2396,44 @@ static void PlayerHandleSwitchInAnim(void)
     BattleLoadPlayerMonSpriteGfx(&gPlayerParty[gBattlerPartyIndexes[gActiveBattler]], gActiveBattler);
     gActionSelectionCursor[gActiveBattler] = 0;
     gMoveSelectionCursor[gActiveBattler] = 0;
+#if PLATFORM_3DS
+    #ifdef BATTLE_ENGINE
+    StartSendOutAnim(gActiveBattler, gBattleResources->bufferA[gActiveBattler][2], FALSE);
+    #else
+    StartSendOutAnim(gActiveBattler, gBattleBufferA[gActiveBattler][2], FALSE);
+    #endif
+#else
     StartSendOutAnim(gActiveBattler, gBattleBufferA[gActiveBattler][2]);
+#endif
     gBattlerControllerFuncs[gActiveBattler] = SwitchIn_TryShinyAnimShowHealthbox;
 }
 
+#if PLATFORM_3DS
+// In normal singles, if follower pokemon exists,
+// and the pokemon following is being sent out,
+// have it slide in instead of being thrown
+static bool8 ShouldDoSlideInAnim(void) {
+    struct ObjectEvent *followerObj = GetFollowerObject();
+    if (!followerObj || followerObj->invisible)
+        return FALSE;
+
+    if (gBattleTypeFlags & (
+        BATTLE_TYPE_LINK | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_FIRST_BATTLE |
+        BATTLE_TYPE_SAFARI | BATTLE_TYPE_WALLY_TUTORIAL | BATTLE_TYPE_EREADER_TRAINER | BATTLE_TYPE_TWO_OPPONENTS |
+        BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_RECORDED | BATTLE_TYPE_TRAINER_HILL)
+    )
+        return FALSE;
+
+    if (GetFirstLiveMon() != &gPlayerParty[gBattlerPartyIndexes[gActiveBattler]])
+        return FALSE;
+
+    return TRUE;
+}
+
+static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit, bool8 doSlideIn)
+#else
 static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit)
+#endif
 {
     u16 species;
 
@@ -2269,7 +2461,11 @@ static void StartSendOutAnim(u8 battler, bool8 dontClearSubstituteBit)
     gSprites[gBattlerSpriteIds[battler]].invisible = TRUE;
     gSprites[gBattlerSpriteIds[battler]].callback = SpriteCallbackDummy;
 
+#if PLATFORM_3DS
+    gSprites[gBattleControllerData[battler]].data[0] = DoPokeballSendOutAnimation(0, doSlideIn ? POKEBALL_PLAYER_SLIDEIN : POKEBALL_PLAYER_SENDOUT);
+#else
     gSprites[gBattleControllerData[battler]].data[0] = DoPokeballSendOutAnimation(0, POKEBALL_PLAYER_SENDOUT);
+#endif
 }
 
 static void PlayerHandleReturnMonToBall(void)
@@ -2625,8 +2821,8 @@ static void PlayerHandleChooseAction(void)
     s32 i;
 
 #if PLATFORM_3DS
-    // Bounds the lifetime of a touch-screen queue to a single selection: a
-    // queue that was never consumed must not fire on a later turn.
+    // A touch-screen queue lasts for only one selection. A queue that the
+    // engine did not use must not fire on a later turn.
     Ctr3dsClearPending();
 #endif
 
@@ -2709,8 +2905,8 @@ static void PlayerHandleChooseItem(void)
     s32 i;
 
 #if PLATFORM_3DS
-    // Already chosen on the touch screen: answer and skip opening the bag. The
-    // target stays queued for PlayerHandleChoosePokemon below.
+    // The player already chose and used the item on the touch screen. Give the
+    // engine its id, and do not open the bag.
     if (sCtr3dsPendingItem != ITEM_NONE)
     {
         gSpecialVar_ItemId = sCtr3dsPendingItem;
@@ -2735,20 +2931,6 @@ static void PlayerHandleChoosePokemon(void)
 
     for (i = 0; i < (int)ARRAY_COUNT(gBattlePartyCurrentOrder); i++)
         gBattlePartyCurrentOrder[i] = gBattleBufferA[gActiveBattler][4 + i];
-
-#if PLATFORM_3DS
-    // Target already chosen on the touch screen: answer with the party slot,
-    // the same value WaitForMonSelection sends after the party menu closes.
-    if (sCtr3dsHasTarget)
-    {
-        sCtr3dsHasTarget = FALSE;
-        BtlController_EmitChosenMonReturnValue(B_COMM_TO_ENGINE,
-                                               sCtr3dsPendingTarget,
-                                               gBattlePartyCurrentOrder);
-        PlayerBufferExecCompleted();
-        return;
-    }
-#endif
 
     if (gBattleTypeFlags & BATTLE_TYPE_ARENA && (gBattleBufferA[gActiveBattler][1] & 0xF) != PARTY_ACTION_CANT_SWITCH)
     {
@@ -3038,7 +3220,11 @@ static void PlayerHandleIntroTrainerBallThrow(void)
     gSprites[gBattlerSpriteIds[gActiveBattler]].sBattlerId = gActiveBattler;
 
     StoreSpriteCallbackInData6(&gSprites[gBattlerSpriteIds[gActiveBattler]], SpriteCB_FreePlayerSpriteLoadMonSprite);
+#if PLATFORM_3DS
+    StartSpriteAnim(&gSprites[gBattlerSpriteIds[gActiveBattler]], ShouldDoSlideInAnim() ? 2 : 1);
+#else
     StartSpriteAnim(&gSprites[gBattlerSpriteIds[gActiveBattler]], 1);
+#endif
 
     paletteNum = AllocSpritePalette(0xD6F8);
     LoadCompressedPalette(gTrainerBackPicPaletteTable[gSaveBlock2Ptr->playerGender].data, OBJ_PLTT_ID(paletteNum), PLTT_SIZE_4BPP);
@@ -3085,16 +3271,28 @@ static void Task_StartSendOutAnim(u8 taskId)
         if (!IsDoubleBattle() || (gBattleTypeFlags & BATTLE_TYPE_MULTI))
         {
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
         }
         else
         {
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
             gActiveBattler ^= BIT_FLANK;
             gBattleBufferA[gActiveBattler][1] = gBattlerPartyIndexes[gActiveBattler];
             BattleLoadPlayerMonSpriteGfx(&gPlayerParty[gBattlerPartyIndexes[gActiveBattler]], gActiveBattler);
+#if PLATFORM_3DS
+            StartSendOutAnim(gActiveBattler, FALSE, ShouldDoSlideInAnim());
+#else
             StartSendOutAnim(gActiveBattler, FALSE);
+#endif
             gActiveBattler ^= BIT_FLANK;
         }
         gBattlerControllerFuncs[gActiveBattler] = Intro_TryShinyAnimShowHealthbox;

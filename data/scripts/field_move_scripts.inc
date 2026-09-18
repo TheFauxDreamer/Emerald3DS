@@ -1,3 +1,10 @@
+#if PLATFORM_3DS
+.macro IsFollowerFieldMoveUser var:req
+callfunc ScrFunc_IsFollowerFieldMoveUser
+.2byte \var
+.endm
+
+#endif
 @ Interact with cuttable tree
 EventScript_CutTree::
 	lockall
@@ -11,8 +18,18 @@ EventScript_CutTree::
 	goto_if_eq VAR_RESULT, NO, EventScript_CancelCut
 	msgbox Text_MonUsedFieldMove, MSGBOX_DEFAULT
 	closemessage
+#if PLATFORM_3DS
+EventScript_CutTreeCommon:
+	IsFollowerFieldMoveUser VAR_0x8004
+	setfieldeffectargument 3, VAR_0x8004 @ skip pose if so
+#endif
 	dofieldeffect FLDEFF_USE_CUT_ON_TREE
 	waitstate
+#if PLATFORM_3DS
+EventScript_CutTreeDown:: @ fallthrough
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+	call_if_eq VAR_0x8004, TRUE, EventScript_FollowerFieldMove
+#else
 	goto EventScript_CutTreeDown
 	end
 
@@ -25,12 +42,20 @@ EventScript_UseCut::
 	end
 
 EventScript_CutTreeDown::
+#endif
 	applymovement VAR_LAST_TALKED, Movement_CutTreeDown
 	waitmovement 0
 	removeobject VAR_LAST_TALKED
 	releaseall
 	end
 
+#if PLATFORM_3DS
+@ Use cut from party menu
+EventScript_UseCut::
+	lockall
+	goto EventScript_CutTreeCommon
+
+#endif
 Movement_CutTreeDown:
 	cut_tree
 	step_end
@@ -57,6 +82,13 @@ Text_CantCut:
 	.string "This tree looks like it can be\n"
 	.string "CUT down!$"
 
+#if PLATFORM_3DS
+@ Use rock smash from party menu
+EventScript_UseRockSmash::
+	lockall
+	goto EventScript_RockSmashCommon
+
+#endif
 @ Interact with smashable rock
 EventScript_RockSmash::
 	lockall
@@ -70,8 +102,19 @@ EventScript_RockSmash::
 	goto_if_eq VAR_RESULT, NO, EventScript_CancelSmash
 	msgbox Text_MonUsedFieldMove, MSGBOX_DEFAULT
 	closemessage
+#if PLATFORM_3DS
+EventScript_RockSmashCommon:
+	@ check if follower should use the field move
+	IsFollowerFieldMoveUser VAR_0x8004
+	setfieldeffectargument 3, VAR_0x8004 @ skip pose if so
+#endif
 	dofieldeffect FLDEFF_USE_ROCK_SMASH
 	waitstate
+#if PLATFORM_3DS
+EventScript_SmashRock:: @ fallthrough
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+	call_if_eq VAR_0x8004, TRUE, EventScript_FollowerFieldMove
+#else
 	goto EventScript_SmashRock
 	end
 
@@ -84,6 +127,7 @@ EventScript_UseRockSmash::
 	end
 
 EventScript_SmashRock::
+#endif
 	applymovement VAR_LAST_TALKED, Movement_SmashRock
 	waitmovement 0
 	removeobject VAR_LAST_TALKED
@@ -95,10 +139,120 @@ EventScript_SmashRock::
 	releaseall
 	end
 
+#if PLATFORM_3DS
+EventScript_FollowerFieldMove:
+	callfunc ScrFunc_GetDirectionToFace
+	.2byte VAR_0x8005
+	.byte OBJ_EVENT_ID_FOLLOWER
+	.byte OBJ_EVENT_ID_PLAYER
+	specialvar VAR_0x8006, GetPlayerFacingDirection
+	goto_if_eq VAR_0x8005, DIR_NONE, EventScript_FollowerFieldMoveEnd
+	@ Swap follower and player
+	call EventScript_FollowerSwap
+	@ Face follower in direction and jump
+	switch VAR_0x8006
+	case DIR_NORTH, EventScript_FollowerJumpNorth
+	case DIR_EAST, EventScript_FollowerJumpEast
+	case DIR_SOUTH, EventScript_FollowerJumpSouth
+	case DIR_WEST, EventScript_FollowerJumpWest
+EventScript_FollowerFieldMoveEnd:
+	return
+
+EventScript_FollowerSwap:
+	switch VAR_0x8005
+	case DIR_NORTH, EventScript_FollowerMoveNorth
+	case DIR_EAST, EventScript_FollowerMoveEast
+	case DIR_SOUTH, EventScript_FollowerMoveSouth
+	case DIR_WEST, EventScript_FollowerMoveWest
+	return
+
+EventScript_FollowerMoveNorth:
+	applymovement OBJ_EVENT_ID_PLAYER, Movement_WalkDown
+	waitmovement 0
+	applymovement OBJ_EVENT_ID_PLAYER, Common_Movement_FaceUp
+	waitmovement 0
+	return
+
+EventScript_FollowerMoveEast:
+	applymovement OBJ_EVENT_ID_PLAYER, Movement_WalkLeft
+	waitmovement 0
+	applymovement OBJ_EVENT_ID_PLAYER, Common_Movement_FaceRight
+	waitmovement 0
+	return
+
+EventScript_FollowerMoveSouth:
+	applymovement OBJ_EVENT_ID_PLAYER, Movement_WalkUp
+	waitmovement 0
+	applymovement OBJ_EVENT_ID_PLAYER, Common_Movement_FaceDown
+	waitmovement 0
+	return
+
+EventScript_FollowerMoveWest:
+	applymovement OBJ_EVENT_ID_PLAYER, Movement_WalkRight
+	waitmovement 0
+	applymovement OBJ_EVENT_ID_PLAYER, Common_Movement_FaceLeft
+	waitmovement 0
+	return
+
+EventScript_FollowerJumpNorth:
+	applymovement OBJ_EVENT_ID_FOLLOWER, Movement_JumpUp
+	waitmovement 0
+	return
+
+EventScript_FollowerJumpEast:
+	applymovement OBJ_EVENT_ID_FOLLOWER, Movement_JumpRight
+	waitmovement 0
+	return
+
+EventScript_FollowerJumpSouth:
+	applymovement OBJ_EVENT_ID_FOLLOWER, Movement_JumpDown
+	waitmovement 0
+	return
+
+EventScript_FollowerJumpWest:
+	applymovement OBJ_EVENT_ID_FOLLOWER, Movement_JumpLeft
+	waitmovement 0
+	return
+
+#endif
 EventScript_EndSmash::
 	releaseall
 	end
 
+#if PLATFORM_3DS
+Movement_WalkUp:
+	walk_up
+	step_end
+
+Movement_JumpUp:
+	jump_in_place_up
+	step_end
+
+Movement_WalkRight:
+	walk_right
+	step_end
+
+Movement_JumpRight:
+	jump_in_place_right
+	step_end
+
+Movement_WalkDown:
+	walk_down
+	step_end
+
+Movement_JumpDown:
+	jump_in_place_down
+	step_end
+
+Movement_WalkLeft:
+	walk_left
+	step_end
+
+Movement_JumpLeft:
+	jump_in_place_left
+	step_end
+
+#endif
 Movement_SmashRock:
 	rock_smash_break
 	step_end
@@ -262,6 +416,26 @@ EventScript_EndSurface::
 	releaseall
 	end
 
+#if PLATFORM_3DS
+EventScript_DigCommon:
+	callfunc ScrFunc_IsFollowerFieldMoveUser
+	.2byte VAR_0x8004
+	setfieldeffectargument 3, VAR_0x8004 @ skip pose if true
+	dofieldeffect FLDEFF_USE_DIG
+	waitstate
+EventScript_DigSealedChamber:: @ fallthrough
+	setflag FLAG_SAFE_FOLLOWER_MOVEMENT
+	call_if_eq VAR_0x8004, TRUE, EventScript_FollowerFieldMove
+	callnative DoBrailleDigEffect
+	releaseall
+	end
+
+@ Use Dig from party menu
+EventScript_UseDig::
+	lockall
+	goto EventScript_DigCommon
+
+#endif
 Text_CantDive:
 	.string "The sea is deep here. A POKéMON\n"
 	.string "may be able to go underwater.$"

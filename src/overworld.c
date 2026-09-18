@@ -66,6 +66,9 @@
 #include "constants/songs.h"
 #include "constants/trainer_hill.h"
 #include "constants/weather.h"
+#if PLATFORM_3DS
+#include "rtc.h"
+#endif
 
 struct CableClubPlayer
 {
@@ -189,6 +192,10 @@ COMMON_DATA bool8 (*gFieldCallback2)(void) = NULL;
 COMMON_DATA u8 gLocalLinkPlayerId = 0; // This is our player id in a multiplayer mode.
 COMMON_DATA u8 gFieldLinkPlayerCount = 0;
 
+#if PLATFORM_3DS
+
+// EWRAM vars
+#endif
 EWRAM_DATA static u8 sObjectEventLoadFlag = 0;
 EWRAM_DATA struct WarpData gLastUsedWarp = {0};
 EWRAM_DATA static struct WarpData sWarpDestination = {0};  // new warp position
@@ -475,6 +482,9 @@ void LoadObjEventTemplatesFromHeader(void)
     CpuCopy32(gMapHeader.events->objectEvents,
               gSaveBlock1Ptr->objectEventTemplates,
               gMapHeader.events->objectEventCount * sizeof(struct ObjectEventTemplate));
+#if PLATFORM_3DS
+    AddDayCareYardTemplates();
+#endif
 }
 
 void LoadSaveblockObjEventScripts(void)
@@ -485,6 +495,9 @@ void LoadSaveblockObjEventScripts(void)
 
     for (i = 0; i < OBJECT_EVENT_TEMPLATES_COUNT; i++)
         savObjTemplates[i].script = mapHeaderObjTemplates[i].script;
+#if PLATFORM_3DS
+    ClearDayCareYardScripts();
+#endif
 }
 
 void SetObjEventTemplateCoords(u8 localId, s16 x, s16 y)
@@ -740,6 +753,15 @@ void SetContinueGameWarpToDynamicWarp(int unused)
 const struct MapConnection *GetMapConnection(u8 dir)
 {
     s32 i;
+#ifdef UBFIX
+    // UB NULL: gMapHeader.connections is NULL on a map that has no
+    // connections, which is most maps. The test below reads the inner pointer,
+    // two lines too late to help. GetIncomingConnection (src/fieldmap.c) has
+    // this guard already. A GBA reads the BIOS at address 0. On the 3DS,
+    // address 0 is not mapped.
+    if (gMapHeader.connections == NULL)
+        return NULL;
+#endif
     s32 count = gMapHeader.connections->count;
     const struct MapConnection *connection = gMapHeader.connections->connections;
 
@@ -1487,8 +1509,16 @@ void CB2_Overworld(void)
     if (fading)
         SetVBlankCallback(NULL);
     OverworldBasic();
+#if PLATFORM_3DS
+    if (fading) {
+#else
     if (fading)
+#endif
         SetFieldVBlankCallback();
+#if PLATFORM_3DS
+        return;
+    }
+#endif
 }
 
 void SetMainCallback1(MainCallback cb)
@@ -1967,6 +1997,12 @@ static bool32 ReturnToFieldLocal(u8 *state)
         ResetScreenForMapLoad();
         ResumeMap(FALSE);
         InitObjectEventsReturnToField();
+#if PLATFORM_3DS
+        if (gFieldCallback == FieldCallback_Fly)
+            RemoveFollowingPokemon();
+        else
+            UpdateFollowingPokemon();
+#endif
         SetCameraToTrackPlayer();
         (*state)++;
         break;
@@ -2137,10 +2173,14 @@ static void ResumeMap(bool32 a1)
     ResetAllPicSprites();
     ResetCameraUpdateInfo();
     InstallCameraPanAheadCallback();
+#if PLATFORM_3DS
+    FreeAllSpritePalettes();
+#else
     if (!a1)
         InitObjectEventPalettes(0);
     else
         InitObjectEventPalettes(1);
+#endif
 
     FieldEffectActiveListClear();
     StartWeather();
@@ -2174,6 +2214,9 @@ static void InitObjectEventsLocal(void)
     SetPlayerAvatarTransitionFlags(player->transitionFlags);
     ResetInitialPlayerAvatarState();
     TrySpawnObjectEvents(0, 0);
+#if PLATFORM_3DS
+    UpdateFollowingPokemon();
+#endif
     TryRunOnWarpIntoMapScript();
 }
 
@@ -2963,7 +3006,11 @@ static void InitLinkPlayerObjectEventPos(struct ObjectEvent *objEvent, s16 x, s1
     objEvent->previousCoords.y = y;
     SetSpritePosToMapCoords(x, y, &objEvent->initialCoords.x, &objEvent->initialCoords.y);
     objEvent->initialCoords.x += 8;
+#if PLATFORM_3DS
+    ObjectEventUpdateElevation(objEvent, NULL);
+#else
     ObjectEventUpdateElevation(objEvent);
+#endif
 }
 
 static void UNUSED SetLinkPlayerObjectRange(u8 linkPlayerId, u8 dir)
@@ -3103,7 +3150,11 @@ static bool8 FacingHandler_DpadMovement(struct LinkPlayerObjectEvent *linkPlayer
     {
         objEvent->directionSequenceIndex = 16;
         ShiftObjectEventCoords(objEvent, x, y);
+#if PLATFORM_3DS
+        ObjectEventUpdateElevation(objEvent, NULL);
+#else
         ObjectEventUpdateElevation(objEvent);
+#endif
         return TRUE;
     }
 }
@@ -3224,3 +3275,27 @@ static void SpriteCB_LinkPlayer(struct Sprite *sprite)
         sprite->data[7]++;
     }
 }
+
+#if PLATFORM_3DS
+// The time of day from the game clock. The hours are those of UpdateTimeOfDay
+// in the lighting branch of aarant's fork, without the palette blend. On the
+// 3DS, the game clock runs on the console clock (src/siirtc.c).
+u8 GetTimeOfDay(void)
+{
+    RtcCalcLocalTime();
+    if (gLocalTime.hours < 4 || gLocalTime.hours >= 20)
+        return TIME_OF_DAY_NIGHT;
+    if (gLocalTime.hours >= 18)
+        return TIME_OF_DAY_TWILIGHT;
+    return TIME_OF_DAY_DAY;
+}
+
+// TRUE for a map type that is outdoors, as in the lighting branch.
+bool8 MapHasNaturalLight(u8 mapType)
+{
+    return mapType == MAP_TYPE_TOWN
+        || mapType == MAP_TYPE_CITY
+        || mapType == MAP_TYPE_ROUTE
+        || mapType == MAP_TYPE_OCEAN_ROUTE;
+}
+#endif

@@ -44,6 +44,9 @@ u8 GetAilmentFromStatus(u32 status);
 u8 GetMonAilment(struct Pokemon *mon);
 void DisplayPartyMenuStdMessage(u32 stringId);
 bool8 FieldCallback_PrepareFadeInFromMenu(void);
+#if PLATFORM_3DS
+bool8 FieldCallback_PrepareFadeInForTeleport(void);
+#endif
 void CB2_ReturnToPartyMenuFromFlyMap(void);
 void LoadHeldItemIcons(void);
 void DrawHeldItemIconsForTrade(u8 *partyCounts, u8 *partySpriteIds, u8 whichParty);
@@ -89,5 +92,13 @@ void MoveDeleterForgetMove(void);
 void BufferMoveDeleterNicknameAndMove(void);
 void GetNumMovesSelectedMonHas(void);
 void MoveDeleterChooseMoveToForget(void);
+
+#if PLATFORM_3DS
+// TRUE while the in-battle party menu (or the summary screen that opens from
+// it) keeps gPlayerParty in battle order. See src/party_menu.c. The bottom
+// screen reads the party through 3ds/ui/ui_team.c, which undoes the change of
+// order.
+bool8 Ctr3dsPartyInBattleOrder(void);
+#endif
 
 #endif // GUARD_PARTY_MENU_H

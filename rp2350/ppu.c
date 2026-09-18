@@ -30,7 +30,11 @@
 // backdrop fill (skipped pixels keep the previous frame's contents); alpha
 // blending reads the "below" pixel and layer byte that may be stale from the
 // previous frame during the backdrop pass; sprites can alpha-blend over
-// sprites; OBJ-window (DISPCNT bit 15) enables windowing but has no region.
+// sprites.
+//
+// Both renderers implement the OBJ window. A sprite in OBJ mode 2 is never
+// drawn. With DISPCNT bit 15 set, its opaque texels are the region of the
+// window (see winRowFor).
 
 #include "ppu.h"
 
@@ -109,11 +113,26 @@ static uint16_t pal565fx[512] PPU_EWRAM;
 static uint16_t bevb5[32], bevb6[64];
 
 // ---- windows ----------------------------------------------------------------
+// Window bounds do not wrap. GBATEK:
+//
+//   "Garbage values of X2>240 or X1>X2 are interpreted as X2=240.
+//    Garbage values of Y2>160 or Y1>Y2 are interpreted as Y2=160."
+//
+// Thus an inverted range goes from X1 or Y1 to the edge of the screen. It is
+// empty when the start is already past the edge. The reference in web/app.js
+// has the same clamp, so ppu_validate.sh stays byte-exact.
+//
+// Code that makes window bounds from task data can make an inverted range. For
+// example, battle_anim_dark.c and battle_anim_effects_2.c make gBattle_WIN0H in
+// that way. A wrap would draw those rows, where the hardware draws nothing.
+//
+// This function is the vertical half (win0v and win1v). The horizontal half is
+// winrowFill below.
 static bool inWindowRange(int value, uint16_t range) {
     int start = range >> 8;
     int end = range & 0xff;
-    return start <= end ? (value >= start && value < end)
-                        : (value >= start || value < end);
+    if (start > end || end > HEIGHT) end = HEIGHT;
+    return value >= start && value < end;
 }
 
 // Window mask for one scanline (only valid when F.windowsOn). Window registers
@@ -125,20 +144,35 @@ static int winrow_u;   // the row's uniform mask value, or -1 if not uniform
 static void winrowFill(uint16_t hrange, uint8_t val) {
     int start = hrange >> 8;
     int end = hrange & 0xff;
-    if (start <= end) {
-        if (start < WIDTH) memset(&winrow[start], val, (end < WIDTH ? end : WIDTH) - start);
-    } else {
-        if (end > 0) memset(&winrow[0], val, end < WIDTH ? end : WIDTH);
-        if (start < WIDTH) memset(&winrow[start], val, WIDTH - start);
-    }
+    // If X1>X2 or X2>240, X2 clamps to the right edge. It never wraps. See the
+    // note on inWindowRange.
+    if (start > end || end > WIDTH) end = WIDTH;
+    if (start >= end) return;   // X1 at or past the right edge: nothing shown
+    memset(&winrow[start], val, end - start);
 }
 
-// Returns the row's mask array, or NULL meaning "mask is 0x3f everywhere".
+static void objWinFill(int y, uint8_t val);   // with the sprite list below
+
+// Returns the mask array of the row, or NULL, which means "the mask is 0x3f
+// everywhere".
+//
+// The OBJ window (DISPCNT bit 15) is the silhouette of each sprite in OBJ mode
+// 2. Inside it, the layers come from the high byte of WINOUT. It is below WIN0
+// and WIN1 and above the outside. Thus this stamps it directly over the outside
+// fill, and the two rectangles then overwrite it.
+//
+// The metal shine and stat-change effects in battle need it.
+// CreateInvisibleSpriteCopy (src/battle_anim_mons.c) makes a priority-0, mode-2
+// copy of the battler, so the effect on BG1 shows only inside the Pokemon.
+// Without a region, that copy would show as a usual sprite in front of all
+// layers, and also in front of the text box. The effect would not show.
 static const uint8_t *winRowFor(int y) {
     if (!F.windowsOn) return NULL;
     if (winrow_y != y) {
         winrow_y = y;
         memset(winrow, F.winout & 0x3f, WIDTH);
+        if (F.dispcnt & 0x8000)
+            objWinFill(y, (F.winout >> 8) & 0x3f);
         // win1 first, then win0 overwrites: matches the reference's win0-first
         // priority check.
         if ((F.dispcnt & 0x4000) && inWindowRange(y, F.win1v))
@@ -437,9 +471,15 @@ static int g_nspr;
 // skip-scanning the whole list 4 times per line.
 static uint8_t g_sprByPrio[4][128] PPU_EWRAM;
 static int g_nsprByPrio[4];
+// OBJ-window sprites (mode 2) use g_spr too, from the far end: g_spr[127-k] for
+// k < g_nobjwin. Each OAM entry is one sprite or the other, so the two ends can
+// never meet. This needs no new buffer (the EWRAM region of the RP2350 is full
+// to the byte).
+static int g_nobjwin;
 
 static void buildSpriteList(uint16_t dispcnt) {
     g_nspr = 0;
+    g_nobjwin = 0;
     g_nsprByPrio[0] = g_nsprByPrio[1] = g_nsprByPrio[2] = g_nsprByPrio[3] = 0;
     if (!(dispcnt & 0x1000)) return;
     // OAM order ascending; render walks the list backwards to keep the
@@ -454,7 +494,11 @@ static void buildSpriteList(uint16_t dispcnt) {
         if (!affine && (a0 & 0x0200)) continue;  // disabled
         int shape = (a0 >> 14) & 3;
         if (shape == 3) continue;
-        sprite_t *s = &g_spr[g_nspr++];
+        // OBJ mode 2 is the OBJ window. It is never drawn. It only marks the
+        // region of the window, and only while DISPCNT has that window on.
+        bool objwin = ((a0 >> 10) & 3) == 2;
+        if (objwin && !(dispcnt & 0x8000)) continue;
+        sprite_t *s = objwin ? &g_spr[127 - g_nobjwin++] : &g_spr[g_nspr++];
         s->w = obj_sizes[shape][(a1 >> 14) & 3][0];
         s->h = obj_sizes[shape][(a1 >> 14) & 3][1];
         s->affine = (uint8_t)affine;
@@ -479,6 +523,7 @@ static void buildSpriteList(uint16_t dispcnt) {
             s->pc = (int16_t)signed16(ld16(OAMb, mb + 22));
             s->pd = (int16_t)signed16(ld16(OAMb, mb + 30));
         }
+        if (objwin) continue;
         int prio = s->priority;
         g_sprByPrio[prio][g_nsprByPrio[prio]++] = (uint8_t)(g_nspr - 1);
     }
@@ -759,6 +804,40 @@ static bool objPixel(const sprite_t *s, int x, int y, int *palIdx) {
     return true;
 }
 
+// Stamp the region of the OBJ window on line y into winrow: each opaque texel
+// of each mode-2 sprite on the line. This walks the same coordinates that
+// spritesLine draws (the same row test, flips and affine steps), with one
+// objPixel for each pixel. Only a few effects use these sprites, so the fast
+// paths of spritesLine are not necessary here.
+static void objWinFill(int y, uint8_t val) {
+    for (int k = 0; k < g_nobjwin; k++) {
+        const sprite_t *s = &g_spr[127 - k];
+        int row = y - s->oy;
+        if (row < 0 || row >= s->drawH) continue;
+        int x0 = (s->ox < 0) ? -s->ox : 0;
+        int x1 = (s->ox + s->drawW > WIDTH) ? WIDTH - s->ox : s->drawW;
+        int palIdx;
+        if (s->affine) {
+            int w = s->w, h = s->h;
+            int dy = row - s->drawH / 2;
+            int32_t fx = s->pa * (x0 - s->drawW / 2) + s->pb * dy;
+            int32_t fy = s->pc * (x0 - s->drawW / 2) + s->pd * dy;
+            for (int x = x0; x < x1; x++, fx += s->pa, fy += s->pc) {
+                int px = (fx >> 8) + w / 2;
+                int py = (fy >> 8) + h / 2;
+                if (px < 0 || py < 0 || px >= w || py >= h) continue;
+                if (objPixel(s, px, py, &palIdx)) winrow[s->ox + x] = val;
+            }
+        } else {
+            int py = s->flipV ? s->h - 1 - row : row;
+            for (int x = x0; x < x1; x++) {
+                int px = s->flipH ? s->w - 1 - x : x;
+                if (objPixel(s, px, py, &palIdx)) winrow[s->ox + x] = val;
+            }
+        }
+    }
+}
+
 // Render the sprites' slice of scanline y. priority < 0 means "all priorities"
 // (bitmap modes). Lists are walked backwards = reference's 127 -> 0 OAM order
 // (the per-priority buckets keep OAM order, so this is the same sequence).
@@ -984,8 +1063,23 @@ static void renderFrame(void) {
         } else {
             backdropLine(y);
             PSLOT(2);
+            // Painter's order: back (priority 3) to front (0), and the last
+            // write wins.
+            //
+            // At one priority, the loop goes through the BGs from the highest
+            // number first. On the GBA, the lower-numbered BG wins a tie, so it
+            // must be painted last. The g_bg[] array is in ascending BG number,
+            // so the index descends.
+            //
+            // The battle puts BG0 (the text box) and BG1 (the intro grass) both
+            // at priority 0 (gBattleBgTemplates). An ascending order would draw
+            // the grass over the text box. The web/app.js reference uses the
+            // same order, so ppu_validate.sh stays exact.
+            //
+            // Sprites come after the BG loop, because a sprite is in front of
+            // each BG of its own priority.
             for (int priority = 3; priority >= 0; priority--) {
-                for (int i = 0; i < g_nbg; i++) {
+                for (int i = g_nbg - 1; i >= 0; i--) {
                     if (g_bg[i].priority == priority) {
                         if (g_bg[i].affine) { affineBgLine(&g_bg[i], y); PSLOT(4); }
                         else { textBgLine(&g_bg[i], y); PSLOT(3); }

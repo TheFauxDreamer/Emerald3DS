@@ -1782,6 +1782,13 @@
 	.2byte \quantity
 	.endm
 
+#if PLATFORM_3DS
+  @ Like callnative, but function expects a ctx
+  .macro callfunc func:req
+  .byte SCR_OP_CALLFUNC
+  .4byte \func
+  .endm
+#endif
 
 @ Supplementary
 
@@ -1992,3 +1999,13 @@
 	setvar VAR_0x8006, \item
 	special CreateEnemyEventMon
 	.endm
+#if PLATFORM_3DS
+
+		@ hide any follower pokemon if present,
+	@ putting them into their pokeball;
+	@ by default waits for their movement to finish
+	.macro hidefollower wait=1
+	callfunc ScrFunc_hidefollower
+	.2byte \wait
+	.endm
+#endif

@@ -49,6 +49,15 @@
 #include "tv.h"
 #include "window.h"
 #include "constants/event_objects.h"
+#if PLATFORM_3DS
+#include "event_scripts.h"
+#endif
+
+#if PLATFORM_3DS
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
+#include "../3ds/tweaks.h"
+#endif
 
 typedef u16 (*SpecialFunc)(void);
 typedef void (*NativeFunc)(void);
@@ -103,6 +112,9 @@ bool8 ScrCmd_nop1(struct ScriptContext *ctx)
 
 bool8 ScrCmd_end(struct ScriptContext *ctx)
 {
+#if PLATFORM_3DS
+    FlagClear(FLAG_SAFE_FOLLOWER_MOVEMENT);
+#endif
     StopScript(ctx);
     return FALSE;
 }
@@ -133,12 +145,25 @@ bool8 ScrCmd_specialvar(struct ScriptContext *ctx)
 
 bool8 ScrCmd_callnative(struct ScriptContext *ctx)
 {
+#if PLATFORM_3DS
+    u32 func = ScriptReadWord(ctx);
+    ((NativeFunc) func)();
+#else
     NativeFunc func = (NativeFunc)ScriptReadWord(ctx);
 
     func();
+#endif
     return FALSE;
 }
 
+#if PLATFORM_3DS
+bool8 ScrCmd_callfunc(struct ScriptContext *ctx)
+{
+    u32 func = ScriptReadWord(ctx);
+    return ((ScrCmdFunc) func)(ctx);
+}
+
+#endif
 bool8 ScrCmd_waitstate(struct ScriptContext *ctx)
 {
     ScriptContext_Stop();
@@ -288,6 +313,9 @@ bool8 ScrCmd_returnram(struct ScriptContext *ctx)
 
 bool8 ScrCmd_endram(struct ScriptContext *ctx)
 {
+#if PLATFORM_3DS
+    FlagClear(FLAG_SAFE_FOLLOWER_MOVEMENT);
+#endif
     ClearRamScript();
     StopScript(ctx);
     return TRUE;
@@ -989,13 +1017,49 @@ bool8 ScrCmd_fadeinbgm(struct ScriptContext *ctx)
     return FALSE;
 }
 
+#if PLATFORM_3DS
+struct ObjectEvent * ScriptHideFollower(void) {
+    struct ObjectEvent *obj = GetFollowerObject();
+
+    if (obj == NULL || obj->invisible)
+        return NULL;
+
+    ClearObjectEventMovement(obj, &gSprites[obj->spriteId]);
+    gSprites[obj->spriteId].animCmdIndex = 0; // Reset start frame of animation
+    // Note: ScriptMovement_ returns TRUE on error
+    if (ScriptMovement_StartObjectMovementScript(obj->localId, obj->mapGroup, obj->mapNum, EnterPokeballMovement))
+        return NULL;
+    return obj;
+}
+
+#endif
 bool8 ScrCmd_applymovement(struct ScriptContext *ctx)
 {
     u16 localId = VarGet(ScriptReadHalfword(ctx));
+#if PLATFORM_3DS
+    const u8 *movementScript = (const u8 *)ScriptReadWord(ctx);
+    struct ObjectEvent *objEvent;
+#else
     const void *movementScript = (const void *)ScriptReadWord(ctx);
+#endif
 
+#if PLATFORM_3DS
+    // When applying script movements to follower, it may have frozen animation that must be cleared
+    if (localId == OBJ_EVENT_ID_FOLLOWER && (objEvent = GetFollowerObject()) && objEvent->frozen) {
+        ClearObjectEventMovement(objEvent, &gSprites[objEvent->spriteId]);
+        gSprites[objEvent->spriteId].animCmdIndex = 0; // Reset start frame of animation
+    }
+#endif
     ScriptMovement_StartObjectMovementScript(localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, movementScript);
     sMovingNpcId = localId;
+#if PLATFORM_3DS
+    if (localId != OBJ_EVENT_ID_FOLLOWER &&
+        !FlagGet(FLAG_SAFE_FOLLOWER_MOVEMENT)
+        && (movementScript < Common_Movement_FollowerSafeStart || movementScript > Common_Movement_FollowerSafeEnd))
+    {
+        ScriptHideFollower();
+    }
+#endif
     return FALSE;
 }
 
@@ -1013,7 +1077,19 @@ bool8 ScrCmd_applymovementat(struct ScriptContext *ctx)
 
 static bool8 WaitForMovementFinish(void)
 {
+#if PLATFORM_3DS
+    if (ScriptMovement_IsObjectMovementFinished(sMovingNpcId, sMovingNpcMapNum, sMovingNpcMapGroup)) {
+        struct ObjectEvent *objEvent = GetFollowerObject();
+        // If the follower is still entering the pokeball, wait for it to finish too
+        // This prevents a `release` after this script command from getting the follower stuck in an intermediate state
+        if (sMovingNpcId != OBJ_EVENT_ID_FOLLOWER && objEvent && ObjectEventGetHeldMovementActionId(objEvent) == MOVEMENT_ACTION_ENTER_POKEBALL)
+            return ScriptMovement_IsObjectMovementFinished(objEvent->localId, objEvent->mapNum, objEvent->mapGroup);
+        return TRUE;
+    }
+    return FALSE;
+#else
     return ScriptMovement_IsObjectMovementFinished(sMovingNpcId, sMovingNpcMapNum, sMovingNpcMapGroup);
+#endif
 }
 
 bool8 ScrCmd_waitmovement(struct ScriptContext *ctx)
@@ -1206,13 +1282,24 @@ bool8 ScrCmd_lockall(struct ScriptContext *ctx)
     }
     else
     {
+#if PLATFORM_3DS
+        struct ObjectEvent *followerObj = GetFollowerObject();
+#endif
         FreezeObjects_WaitForPlayer();
         SetupNativeScript(ctx, IsFreezePlayerFinished);
+#if PLATFORM_3DS
+        if (FlagGet(FLAG_SAFE_FOLLOWER_MOVEMENT) && followerObj) // Unfreeze follower object (conditionally)
+            UnfreezeObjectEvent(followerObj);
+#endif
         return TRUE;
     }
 }
 
+#if PLATFORM_3DS
+// lock freezes all object events except the player, follower, and the selected object immediately.
+#else
 // lock freezes all object events except the player and the selected object immediately.
+#endif
 // The player and selected object are frozen after waiting for their current movement to finish.
 bool8 ScrCmd_lock(struct ScriptContext *ctx)
 {
@@ -1222,16 +1309,28 @@ bool8 ScrCmd_lock(struct ScriptContext *ctx)
     }
     else
     {
+#if PLATFORM_3DS
+        struct ObjectEvent *followerObj = GetFollowerObject();
+#endif
         if (gObjectEvents[gSelectedObjectEvent].active)
         {
             FreezeObjects_WaitForPlayerAndSelected();
             SetupNativeScript(ctx, IsFreezeSelectedObjectAndPlayerFinished);
+#if PLATFORM_3DS
+            // follower is being talked to; keep it frozen
+            if (gObjectEvents[gSelectedObjectEvent].localId == OBJ_EVENT_ID_FOLLOWER)
+                followerObj = NULL;
+#endif
         }
         else
         {
             FreezeObjects_WaitForPlayer();
             SetupNativeScript(ctx, IsFreezePlayerFinished);
         }
+#if PLATFORM_3DS
+        if (followerObj) // Unfreeze follower object
+            UnfreezeObjectEvent(followerObj);
+#endif
         return TRUE;
     }
 }
@@ -1239,6 +1338,12 @@ bool8 ScrCmd_lock(struct ScriptContext *ctx)
 bool8 ScrCmd_releaseall(struct ScriptContext *ctx)
 {
     u8 playerObjectId;
+#if PLATFORM_3DS
+    struct ObjectEvent *followerObject = GetFollowerObject();
+    // Release follower from movement iff it exists and is in the shadowing state
+    if (followerObject && gSprites[followerObject->spriteId].data[1] == 0)
+        ClearObjectEventMovement(followerObject, &gSprites[followerObject->spriteId]);
+#endif
 
     HideFieldMessageBox();
     playerObjectId = GetObjectEventIdByLocalIdAndMap(LOCALID_PLAYER, 0, 0);
@@ -1251,6 +1356,12 @@ bool8 ScrCmd_releaseall(struct ScriptContext *ctx)
 bool8 ScrCmd_release(struct ScriptContext *ctx)
 {
     u8 playerObjectId;
+#if PLATFORM_3DS
+    struct ObjectEvent *followerObject = GetFollowerObject();
+    // Release follower from movement iff it exists and is in the shadowing state
+    if (followerObject && gSprites[followerObject->spriteId].data[1] == 0)
+        ClearObjectEventMovement(followerObject, &gSprites[followerObject->spriteId]);
+#endif
 
     HideFieldMessageBox();
     if (gObjectEvents[gSelectedObjectEvent].active)
@@ -1549,7 +1660,11 @@ bool8 ScrCmd_vmessage(struct ScriptContext *ctx)
 bool8 ScrCmd_bufferspeciesname(struct ScriptContext *ctx)
 {
     u8 stringVarIndex = ScriptReadByte(ctx);
+#if PLATFORM_3DS
+    u16 species = VarGet(ScriptReadHalfword(ctx)) & ((1 << 10) - 1); // ignore possible shiny / form bits
+#else
     u16 species = VarGet(ScriptReadHalfword(ctx));
+#endif
 
     StringCopy(sScriptStringVars[stringVarIndex], gSpeciesNames[species]);
     return FALSE;
@@ -1566,6 +1681,17 @@ bool8 ScrCmd_bufferleadmonspeciesname(struct ScriptContext *ctx)
     return FALSE;
 }
 
+#if PLATFORM_3DS
+bool8 ScrFunc_bufferlivemonnickname(struct ScriptContext *ctx)
+{
+    u8 stringVarIndex = ScriptReadByte(ctx);
+
+    GetMonData(GetFirstLiveMon(), MON_DATA_NICKNAME, sScriptStringVars[stringVarIndex]);
+    StringGet_Nickname(sScriptStringVars[stringVarIndex]);
+    return FALSE;
+}
+
+#endif
 bool8 ScrCmd_bufferpartymonnick(struct ScriptContext *ctx)
 {
     u8 stringVarIndex = ScriptReadByte(ctx);
@@ -1686,6 +1812,13 @@ bool8 ScrCmd_givemon(struct ScriptContext *ctx)
     u32 unkParam1 = ScriptReadWord(ctx);
     u32 unkParam2 = ScriptReadWord(ctx);
     u8 unkParam3 = ScriptReadByte(ctx);
+
+#if PLATFORM_3DS
+    // The randomizer hooks the script command, not ScriptGiveMon, because the
+    // other caller (CB2_GiveStarter) gives a species that GetStarterPokemon
+    // already mapped. See the comment there.
+    species = Ctr3dsMapSpecies(species);
+#endif
 
     gSpecialVar_Result = ScriptGiveMon(species, level, item, unkParam1, unkParam2, unkParam3);
     return FALSE;
@@ -2025,6 +2158,15 @@ bool8 ScrCmd_playmoncry(struct ScriptContext *ctx)
     return FALSE;
 }
 
+#if PLATFORM_3DS
+bool8   ScrFunc_playfirstmoncry(struct ScriptContext *ctx)
+{
+    u16 species = GetMonData(GetFirstLiveMon(), MON_DATA_SPECIES);
+    PlayCry_Script(species, 0);
+    return FALSE;
+}
+
+#endif
 bool8 ScrCmd_waitmoncry(struct ScriptContext *ctx)
 {
     SetupNativeScript(ctx, IsCryFinished);
@@ -2305,3 +2447,25 @@ bool8 ScrCmd_warpwhitefade(struct ScriptContext *ctx)
     ResetInitialPlayerAvatarState();
     return TRUE;
 }
+#if PLATFORM_3DS
+
+bool8 ScrFunc_hidefollower(struct ScriptContext *ctx) {
+    bool16 wait = VarGet(ScriptReadHalfword(ctx));
+    struct ObjectEvent *obj;
+
+    if ((obj = ScriptHideFollower()) != NULL && wait) {
+        sMovingNpcId = obj->localId;
+        sMovingNpcMapGroup = obj->mapGroup;
+        sMovingNpcMapNum = obj->mapNum;
+        SetupNativeScript(ctx, WaitForMovementFinish);
+    }
+
+    // Just in case, prevent `applymovement`
+    // from hiding the follower again
+    if (obj)
+        FlagSet(FLAG_SAFE_FOLLOWER_MOVEMENT);
+
+    // execute next script command with no delay
+    return TRUE;
+}
+#endif

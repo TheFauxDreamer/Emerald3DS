@@ -1227,6 +1227,8 @@ static bool8 Swirl_End(struct Task *task)
 
 static void VBlankCB_Swirl(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA)
         DmaCopy16(3, gScanlineEffectRegBuffers[0], gScanlineEffectRegBuffers[1], DISPLAY_HEIGHT * 2);
@@ -1298,6 +1300,8 @@ static bool8 Shuffle_End(struct Task *task)
 
 static void VBlankCB_Shuffle(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA)
         DmaCopy16(3, gScanlineEffectRegBuffers[0], gScanlineEffectRegBuffers[1], DISPLAY_HEIGHT * 2);
@@ -1724,6 +1728,8 @@ static bool8 PatternWeave_CircularMask(struct Task *task)
 
 static void VBlankCB_SetWinAndBlend(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA)
@@ -2055,6 +2061,8 @@ static bool8 ClockwiseWipe_End(struct Task *task)
 
 static void VBlankCB_ClockwiseWipe(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA != 0)
@@ -2135,6 +2143,8 @@ static bool8 Ripple_Main(struct Task *task)
 
 static void VBlankCB_Ripple(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA)
         DmaCopy16(3, gScanlineEffectRegBuffers[0], gScanlineEffectRegBuffers[1], DISPLAY_HEIGHT * 2);
@@ -2226,6 +2236,8 @@ static bool8 Wave_End(struct Task *task)
 
 static void VBlankCB_Wave(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA != 0)
@@ -2549,6 +2561,8 @@ static bool8 Mugshot_End(struct Task *task)
 
 static void VBlankCB_Mugshots(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA != 0)
@@ -2562,6 +2576,8 @@ static void VBlankCB_Mugshots(void)
 
 static void VBlankCB_MugshotsFadeOut(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA != 0)
@@ -2804,6 +2820,8 @@ static bool8 Slice_End(struct Task *task)
 
 static void VBlankCB_Slice(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     REG_WININ = sTransitionData->WININ;
@@ -3555,6 +3573,8 @@ static void VBlankCB_Rayquaza(void)
 {
     void *dmaSrc;
 
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
 
@@ -3681,6 +3701,8 @@ static bool8 WhiteBarsFade_End(struct Task *task)
 
 static void VBlankCB_WhiteBarsFade(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     REG_BLDCNT = sTransitionData->BLDCNT;
@@ -3694,6 +3716,8 @@ static void VBlankCB_WhiteBarsFade(void)
 
 static void VBlankCB_WhiteBarsFade_Blend(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     VBlankCB_BattleTransition();
     REG_BLDY = sTransitionData->BLDY;
     REG_BLDCNT = sTransitionData->BLDCNT;
@@ -3938,6 +3962,8 @@ static bool8 AngledWipes_StartNext(struct Task *task)
 
 static void VBlankCB_AngledWipes(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     DmaStop(0);
     VBlankCB_BattleTransition();
     if (sTransitionData->VBlank_DMA)
@@ -4397,6 +4423,8 @@ static bool8 FrontierLogoWave_Main(struct Task *task)
 
 static void VBlankCB_FrontierLogoWave(void)
 {
+    VBLANK_REQUIRE(sTransitionData);
+
     VBlankCB_BattleTransition();
     REG_BLDCNT = sTransitionData->BLDCNT;
     REG_BLDALPHA = sTransitionData->BLDALPHA;

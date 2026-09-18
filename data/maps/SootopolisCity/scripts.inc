@@ -475,6 +475,9 @@ SootopolisCity_EventScript_RayquazaSceneFromPokeCenter::
 	removeobject LOCALID_SOOTOPOLIS_GROUDON
 	removeobject LOCALID_SOOTOPOLIS_KYOGRE
 	addobject LOCALID_SOOTOPOLIS_RAYQUAZA
+#if PLATFORM_3DS
+	hideobjectat LOCALID_SOOTOPOLIS_RAYQUAZA, MAP_SOOTOPOLIS_CITY
+#endif
 	setvar VAR_0x8004, TRUE
 	special Script_DoRayquazaScene
 	playse SE_THUNDER

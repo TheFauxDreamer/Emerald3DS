@@ -136,7 +136,24 @@ void RLUnCompVram(const u32 *src, void *dest) { RlUnComp(src, dest); }
 static void AffineTerms(s16 xScale, s16 yScale, u16 rotation,
                         s32 *pa, s32 *pb, s32 *pc, s32 *pd)
 {
-    float angle = rotation * (float)(2.0 * M_PI) / 256.0f;
+    // The divisor is 65536, one full turn, not 256.
+    //
+    // GBATEK says that the angle of ObjAffineSet is "8bit = 360 degrees",
+    // which seems to mean 0..255. But the field is a u16, and the BIOS uses
+    // alpha >> 8 as an index into its 256-entry sin/cos table. Thus a full
+    // turn is 0x10000.
+    //
+    // Callers always give multiples of 256. For example, sprite.c uses
+    // `(rotation + (frameCmd->rotation << 8)) & ~0xFF`, and
+    // pokedex_cry_screen.c uses `needle->rotation * 256`. With a divisor of
+    // 256, each angle is a whole number of turns: sin is 0 and cos is 1, an
+    // identity matrix. The affine scale is a separate term, so it still works,
+    // and only rotation fails.
+    //
+    // With the wrong divisor, no affine sprite rotates. The Poke Ball slides
+    // during a catch and does not roll, and the needle of the Pokedex cry meter
+    // does not move.
+    float angle = rotation * (float)(2.0 * M_PI) / 65536.0f;
     float s = sinf(angle) * 256.0f;
     float c = cosf(angle) * 256.0f;
     *pa = (s32)(c * xScale / 256.0f);

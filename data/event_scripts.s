@@ -724,6 +724,9 @@ Common_EventScript_OutOfCenterPartyHeal::
 	playfanfare MUS_HEAL
 	waitfanfare
 	special HealPlayerParty
+#if PLATFORM_3DS
+	callnative UpdateFollowingPokemon
+#endif
 	fadescreen FADE_FROM_BLACK
 	return
 
@@ -1028,6 +1031,9 @@ Common_EventScript_LegendaryFlewAway::
 	.include "data/scripts/day_care.inc"
 	.include "data/scripts/flash.inc"
 	.include "data/scripts/players_house.inc"
+#if PLATFORM_3DS
+	.include "data/scripts/ctr3ds_event_tickets.inc"
+#endif
 	.include "data/scripts/berry_blender.inc"
 	.include "data/text/mauville_man.inc"
 	.include "data/text/trainers.inc"
@@ -1055,6 +1061,9 @@ Common_EventScript_LegendaryFlewAway::
 	.include "data/scripts/move_tutors.inc"
 	.include "data/scripts/trainer_hill.inc"
 	.include "data/scripts/test_signpost.inc"
+#if PLATFORM_3DS
+	.include "data/scripts/follower.inc"
+#endif
 	.include "data/text/frontier_brain.inc"
 	.include "data/text/save.inc"
 	.include "data/text/birch_speech.inc"

@@ -72,6 +72,15 @@
 #include "constants/party_menu.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#if PLATFORM_3DS
+#include "event_object_movement.h"
+#endif
+
+#if PLATFORM_3DS
+// The level cap from the badges, which the EXTRA tab of the bottom screen turns
+// on and off.
+#include "../3ds/tweaks.h"
+#endif
 
 enum {
     MENU_SUMMARY,
@@ -3820,6 +3829,13 @@ bool8 FieldCallback_PrepareFadeInFromMenu(void)
     return TRUE;
 }
 
+#if PLATFORM_3DS
+bool8 FieldCallback_PrepareFadeInForTeleport(void) { // same as above, but removes follower pokemon
+    RemoveFollowingPokemon();
+    return FieldCallback_PrepareFadeInFromMenu();
+}
+
+#endif
 static void Task_FieldMoveWaitForFade(u8 taskId)
 {
     if (IsWeatherNotFadingIn() == TRUE)
@@ -4960,7 +4976,13 @@ void ItemUseCB_RareCandy(u8 taskId, TaskFunc task)
     u16 *itemPtr = &gSpecialVar_ItemId;
     bool8 cannotUseEffect;
 
-    if (GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL)
+    // Mirrors the cap test in PokemonUseItemEffects, so a capped mon is told
+    // "It won't have any effect." rather than appearing to accept the candy.
+    if (GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL
+#if PLATFORM_3DS
+     && !Ctr3dsHardCapBlocks(GetMonData(mon, MON_DATA_LEVEL))
+#endif
+       )
     {
         BufferMonStatsToTaskData(mon, arrayPtr);
         cannotUseEffect = ExecuteTableBasedItemEffect_(gPartyMenu.slotId, *itemPtr, 0);
@@ -6075,6 +6097,20 @@ u8 GetPartyIdFromBattlePartyId(u8 battlePartyId)
     return 0;
 }
 
+#if PLATFORM_3DS
+// Whether gPlayerParty is in battle order now. The in-battle party menu, and
+// the summary screen that opens from it, change the order of the array while
+// they show. The bottom screen reads the party on each frame. Without this
+// flag, it would see the new order as a different party. The two functions
+// below set and clear it, and they always run in pairs.
+static bool8 sCtr3dsPartyInBattleOrder;
+
+bool8 Ctr3dsPartyInBattleOrder(void)
+{
+    return sCtr3dsPartyInBattleOrder;
+}
+#endif
+
 static void UpdatePartyToBattleOrder(void)
 {
     struct Pokemon *partyBuffer = Alloc(sizeof(gPlayerParty));
@@ -6084,6 +6120,9 @@ static void UpdatePartyToBattleOrder(void)
     for (i = 0; i < PARTY_SIZE; i++)
         memcpy(&gPlayerParty[GetPartyIdFromBattlePartyId(i)], &partyBuffer[i], sizeof(struct Pokemon));
     Free(partyBuffer);
+#if PLATFORM_3DS
+    sCtr3dsPartyInBattleOrder = TRUE;
+#endif
 }
 
 static void UpdatePartyToFieldOrder(void)
@@ -6095,6 +6134,9 @@ static void UpdatePartyToFieldOrder(void)
     for (i = 0; i < PARTY_SIZE; i++)
         memcpy(&gPlayerParty[GetPartyIdFromBattleSlot(i)], &partyBuffer[i], sizeof(struct Pokemon));
     Free(partyBuffer);
+#if PLATFORM_3DS
+    sCtr3dsPartyInBattleOrder = FALSE;
+#endif
 }
 
 static void UNUSED SwitchAliveMonIntoLeadSlot(void)

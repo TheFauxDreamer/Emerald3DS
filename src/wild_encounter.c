@@ -64,6 +64,12 @@ EWRAM_DATA static u32 sFeebasRngValue = 0;
 
 #include "data/wild_encounters.h"
 
+#if PLATFORM_3DS
+// Species randomizer, which the EXTRA tab of the bottom screen turns on and
+// off.
+#include "../3ds/tweaks.h"
+#endif
+
 static const struct WildPokemon sWildFeebas = {20, 25, SPECIES_FEEBAS};
 
 static const u16 sRoute119WaterTileData[] =
@@ -380,7 +386,25 @@ static void CreateWildMon(u16 species, u8 level)
 {
     bool32 checkCuteCharm;
 
+#if PLATFORM_3DS
+    // This must be the first step here. The gender-ratio switch below reads
+    // gSpeciesInfo[species]. A later remap would run Cute Charm against the
+    // ratio of the wrong species.
+    species = Ctr3dsMapWildSpecies(species);
+#endif
+
     ZeroEnemyPartyMons();
+
+#if PLATFORM_3DS
+    // The shiny test switch, which creates the Pokemon itself when it is armed.
+    // It comes after ZeroEnemyPartyMons, because CreateMon clears only its own
+    // slot, not the five old slots from an earlier trainer battle. It comes
+    // before Cute Charm, which has no gender to change after the personality is
+    // set. For a test shiny, Cute Charm is not important.
+    if (Ctr3dsTryCreateShinyTestMon(species, level))
+        return;
+#endif
+
     checkCuteCharm = TRUE;
 
     switch (gSpeciesInfo[species].genderRatio)
@@ -461,7 +485,13 @@ static u16 GenerateFishingWildMon(const struct WildPokemonInfo *wildMonInfo, u8 
     u8 level = ChooseWildMonLevel(&wildMonInfo->wildPokemon[wildMonIndex]);
 
     CreateWildMon(wildMonInfo->wildPokemon[wildMonIndex].species, level);
+#if PLATFORM_3DS
+    // The caller gives this to SetPokemonAnglerSpecies for the TV show. Thus it
+    // must be the species that the player hooked, not the species in the table.
+    return Ctr3dsMapWildSpecies(wildMonInfo->wildPokemon[wildMonIndex].species);
+#else
     return wildMonInfo->wildPokemon[wildMonIndex].species;
+#endif
 }
 
 static bool8 SetUpMassOutbreakEncounter(u8 flags)

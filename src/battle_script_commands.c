@@ -52,6 +52,18 @@
 #include "constants/songs.h"
 #include "constants/trainers.h"
 
+#if PLATFORM_3DS
+// EXP All and the level cap. The EXTRA tab of the bottom screen turns them on
+// and off. The behavior is in 3ds/tweaks.c. Thus each of the five hooks below
+// is one more clause on a condition that the game already evaluates, or one
+// more statement. None of them changes the vanilla path, so each one is in its
+// own #if block.
+#include "../3ds/tweaks.h"
+// The shiny-catch achievement. It is the only achievement that is an event, not
+// a state, so it needs a hook (Cmd_givecaughtmon). See 3ds/achievements.c.
+#include "../3ds/achievements.h"
+#endif
+
 extern const u8 *const gBattleScriptsForMoveEffects[];
 
 #define DEFENDER_IS_PROTECTED ((gProtectStructs[gBattlerTarget].protected) && (gBattleMoves[gCurrentMove].flags & FLAG_PROTECT_AFFECTED))
@@ -1352,6 +1364,64 @@ static void ModulateDmgByType(u8 multiplier)
     }
 }
 
+#if PLATFORM_3DS
+s32 GetTypeEffectiveness(struct Pokemon *mon, u8 moveType) {
+    u16 species = GetMonData(mon, MON_DATA_SPECIES);
+    u8 type1 = gSpeciesInfo[species].types[0];
+    u8 type2 = gSpeciesInfo[species].types[1];
+    s32 i = 0;
+    u8 multiplier;
+    s32 flags = 0;
+    if (GetMonAbility(mon) == ABILITY_LEVITATE && moveType == TYPE_GROUND)
+        return MOVE_RESULT_NOT_VERY_EFFECTIVE;
+    while (TYPE_EFFECT_ATK_TYPE(i) != TYPE_ENDTABLE) {
+        if (TYPE_EFFECT_ATK_TYPE(i) == TYPE_FORESIGHT) {
+            i += 3;
+            continue;
+        }
+        else if (TYPE_EFFECT_ATK_TYPE(i) == moveType) {
+            // check type1
+            if (TYPE_EFFECT_DEF_TYPE(i) == type1)
+                multiplier = TYPE_EFFECT_MULTIPLIER(i);
+            else if (TYPE_EFFECT_DEF_TYPE(i) == type2 && type1 != type2)
+                multiplier = TYPE_EFFECT_MULTIPLIER(i);
+            else {
+                i += 3;
+                continue;
+            }
+            switch (multiplier)
+            {
+            case TYPE_MUL_NO_EFFECT:
+                flags |= MOVE_RESULT_DOESNT_AFFECT_FOE;
+                flags &= ~MOVE_RESULT_NOT_VERY_EFFECTIVE;
+                flags &= ~MOVE_RESULT_SUPER_EFFECTIVE;
+                break;
+            case TYPE_MUL_NOT_EFFECTIVE:
+                if (!(flags & MOVE_RESULT_NO_EFFECT))
+                {
+                    if (flags & MOVE_RESULT_SUPER_EFFECTIVE)
+                        flags &= ~MOVE_RESULT_SUPER_EFFECTIVE;
+                    else
+                        flags |= MOVE_RESULT_NOT_VERY_EFFECTIVE;
+                }
+                break;
+            case TYPE_MUL_SUPER_EFFECTIVE:
+                if (!(flags & MOVE_RESULT_NO_EFFECT))
+                {
+                    if (flags & MOVE_RESULT_NOT_VERY_EFFECTIVE)
+                        flags &= ~MOVE_RESULT_NOT_VERY_EFFECTIVE;
+                    else
+                        flags |= MOVE_RESULT_SUPER_EFFECTIVE;
+                }
+                break;
+            }
+        }
+        i += 3;
+    }
+    return flags;
+}
+
+#endif
 static void Cmd_typecalc(void)
 {
     s32 i = 0;
@@ -3303,7 +3373,11 @@ static void Cmd_getexp(void)
                 else
                     holdEffect = GetItemHoldEffect(item);
 
-                if (holdEffect == HOLD_EFFECT_EXP_SHARE)
+                if (holdEffect == HOLD_EFFECT_EXP_SHARE
+#if PLATFORM_3DS
+                 || Ctr3dsExpAllOn()
+#endif
+                   )
                     viaExpShare++;
             }
 
@@ -3342,13 +3416,25 @@ static void Cmd_getexp(void)
             else
                 holdEffect = GetItemHoldEffect(item);
 
-            if (holdEffect != HOLD_EFFECT_EXP_SHARE && !(gBattleStruct->sentInPokes & 1))
+            if (holdEffect != HOLD_EFFECT_EXP_SHARE && !(gBattleStruct->sentInPokes & 1)
+#if PLATFORM_3DS
+             && !Ctr3dsExpAllOn()
+#endif
+               )
             {
                 *(&gBattleStruct->sentInPokes) >>= 1;
                 gBattleScripting.getexpState = 5;
                 gBattleMoveDamage = 0; // used for exp
             }
-            else if (GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL) == MAX_LEVEL)
+            // A HARD cap rides on the existing MAX_LEVEL gate rather than on a
+            // new one: reaching the cap has to mean exactly what reaching level
+            // 100 already means, or the two would drift apart. Note this also
+            // stops MonGainEVs below, which is intended for a challenge cap.
+            else if (GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL) == MAX_LEVEL
+#if PLATFORM_3DS
+                  || Ctr3dsHardCapBlocks(GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL))
+#endif
+                    )
             {
                 *(&gBattleStruct->sentInPokes) >>= 1;
                 gBattleScripting.getexpState = 5;
@@ -3371,7 +3457,11 @@ static void Cmd_getexp(void)
                     else
                         gBattleMoveDamage = 0;
 
-                    if (holdEffect == HOLD_EFFECT_EXP_SHARE)
+                    if (holdEffect == HOLD_EFFECT_EXP_SHARE
+#if PLATFORM_3DS
+                     || Ctr3dsExpAllOn()
+#endif
+                       )
                         gBattleMoveDamage += gExpShareExp;
                     if (holdEffect == HOLD_EFFECT_LUCKY_EGG)
                         gBattleMoveDamage = (gBattleMoveDamage * 150) / 100;
@@ -3395,6 +3485,15 @@ static void Cmd_getexp(void)
                     {
                         i = STRINGID_EMPTYSTRING4;
                     }
+
+#if PLATFORM_3DS
+                    // A soft cap scales the value here, after the Lucky Egg,
+                    // trainer and traded bonuses, and before the message below.
+                    // Thus the player sees the number that the Pokemon gets.
+                    gBattleMoveDamage = (s32)Ctr3dsSoftCapExp(
+                        GetMonData(&gPlayerParty[gBattleStruct->expGetterMonId], MON_DATA_LEVEL),
+                        (u32)gBattleMoveDamage);
+#endif
 
                     // get exp getter battler
                     if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
@@ -4001,12 +4100,22 @@ static void Cmd_endselectionscript(void)
     *(gBattlerAttacker + gBattleStruct->selectionScriptFinished) = TRUE;
 }
 
+#ifdef UBFIX
+// UB: Most playanimation scripts give no argument, so the pointer is NULL.
+// A GBA reads BIOS at address 0. On the 3DS, address 0 is not mapped.
+static const u16 sNoAnimArgument = 0;
+#endif
+
 static void Cmd_playanimation(void)
 {
     const u16 *argumentPtr;
 
     gActiveBattler = GetBattlerForBattleScript(gBattlescriptCurrInstr[1]);
     argumentPtr = T2_READ_PTR(gBattlescriptCurrInstr + 3);
+#ifdef UBFIX
+    if (argumentPtr == NULL)
+        argumentPtr = &sNoAnimArgument;
+#endif
 
     if (gBattlescriptCurrInstr[2] == B_ANIM_STATS_CHANGE
      || gBattlescriptCurrInstr[2] == B_ANIM_SNATCH_MOVE
@@ -4051,6 +4160,10 @@ static void Cmd_playanimation_var(void)
     gActiveBattler = GetBattlerForBattleScript(gBattlescriptCurrInstr[1]);
     animationIdPtr = T2_READ_PTR(gBattlescriptCurrInstr + 2);
     argumentPtr = T2_READ_PTR(gBattlescriptCurrInstr + 6);
+#ifdef UBFIX
+    if (argumentPtr == NULL)
+        argumentPtr = &sNoAnimArgument;
+#endif
 
     if (*animationIdPtr == B_ANIM_STATS_CHANGE
      || *animationIdPtr == B_ANIM_SNATCH_MOVE
@@ -10054,6 +10167,9 @@ static void Cmd_handleballthrow(void)
 
 static void Cmd_givecaughtmon(void)
 {
+#if PLATFORM_3DS
+    Ctr3dsAchOnCaught(&gEnemyParty[gBattlerPartyIndexes[BATTLE_OPPOSITE(gBattlerAttacker)]]);
+#endif
     if (GiveMonToPlayer(&gEnemyParty[gBattlerPartyIndexes[BATTLE_OPPOSITE(gBattlerAttacker)]]) != MON_GIVEN_TO_PARTY)
     {
         if (!ShouldShowBoxWasFullMessage())
