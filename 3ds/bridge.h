@@ -549,6 +549,7 @@ void CtrProfile(const char *stage, unsigned long long startTicks);
 #define CTR_LINK_JOINING    3
 #define CTR_LINK_CONNECTED  4   // two or more nodes present
 #define CTR_LINK_FAILED     5
+#define CTR_LINK_WORKING    6   // a pairing call is running on the worker
 
 typedef struct {
     uint8_t state;        // CTR_LINK_*
@@ -558,13 +559,17 @@ typedef struct {
 } CtrLinkStatus;
 
 // Pairing, driven from the LINK page of the EXTRA tab. Poll the status.
-// Ctr3dsLinkScan() blocks while udsScanBeacons runs. The others return at
-// once.
+//
+// All four return at once. The UDS calls behind them block for 100 ms to more
+// than a second, so a worker thread runs them (3ds/host/link.c). While one
+// runs, Ctr3dsLinkBusy() is true and the state is SCANNING, JOINING or WORKING.
+// The UI must show that and refuse a second request until it clears.
 void Ctr3dsLinkHost(void);
 void Ctr3dsLinkScan(void);
 void Ctr3dsLinkJoin(int index);
 void Ctr3dsLinkStop(void);
 void Ctr3dsLinkGetStatus(CtrLinkStatus *out);
+int  Ctr3dsLinkBusy(void);
 
 // Results of the last Ctr3dsLinkScan(). `name` is plain ASCII, not the game's
 // encoding, because it comes from the host console rather than from Emerald.
@@ -588,5 +593,10 @@ int  Ctr3dsLinkLocalId(void);
 // is synchronous and UDS is not, so this blocks briefly waiting for peers: that
 // stall IS the lockstep, and is what stops the two consoles drifting apart.
 int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+
+// Called from TrySetLinkErrorBuffer() in src/link.c, where every link error
+// passes. Emerald's own error screen and a real fault otherwise look the same
+// in a log: the game stops talking and nothing says why.
+void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 
 #endif // CTR_BRIDGE_H

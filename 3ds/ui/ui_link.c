@@ -112,6 +112,23 @@ void UiLinkPageDraw(void)
         return;
     }
 
+    // A pairing call is running on the worker thread. Say so, and dim the
+    // buttons, because they do nothing until it ends. The game keeps running
+    // behind this panel, which is the whole point of the worker.
+    if (st.state == CTR_LINK_SCANNING || st.state == CTR_LINK_JOINING
+        || st.state == CTR_LINK_WORKING)
+    {
+        const char *what = st.state == CTR_LINK_SCANNING ? "Scanning..."
+                         : st.state == CTR_LINK_JOINING  ? "Joining..."
+                                                         : "Please wait...";
+
+        DrawButton(HOST_X, BTN_Y, HOST_W, "HOST", UI_COL_DIM);
+        DrawButton(SCAN_X, BTN_Y, SCAN_W, "SCAN", UI_COL_DIM);
+        UiText(ROW_X, LIST_Y, UiAscii(label, what, sizeof(label)),
+               UiThemeText(), UiThemeShadow());
+        return;
+    }
+
     DrawButton(HOST_X, BTN_Y, HOST_W, "HOST", UiThemeText());
     DrawButton(SCAN_X, BTN_Y, SCAN_W, "SCAN", UiThemeText());
 
@@ -130,6 +147,11 @@ void UiLinkPageTouch(const CtrTouchState *t)
     CtrLinkStatus st;
 
     if (!t->justReleased)
+        return;
+
+    // The worker owns the wireless while a pairing call runs. link.c drops a
+    // second request anyway; refusing here keeps the panel honest about it.
+    if (Ctr3dsLinkBusy())
         return;
 
     Ctr3dsLinkGetStatus(&st);
@@ -151,9 +173,8 @@ void UiLinkPageTouch(const CtrTouchState *t)
         return;
     }
 
-    // Scanning blocks for as long as the beacon sweep takes, so the screen is
-    // stale until it returns. That is acceptable for a deliberate button press
-    // and avoids threading the scan.
+    // The sweep runs on the link worker, so this returns at once and the panel
+    // shows "Scanning..." until the results land.
     if (UiHit(t, SCAN_X, BTN_Y, SCAN_W, BTN_H))
     {
         Ctr3dsLinkScan();

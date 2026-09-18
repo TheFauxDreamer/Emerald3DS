@@ -77,7 +77,13 @@ AccessControlInfo:
   MemoryType                    : Application # Application/System/Base
   SystemMode                    : 64MB # 64MB(Default)/96MB/80MB/72MB/32MB
   IdealProcessor                : 0
-  AffinityMask                  : 1
+  # Bit 0 is core 0, bit 1 is core 1. Core 1 is the Old 3DS system core, and the
+  # rasterizer thread wants a share of it (3ds/host/video.c, ppu_thread_start).
+  # With a mask of 1 an Old 3DS can never give the rasterizer a second core, so
+  # it renders inline on core 0 and a heavy scene drops the port to 30 fps.
+  # New 3DS core 2 is granted by CanAccessCore2 below, not by this mask, which is
+  # why the New 3DS path worked and hid this.
+  AffinityMask                  : 3
   Priority                      : 16
   MaxCpu                        : 0x9E # Default
   HandleTableSize               : 0x200

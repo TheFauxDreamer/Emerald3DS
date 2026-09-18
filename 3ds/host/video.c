@@ -158,7 +158,9 @@ static const void *sLiveReg, *sLivePal, *sLiveVram, *sLiveOam;
 // system's threads on core 1.
 #define PPU_THREAD_PRIO     0x18
 #define PPU_STACK_SIZE      (16 * 1024)   // the rasterizer's state is static
-#define PPU_SYSCORE_PERCENT 80
+// What to ask PM for on the Old 3DS system core, the most first. 80 is the
+// documented maximum for an application.
+static const int kSyscorePercent[] = { 80, 70, 50 };
 #define PPU_START_WAIT_MS   250           // see ppu_try_core
 
 static Thread     sPpuThread;
@@ -260,10 +262,31 @@ static void ppu_thread_start(void)
         return;
     }
 
-    rc = APT_SetAppCpuTimeLimit(PPU_SYSCORE_PERCENT);
-    if (R_SUCCEEDED(rc) && ppu_try_core(1, &sPpuStart[1])) {
-        CtrLog("emerald3ds: rasteriser on core 1 (%d%% of the system core)\n",
-               PPU_SYSCORE_PERCENT);
+    // Core 1 is the Old 3DS system core. The kernel gives an application no
+    // time on it until PM grants a share, and PM refuses a share that it thinks
+    // the console cannot spare, so ask for less before giving up. A base 3DS
+    // refused 80 percent with "not implemented" while the exheader affinity
+    // mask was 1, which barred core 1 outright. That mask is now 3
+    // (3ds/emerald3ds.rsf).
+    for (unsigned i = 0; i < sizeof(kSyscorePercent) / sizeof(kSyscorePercent[0]); i++) {
+        rc = APT_SetAppCpuTimeLimit(kSyscorePercent[i]);
+        if (R_FAILED(rc))
+            continue;
+        if (ppu_try_core(1, &sPpuStart[1])) {
+            CtrLog("emerald3ds: rasteriser on core 1 (%d%% of the system core)\n",
+                   kSyscorePercent[i]);
+            return;
+        }
+        break;   // the time limit was granted, so the core itself refused
+    }
+
+    // Try it anyway. A thread that gets no time is caught and named by the
+    // handshake in ppu_try_core(), which tells a refusal by PM apart from a
+    // refusal by the kernel. Without this the log blames the time limit for
+    // both.
+    if (R_FAILED(rc) && ppu_try_core(1, &sPpuStart[1])) {
+        CtrLog("emerald3ds: rasteriser on core 1 (no time limit; rc=0x%08lX)\n",
+               (unsigned long)rc);
         return;
     }
 
@@ -354,11 +377,79 @@ static void apply_top_filter(void)
     C3D_TexSetFilter(&sTopTex, f, f);
 }
 
-#if CTR_BOOT_DIAG
-// Kept so that the diagnostics below can read DISPCNT. The ppu_set_memory()
-// call uses these, and video.c does not need them again.
+// Kept so that the diagnostics below can read the registers. The
+// ppu_set_memory() call uses these, and video.c does not need them again.
+//
+// This is the live region. The rasterizer reads the snapshot when it has its
+// own core, so a diagnostic that must match the picture uses ppu_regs() below.
 static const uint8_t *sRegBase;
-#endif
+
+// The registers and the OAM that the LAST render read.
+static const uint8_t *ppu_regs(void)
+{
+    return sPpuCore >= 0 ? sSnapReg : sRegBase;
+}
+
+static const uint8_t *ppu_oam(void)
+{
+    return sPpuCore >= 0 ? sSnapOam : (const uint8_t *)sLiveOam;
+}
+
+static uint16_t read16(const uint8_t *p, int off)
+{
+    return (uint16_t)(p[off] | (p[off + 1] << 8));
+}
+
+// A rasterizer frame longer than this cannot fit in a 16.6 ms budget when it
+// shares a core with the game. Report the first one, with the registers that
+// decide the cost, so that a log names the scene instead of leaving it to
+// guesswork. Once for each boot: this is a diagnostic, not a monitor.
+//
+// The costly shapes, in the order that they are likely: a window that is
+// partial in x, which puts every layer of those lines on the per-pixel path; a
+// brightness effect in BLDCNT, which has no fast path at all; and affine
+// backgrounds or affine sprites, which are per-pixel by nature. See
+// passWinRow() and setPass() in rp2350/ppu.c.
+#define PPU_SLOW_TICKS   ((unsigned long long)SYSCLOCK_ARM11 / 125)   // 8 ms
+#define PPU_SLOW_RUN     60     // a second of them: a boot spike must not win
+#define PPU_SLOW_REPORTS 3      // and a later scene still gets its turn
+
+static void log_slow_scene(unsigned long long ticks)
+{
+    static unsigned run;
+    static int reports;
+    const uint8_t *r = ppu_regs();
+    const uint8_t *oam = ppu_oam();
+    unsigned affine = 0;
+
+    // A run, not one frame. The intro alone has frames over the threshold, and
+    // they say nothing about the scene that holds the port at 30 fps.
+    if (ticks < PPU_SLOW_TICKS) {
+        run = 0;
+        return;
+    }
+
+    if (++run != PPU_SLOW_RUN || reports >= PPU_SLOW_REPORTS)
+        return;
+    if (r == NULL || oam == NULL)
+        return;
+
+    reports++;
+
+    for (int i = 0; i < 128; i++) {
+        // Bit 8 of attribute 0 is the rotation and scaling flag.
+        if (read16(oam, i * 8) & 0x0100)
+            affine++;
+    }
+
+    CtrLog("emerald3ds: slow scene %u us DISPCNT=%04X WIN0H=%04X WIN1H=%04X "
+           "WININ=%04X WINOUT=%04X BLDCNT=%04X BLDALPHA=%04X BLDY=%04X "
+           "affobj=%u\n",
+           (unsigned)(ticks / (SYSCLOCK_ARM11 / 1000000)),
+           read16(r, 0x00), read16(r, 0x40), read16(r, 0x42),
+           read16(r, 0x48), read16(r, 0x4A), read16(r, 0x50),
+           read16(r, 0x52), read16(r, 0x54), affine);
+}
 
 static void init_subtex(Tex3DS_SubTexture *sub, int w, int h, int texW, int texH)
 {
@@ -425,9 +516,7 @@ int CtrVideoInit(void)
         ppu_set_memory(sSnapReg, sSnapPal, sSnapVram, sSnapOam);
     else
         ppu_set_memory(reg, pal, vram, oam);
-#if CTR_BOOT_DIAG
     sRegBase = (const uint8_t *)reg;
-#endif
 
     sReady = 1;
 
@@ -667,6 +756,7 @@ void CtrVideoPresent(void)
     // The frame that the game just wrote: collect it from the worker, or
     // rasterize it here when there is no worker.
     t0 = CtrTimeNowMs();
+    unsigned long long ppuTicks;
     if (sPpuCore >= 0) {
         unsigned long long tw;
 
@@ -688,13 +778,16 @@ void CtrVideoPresent(void)
         // The worker's own measurement, reported here because CtrProfile is
         // only for the main thread. The stage name is the same as on the inline
         // path, so the logs of the two builds compare directly.
-        CtrProfile("ppu", CtrTicksNow() - sPpuTicks);
+        ppuTicks = sPpuTicks;
+        CtrProfile("ppu", CtrTicksNow() - ppuTicks);
     } else {
         unsigned long long tp = CtrTicksNow();
         ppu_render_rgb565(sGbaFrame, sGbaLayer);
+        ppuTicks = CtrTicksNow() - tp;
         CtrProfile("ppu", tp);
     }
     CtrLogSlow("ppu", t0);
+    log_slow_scene(ppuTicks);
 
 #if CTR_BOOT_DIAG
     // Two facts show where a black screen comes from:
