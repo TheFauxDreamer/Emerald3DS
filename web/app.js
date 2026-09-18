@@ -621,6 +621,51 @@ function readS32(ptr) {
   return (u16[ptr >> 1] | (u16[(ptr + 2) >> 1] << 16)) | 0;
 }
 
+// Each site that the null pointer sweep reports, by its data block address.
+// The compiler makes one block for each dereference, so the address is the
+// identity of the site.
+const nullDerefSites = new Map();
+
+// The handler for -fsanitize=null. See the WASM_SANITIZE note in the Makefile.
+//
+// The compiler calls this before a dereference whose pointer is 0. Its first
+// argument points at a struct that starts with a source location: a pointer to
+// the file name, then the line, then the column. The second argument is the
+// pointer itself.
+//
+// The same check also reports a misaligned pointer and an object that is too
+// small, so the pointer test below keeps only the null ones.
+//
+// A site is logged once. Many of these run on every frame, and a line for each
+// would bury the report.
+function ubsanTypeMismatch(data, ptr) {
+  if (ptr !== 0) return;
+
+  let site = nullDerefSites.get(data);
+  if (site) {
+    site.hits++;
+    return;
+  }
+
+  site = {
+    file: readCString(readU32(data)),
+    line: readU32(data + 4),
+    column: readU32(data + 8),
+    hits: 1,
+  };
+  nullDerefSites.set(data, site);
+  console.warn(`ubsan: null deref at ${site.file}:${site.line}:${site.column}`);
+}
+
+// A summary for the end of a run. tools/wasm_replay.mjs keeps the console, so
+// calling this before the page closes puts the whole list in one place.
+function reportNullDerefs() {
+  const sites = [...nullDerefSites.values()].sort((a, b) => b.hits - a.hits);
+  console.warn(`ubsan: ${sites.length} null deref site(s)`);
+  for (const s of sites) console.warn(`ubsan:   ${s.file}:${s.line} x${s.hits}`);
+  return sites;
+}
+
 function writeS16(ptr, value) {
   u16[ptr >> 1] = value & 0xffff;
 }
@@ -698,6 +743,7 @@ function importsFor(module) {
         case 'Div': return args[1] ? (args[0] / args[1]) | 0 : 0;
         case 'Sqrt': return Math.sqrt(args[0]) | 0;
         case 'strcmp': return readCString(args[0]).localeCompare(readCString(args[1]));
+        case '__ubsan_handle_type_mismatch_v1': return ubsanTypeMismatch(args[0], args[1]);
         default: return 0;
       }
     };
@@ -774,7 +820,7 @@ async function boot() {
   const module = await WebAssembly.compile(bytes);
   instance = await WebAssembly.instantiate(module, importsFor(module));
   memory = instance.exports.memory;
-  window.pokeemerald = { instance, memory, runFrames };
+  window.pokeemerald = { instance, memory, runFrames, nullDerefs: reportNullDerefs };
   if (automate) window.pokeemerald.automation = automationApi();
   refreshViews();
   loadFlashSave();
