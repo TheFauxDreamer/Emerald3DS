@@ -124,6 +124,52 @@ REVIEWED = {
         'PreparePokeblockFeedScene() reaches ResetSpriteData() in the same frame',
     ('src/use_pokeblock.c', 'sMenu', 'CloseUsePokeblockMenu'):
         'destroys all three reader sprites before the free',
+
+    # --- sweep of 2026-09-18, after the corpus fix made these visible at all.
+    # Every one of them was invisible to this script before that.
+    ('src/battle_anim_utility_funcs.c', 'sAnimStatsChangeData', 'StatsChangeAnimation_Step3'):
+        'destroys its own sprites before the free; the anim task ends with it',
+    ('src/battle_factory_screen.c', 'sFactorySelectMons', 'CB2_InitSelectScreen'):
+        'a setup callback: the scratch buffer goes as setup ends, then it hands '
+        'off to CB2_SelectScreen',
+    ('src/berry_blender.c', 'sBerryBlender', 'CB2_CheckPlayAgainLink'):
+        'FIXED 2026-09-18: the callback returns after the free, before '
+        'AnimateSprites(). SpriteCB_PlayerArrow reads bg_X with no test',
+    ('src/berry_blender.c', 'sBerryBlender', 'CB2_CheckPlayAgainLocal'):
+        'FIXED 2026-09-18: as above, and this is the path a solo blend takes',
+    ('src/contest.c', 'gContestResources', 'FreeContestResources'):
+        'CB2_ContestMain calls AnimateSprites() BEFORE RunTasks(), so the '
+        'sprites of that frame ran before the free, and its tail reads nothing '
+        'through the pointer',
+    ('src/dodrio_berry_picking.c', 'sStatusBar', 'FreeStatusBar'):
+        'destroys its sprites before the free; link-only',
+    ('src/mirage_tower.c', 'sBgShakeOffsets', 'DoMirageTowerDisintegration'):
+        'destroys the reading task before the free',
+    ('src/mirage_tower.c', 'sFallingFossil', 'Task_FossilFallAndSink'):
+        'destroys its sprite before the free',
+    ('src/mirage_tower.c', 'sMirageTowerPulseBlend', 'ClearMirageTowerPulseBlendEffect'):
+        'destroys the pulse-blend task before the free',
+    ('src/pokedex_area_screen.c', 'sPokedexAreaScreen', 'Task_HandlePokedexAreaScreenInput'):
+        'destroys the reading task before the free',
+    ('src/pokemon_storage_system.c', 'sStorage', 'FreePokeStorageData'):
+        'CB2_PokeStorage returns on NULL, and the guard sits BEFORE '
+        'AnimateSprites() exactly because SpriteCB_HeldMon reads sStorage (ff770eb)',
+    ('src/region_map.c', 'sFlyMap', 'CB_ExitFlyMap'):
+        'hands off to CB2_ReturnToPartyMenuFromFlyMap, a setup path',
+    ('src/roulette.c', 'sRoulette', 'FreeRoulette'):
+        'Task_ExitRoulette calls ResetSpriteData() before FreeRoulette(), which '
+        'this script cannot see because it reads only the freeing function. The '
+        'CB2 tail is guarded separately',
+    ('src/trade.c', 'sTradeAnim', 'DoTradeAnim_Cable'):
+        'FIXED 2026-09-18: CB2_InGameTrade returns after DoTradeAnim() frees, '
+        'before RunTasks() and AnimateSprites()',
+    ('src/trade.c', 'sTradeAnim', 'DoTradeAnim_Wireless'):
+        'FIXED 2026-09-18: covered by the same two callback guards; link-only',
+    ('src/trade.c', 'sTradeAnim', 'CB2_FreeTradeAnim'):
+        'FIXED 2026-09-18: the callback returns after the free, before RunTasks()',
+    ('src/trainer_card.c', 'sData', 'CloseTrainerCard'):
+        'SetMainCallback2(sData->callback2) reads the pointer BEFORE the free, '
+        'and the task then destroys itself',
 }
 
 
