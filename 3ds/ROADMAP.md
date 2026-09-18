@@ -36,6 +36,11 @@ The large pieces:
   its LINK screen goes is an open question (C.3).
 - **Part E:** the trade-dependent achievements, and a RetroAchievements
   provider.
+- **[NULL_CRASHES_PLAN.md](NULL_CRASHES_PLAN.md):** the crash class that keeps
+  stopping the console, which is a read through a NULL pointer that a GBA
+  ignores. 15 are fixed. The detector cannot yet see the callback-tail shape
+  that caused 5 of them, the wasm sweep that would enumerate the rest has not
+  run, and nothing behind `#if PLATFORM_3DS` is swept at all.
 
 The small ones:
 - **A bar that starts to slide under an overlay stalls** on the single-core
