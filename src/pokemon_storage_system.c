@@ -4477,6 +4477,12 @@ static void InitBoxMonSprites(u8 boxId)
     {
         for (boxPosition = 0; boxPosition < IN_BOX_COUNT; boxPosition++)
         {
+#ifdef UBFIX
+            // UB: An empty slot holds no item and has no icon. A GBA ignores
+            // the write. On the 3DS, address 0 is not mapped.
+            if (sStorage->boxMonsSprites[boxPosition] == NULL)
+                continue;
+#endif
             if (GetBoxMonDataAt(boxId, boxPosition, MON_DATA_HELD_ITEM) == ITEM_NONE)
                 sStorage->boxMonsSprites[boxPosition]->oam.objMode = ST_OAM_OBJ_BLEND;
         }
