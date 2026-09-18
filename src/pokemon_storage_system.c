@@ -1990,6 +1990,12 @@ static void VBlankCB_PokeStorage(void)
 static void CB2_PokeStorage(void)
 {
     RunTasks();
+#if WASM || RP2350
+    // Task_ChangeScreen frees sStorage in this frame. The next screen's setup
+    // callback resets the sprites, so this frame has nothing more to draw.
+    if (sStorage == NULL)
+        return;
+#endif
     DoScheduledBgTilemapCopiesToVram();
     ScrollBackground();
     UpdateCloseBoxButtonFlash();
