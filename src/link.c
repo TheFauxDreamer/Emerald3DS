@@ -2112,6 +2112,30 @@ static void DequeueRecvCmds(u16 (*recvCmds)[CMD_LENGTH])
 // It moves a WHOLE command per player per frame instead of one u16 per
 // transfer, because that is the unit the wireless transport carries and the
 // unit LinkMain1 consumes. Nothing above the queues can tell the difference.
+//
+// A missed frame is NOT reported as lag at once. LinkMain1 turns gLink.lag
+// straight into LINK_STAT_ERROR_LAG_*, and CheckLinkErrors treats one such bit
+// as fatal: it shows the communication error and closes the link. The cable
+// path is far more forgiving than that. Its slave allows more than 10 VBlanks
+// with no serial interrupt before it calls it lag (see the #else branch of
+// LinkVSync below), and its master tests one frame's worth of transfers. So
+// count consecutive misses here and use the same tolerance. Without this, one
+// late wireless frame ends the session.
+#define CTR_LINK_MISS_LIMIT 10
+
+static u8 sCtrLinkMisses;
+
+// Report lag only once the misses pass the limit. Returns nothing: it writes
+// gLink.lag, which is what LinkMain1 reads.
+static void Ctr3dsLinkMiss(void)
+{
+    if (sCtrLinkMisses <= CTR_LINK_MISS_LIMIT)
+        sCtrLinkMisses++;
+
+    if (sCtrLinkMisses > CTR_LINK_MISS_LIMIT)
+        gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
+}
+
 static void Ctr3dsLinkPump(void)
 {
     u16 send[CMD_LENGTH];
@@ -2122,11 +2146,11 @@ static void Ctr3dsLinkPump(void)
 
     if (!Ctr3dsLinkIsConnected())
     {
-        // Losing the link mid-session is the game's own lag case, which it
-        // already knows how to surface and recover from. Anything harsher
-        // would strand the player mid-trade.
+        // Losing the link mid-session is the game's own lag case. Give it the
+        // same tolerance as a missed frame: a peer that is briefly absent, for
+        // example while the other console stalls, must not end the session.
         if (gLink.state == LINK_STATE_CONN_ESTABLISHED)
-            gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
+            Ctr3dsLinkMiss();
         return;
     }
 
@@ -2145,6 +2169,7 @@ static void Ctr3dsLinkPump(void)
     {
         gLink.state = LINK_STATE_CONN_ESTABLISHED;
         gLink.lag = 0;
+        sCtrLinkMisses = 0;
     }
 
     if (gLink.state != LINK_STATE_CONN_ESTABLISHED)
@@ -2163,14 +2188,15 @@ static void Ctr3dsLinkPump(void)
 
     if (!Ctr3dsLinkExchange(send, recv))
     {
-        // A frame the peers did not deliver in time. Same treatment as a
-        // late cable transfer: report lag and try again next frame, keeping
-        // the send queue intact so nothing is lost.
-        gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
+        // A frame the peers did not deliver in time. The send queue is left
+        // intact, so nothing is lost and the same command goes again next
+        // frame. Only a run of these is lag.
+        Ctr3dsLinkMiss();
         return;
     }
 
     gLink.lag = 0;
+    sCtrLinkMisses = 0;
 
     if (gLink.sendQueue.count > 0)
     {

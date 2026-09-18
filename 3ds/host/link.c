@@ -366,8 +366,9 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     if (R_FAILED(udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL,
                            UDS_SENDFLAG_Default, &out, sizeof(out)))) {
         // A failed send is a dropped frame, not a dead link: the caller
-        // reports lag and we try again next frame.
-        sFrame++;
+        // reports the miss and we send this same frame again next time. The
+        // counter must NOT advance here, or this console runs ahead of a peer
+        // that never saw the frame. See the note at the end of this function.
         return 0;
     }
 
@@ -392,7 +393,21 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
             memcpy(dst + p * CTR_LINK_CMD_BYTES, sLatest[p].cmd, CTR_LINK_CMD_BYTES);
     }
 
-    sFrame++;
+    // Advance ONLY on success. This is what makes the exchange a lockstep
+    // rather than two consoles each counting their own frames.
+    //
+    // The counter used to advance every call. Each console then counted at its
+    // own frame rate, so a console running faster than its peer, which is what
+    // a New 3DS against an Old 3DS is, drew permanently ahead: peers_ready()
+    // compares the peer's frame against ours, so once the gap opened it never
+    // closed, every exchange failed and the game showed a communication error
+    // within seconds. One dropped frame on either side did the same thing.
+    //
+    // Holding the counter back makes a stalled peer stall us too, which is the
+    // point: the pair runs at the slower console's rate instead of drifting.
+    if (ready)
+        sFrame++;
+
     return ready;
 }
 
