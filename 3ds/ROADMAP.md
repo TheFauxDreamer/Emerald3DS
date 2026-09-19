@@ -6,7 +6,7 @@ built and why it is structured the way it is.
 
 ## Status
 
-Checked against `6a3336c` on 2026-09-18.
+Checked against `d482f2a` on 2026-09-18.
 
 | Part | State |
 |---|---|
@@ -15,7 +15,7 @@ Checked against `6a3336c` on 2026-09-18.
 | D: Gameplay tweaks | **Done.** |
 | Save durability | **Done.** |
 | The busy-wait audit | **Done.** |
-| C: Local wireless | **Pairs and links on hardware; a trade still errors.** On the `local-wireless` branch. |
+| C: Local wireless | **Pairs and links on hardware.** The trade error was a save stall against a 10-frame lag limit; the limit is wall clock now. On the `local-wireless` branch. |
 | E: Achievements | **Built in.** Two items are left. |
 
 The done parts stay in this file because their facts are recorded nowhere else.
@@ -50,24 +50,22 @@ The small ones:
   path (cheatsheet section 5, "Single core"). The second-core path repaints for
   it. One full repaint when the slide ends would fix the single-core path, for
   the cost of that repaint.
-- **The Old 3DS did not get its second core.** Measured at last, and the
-  assumption was wrong: `APT_SetAppCpuTimeLimit` returned `0xD8E05BF4` (PM,
-  permanent, not implemented) and the rasterizer fell back to running inline on
-  core 0. The exheader had `AffinityMask : 1`, which bars core 1 outright, and
-  New 3DS core 2 comes from `CanAccessCore2` instead, so the New 3DS path
-  worked and hid it. The mask is now 3 and `ppu_thread_start()` asks for 80, 70
-  then 50 percent before giving up. Unconfirmed on hardware. ZL and ZR cannot
-  be tested there.
-- **A base 3DS renders some scenes at 13.6 ms.** Against 3.1 ms in the
-  overworld, which puts a frame over budget on one core and locks the port to
-  30 fps. The shape is known but not the scene: `passWinRow()`
-  (`rp2350/ppu.c:204`) drops every background, sprite and backdrop pass onto the
-  per-pixel `emitMasked()` path for any line whose window mask is not uniform,
-  and a window partial in x makes every line so. The fix is to render such a
-  line as runs of constant mask and use the existing span loop inside each run:
-  the mask has at most a few runs unless OBJWIN is on. Not started, because it
-  touches every scene. `log_slow_scene()` (`3ds/host/video.c`) now reports the
-  deciding registers once for each boot, so do that first.
+- **The Old 3DS has no second core, and that is settled.** Two attempts:
+  `APT_SetAppCpuTimeLimit` returns `0xD8E05BF4` (PM, permanent, **not
+  implemented**), and setting the exheader `AffinityMask` to 3 changed nothing.
+  The firmware does not give an application a share of the system core. The
+  port is single core there for good, which is why the display divider
+  (`3ds/host/main.c`) exists. `ppu_try_core()` now says which of the two
+  refusals happened, if it is ever worth another look. ZL and ZR cannot be
+  tested there.
+- **Save flushes stall a link.** `CTR_SAVE_QUIET_MS` (`3ds/host/save.c:36`) is
+  100 ms and a link save writes one sector every 6 frames, about 100 ms apart,
+  so the debounce expires between nearly every sector and each one writes the
+  whole 128 KB save to the card at 136 ms a time. A trade therefore carries
+  roughly 1.8 seconds of stalls and the matching SD wear. The lag tolerance now
+  rides over it, so nothing fails, but raising the quiet time above the
+  inter-sector gap would collapse the writes into one. `CtrSaveCommit` forces an
+  immediate write at the real save points either way.
 - **MAP extras not built:** the city zoom, the indoor icon blink and the
   fly-destination icons (Part B, stage 4).
 - **Only if core 0 needs time back.** None of these is necessary at the

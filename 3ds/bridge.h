@@ -599,4 +599,11 @@ int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 // in a log: the game stops talking and nothing says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 
+// The lag tolerance, driven from src/link.c's pump: it is the only caller that
+// sees every missed frame. Ctr3dsLinkExchange() returns early, and reports
+// nothing, when the worker owns the wireless or the link is already down.
+void Ctr3dsLinkNoteMiss(void);
+void Ctr3dsLinkNoteOk(void);
+int  Ctr3dsLinkLagged(void);
+
 #endif // CTR_BRIDGE_H

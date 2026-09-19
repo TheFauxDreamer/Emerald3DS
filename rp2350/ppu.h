@@ -37,4 +37,17 @@ void ppu_render_rgb888(uint8_t *img, uint8_t *layer);
 // the 565 round-trip rounding (<=1 LSB/channel), not byte-for-byte.
 void ppu_render_rgb565(uint16_t *out, uint8_t *layer);
 
+// The same render, composed straight into 'out' at a row stride of 'stride'
+// uint16_t (>= PPU_WIDTH), with no intermediate line buffer. It saves the
+// per-line seed and flush memcpys, 153,600 bytes a frame, AND lets a caller
+// whose upload buffer is wider than 240 skip a second full-frame copy.
+//
+// Only for a target that is NOT scanned out while a line is half composed. The
+// RP2350 scans out of its framebuffer directly and must keep using
+// ppu_render_rgb565; a caller that reads the picture only after the render has
+// returned, such as a texture upload, can use this.
+//
+// 'layer' stays PPU_PIXELS bytes at a stride of PPU_WIDTH either way.
+void ppu_render_rgb565_direct(uint16_t *out, int stride, uint8_t *layer);
+
 #endif // RP2350_PPU_H

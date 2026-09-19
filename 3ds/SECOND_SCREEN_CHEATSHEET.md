@@ -55,9 +55,10 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            the I/O thread
 ```
 
-The rasteriser runs on a second core (core 2 on a New 3DS, core 1 otherwise)
-while `CtrBottomUpdate` paints, which is why a full repaint no longer costs a
-frame. It reads a private copy of VRAM, palette, OAM and the registers taken
+The rasteriser runs on core 2 of a New 3DS while `CtrBottomUpdate` paints,
+which is why a full repaint no longer costs a frame there. An Old 3DS gets no
+second core, so it keeps the single-core tuning; `Ctr3dsRasteriserOnOwnCore()`
+is what selects between the two. It reads a private copy of VRAM, palette, OAM and the registers taken
 just before the paint, so **anything a touch handler changes in video memory
 shows up one frame later**, never half-drawn. If no second core can be had, or
 the build is `CTR_PPU_THREAD=0`, it rasterises inline inside

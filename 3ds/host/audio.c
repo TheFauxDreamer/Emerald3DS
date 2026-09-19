@@ -145,10 +145,10 @@ static int16_t *ring_slot(uint32_t frame)
 // The 3DS scheduler uses strict priority, with no round-robin between different
 // priorities. A lower-priority thread runs only while all higher ones are
 // blocked. The libctru library runs the NDSP work on its own thread at 0x18.
-// AffinityMask 1 and SystemModeExt Legacy keep that thread and this one on core
-// 0. A main thread above it would starve the DSP whenever the rasterizer has
-// work, which is always. Under hbmenu, a .3dsx gets main priority 0x30, below
-// NDSP.
+// SystemModeExt Legacy keeps that thread and this one on core 0, and on an Old
+// 3DS nothing of ours leaves core 0 at all. A main thread above it would starve
+// the DSP whenever the rasterizer has work, which is always. Under hbmenu, a
+// .3dsx gets main priority 0x30, below NDSP.
 //
 // The file 3ds/emerald3ds.rsf asks for main priority 0x10, which would be above
 // NDSP. On hardware, the main thread was already at 0x18 or below, and this
