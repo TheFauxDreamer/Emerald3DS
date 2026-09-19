@@ -98,6 +98,17 @@ static int sUdsUp;                                       // worker thread only
 static int sState = CTR_LINK_IDLE;
 static int sIsHost;
 
+// Whether sBind currently holds a live bind context, and so whether there is
+// anything to tear down.
+//
+// This must NOT be inferred from sState. sState is the UI's word for what the
+// panel shows, and post() sets it to the busy state BEFORE the worker runs, so
+// by the time do_stop() looks, an established link reads as CTR_LINK_WORKING.
+// do_stop() used to test sState, skipped the teardown on exactly that path, and
+// let udsCreateNetwork() run against a bind context that was still live. HOST
+// after any earlier HOST or JOIN crashed. Resource ownership gets its own flag.
+static int sBound;
+
 static udsNetworkStruct sNetwork;                        // worker thread only
 static udsBindContext   sBind;
 
@@ -163,63 +174,16 @@ static volatile int sReq;
 static volatile int sReqArg;
 static int          sPrevState;   // what to put back when a request ends
 
-// What the worker did, for the main thread to log. The worker must not call
-// CtrLog: its queue has no lock and belongs to the main thread (3ds/host/log.c).
-// One slot is enough, because only one request runs at a time and the main
-// thread drains this at least thirty times a second.
-enum { RPT_NONE = 0, RPT_UDS_FAIL, RPT_HOST, RPT_SCAN, RPT_JOIN, RPT_STOP };
-static volatile int      sReport;
-static volatile uint32_t sReportA, sReportB;
-
-static void report(int kind, uint32_t a, uint32_t b)
-{
-    sReportA = a;
-    sReportB = b;
-    __dmb();
-    sReport = kind;
-}
-
-// Main thread only.
-static void drain_report(void)
-{
-    int kind = sReport;
-    uint32_t a, b;
-
-    if (kind == RPT_NONE)
-        return;
-
-    __dmb();
-    a = sReportA;
-    b = sReportB;
-    sReport = RPT_NONE;
-
-    switch (kind) {
-    case RPT_UDS_FAIL:
-        CtrLog("emerald3ds: link udsInit failed rc=0x%08lX\n", (unsigned long)a);
-        break;
-    case RPT_HOST:
-        if (a == 0)
-            CtrLog("emerald3ds: link hosting\n");
-        else
-            CtrLog("emerald3ds: link host failed rc=0x%08lX\n", (unsigned long)a);
-        break;
-    case RPT_SCAN:
-        CtrLog("emerald3ds: link scan found %lu in %lu ms\n",
-               (unsigned long)a, (unsigned long)b);
-        break;
-    case RPT_JOIN:
-        if (a == 0)
-            CtrLog("emerald3ds: link joined\n");
-        else
-            CtrLog("emerald3ds: link join failed rc=0x%08lX\n", (unsigned long)a);
-        break;
-    case RPT_STOP:
-        CtrLog("emerald3ds: link stopped\n");
-        break;
-    default:
-        break;
-    }
-}
+// The worker logs for itself.
+//
+// CtrLog is safe from any thread: svcOutputDebugString takes no lock, and
+// log_to_file holds sQueueLock (3ds/host/log.c). Only CtrProfile and
+// CtrLogSlow are main-thread-only, because their tables are unlocked.
+//
+// This matters more than tidiness. Each blocking UDS call gets a line BEFORE it
+// runs, so if the console faults inside one, the last line in the log names the
+// call that did it. Handing finished results to the main thread to print, which
+// is what this file did first, loses exactly the case worth diagnosing.
 
 // ---------------------------------------------------------------- helpers ---
 
@@ -233,9 +197,11 @@ static int ensure_uds(void)
     // The username is what other consoles see in the beacon. Emerald's own
     // trainer name is game-side and this file must not reach for it, so the
     // console's own name is used instead.
+    CtrLog("emerald3ds: link udsInit\n");
     rc = udsInit(LINK_SHAREDMEM, NULL);
     if (R_FAILED(rc)) {
-        report(RPT_UDS_FAIL, (uint32_t)rc, 0);
+        CtrLog("emerald3ds: link udsInit failed rc=0x%08lX\n",
+               (unsigned long)rc);
         return 0;
     }
 
@@ -286,13 +252,15 @@ static void publish_state(int state, int isHost)
 
 static void do_stop(void)
 {
-    if (sState == CTR_LINK_HOSTING || sState == CTR_LINK_CONNECTED ||
-        sState == CTR_LINK_JOINING) {
+    if (sBound) {
+        CtrLog("emerald3ds: link teardown (%s)\n", sIsHost ? "host" : "client");
         udsUnbind(&sBind);
         if (sIsHost)
             udsDestroyNetwork();
         else
             udsDisconnectNetwork();
+        sBound = 0;
+        memset(&sBind, 0, sizeof sBind);
     }
 
     reset_frames();
@@ -312,17 +280,19 @@ static void do_host(void)
     udsGenerateDefaultNetworkStruct(&sNetwork, LINK_WLANCOMM_ID, LINK_ID8,
                                     CTR_LINK_MAX_PLAYERS);
 
+    CtrLog("emerald3ds: link udsCreateNetwork\n");
     rc = udsCreateNetwork(&sNetwork, LINK_PASSPHRASE, sizeof(LINK_PASSPHRASE),
                           &sBind, LINK_CHANNEL, LINK_RECVBUF);
     if (R_FAILED(rc)) {
-        report(RPT_HOST, (uint32_t)rc, 0);
+        CtrLog("emerald3ds: link host failed rc=0x%08lX\n", (unsigned long)rc);
         publish_state(CTR_LINK_FAILED, 0);
         return;
     }
 
+    sBound = 1;
     reset_frames();
     publish_state(CTR_LINK_HOSTING, 1);
-    report(RPT_HOST, 0, 0);
+    CtrLog("emerald3ds: link hosting\n");
 }
 
 static void do_scan(void)
@@ -344,13 +314,15 @@ static void do_scan(void)
 
     // The sweep itself, with no lock held. It is the whole reason this file has
     // a worker thread.
+    CtrLog("emerald3ds: link udsScanBeacons\n");
     if (R_FAILED(udsScanBeacons(buf, sizeof(buf), &nets, &total,
                                 LINK_WLANCOMM_ID, LINK_ID8, NULL, false))) {
         LightLock_Lock(&sLock);
         sScanCount = 0;
         LightLock_Unlock(&sLock);
         publish_state(back, sIsHost);
-        report(RPT_SCAN, 0, CtrTimeNowMs() - t0);
+        CtrLog("emerald3ds: link scan failed after %u ms\n",
+               CtrTimeNowMs() - t0);
         return;
     }
 
@@ -383,7 +355,8 @@ static void do_scan(void)
     LightLock_Unlock(&sLock);
 
     publish_state(back, sIsHost);
-    report(RPT_SCAN, (uint32_t)sScanCount, CtrTimeNowMs() - t0);
+    CtrLog("emerald3ds: link scan found %d in %u ms\n",
+           sScanCount, CtrTimeNowMs() - t0);
 }
 
 static void do_join(int index)
@@ -402,23 +375,30 @@ static void do_join(int index)
     net = sScan[index].network;
     LightLock_Unlock(&sLock);
 
+    // Take the copy first, then let go of anything already held. Joining while
+    // hosting, or twice over, would otherwise bind sBind a second time without
+    // unbinding the first, which is the same fault do_host() had.
+    do_stop();
+
     if (!ensure_uds()) {
         publish_state(CTR_LINK_FAILED, 0);
         return;
     }
 
+    CtrLog("emerald3ds: link udsConnectNetwork index %d\n", index);
     rc = udsConnectNetwork(&net, LINK_PASSPHRASE, sizeof(LINK_PASSPHRASE),
                            &sBind, UDS_BROADCAST_NETWORKNODEID,
                            UDSCONTYPE_Client, LINK_CHANNEL, LINK_RECVBUF);
     if (R_FAILED(rc)) {
-        report(RPT_JOIN, (uint32_t)rc, 0);
+        CtrLog("emerald3ds: link join failed rc=0x%08lX\n", (unsigned long)rc);
         publish_state(CTR_LINK_FAILED, 0);
         return;
     }
 
+    sBound = 1;
     reset_frames();
     publish_state(CTR_LINK_CONNECTED, 0);
-    report(RPT_JOIN, 0, 0);
+    CtrLog("emerald3ds: link joined\n");
 }
 
 static void run_request(int req, int arg)
@@ -427,7 +407,7 @@ static void run_request(int req, int arg)
     case REQ_HOST: do_host();     break;
     case REQ_SCAN: do_scan();     break;
     case REQ_JOIN: do_join(arg);  break;
-    case REQ_STOP: do_stop(); report(RPT_STOP, 0, 0); break;
+    case REQ_STOP: do_stop(); CtrLog("emerald3ds: link stopped\n"); break;
     default: break;
     }
 }
@@ -590,7 +570,6 @@ static void refresh_status(void)
     int state, isHost;
 
     ensure_lock();
-    drain_report();
 
     // The worker owns UDS while it runs. Answer from the cache.
     if (sBusy)
@@ -1062,7 +1041,6 @@ void CtrLinkExit(void)
     }
 
     do_stop();
-    drain_report();
 
     if (sUdsUp) {
         udsExit();
