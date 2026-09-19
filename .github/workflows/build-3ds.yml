@@ -46,7 +46,16 @@ jobs:
       # toolchain.
       - name: Install host build dependencies
         run: |
-          apt-get update
+          # Drop apt.devkitpro.org before updating. Nothing in this step wants
+          # it: the cross toolchain is already in the image, the 3DS libraries
+          # come from dkp-pacman below, and every package here is from Debian.
+          # It is also the source that goes down, and apt-get update fails the
+          # WHOLE step when any single source is unreachable, so an outage there
+          # stopped a build that needed nothing from it.
+          grep -rl devkitpro /etc/apt/sources.list.d 2>/dev/null | xargs -r rm -f
+          # Tolerate a flaky mirror: apt-get install below is the real gate, and
+          # it fails loudly and specifically if a package is actually missing.
+          apt-get update || apt-get update || true
           apt-get install -y --no-install-recommends \
             build-essential pkg-config libpng-dev zlib1g-dev python3 \
             curl unzip ca-certificates
