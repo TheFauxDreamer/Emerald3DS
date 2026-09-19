@@ -112,6 +112,14 @@ static uint16_t pal565fx[512] PPU_EWRAM;
 // values fit uint16). Not in EWRAM: that region is packed to the byte.
 static uint16_t bevb5[32], bevb6[64];
 
+// The palette bytes the LUTs above were built from, with the effect and level
+// that shaped pal565fx. See the compare in buildFrameState. Not in EWRAM, for
+// the same reason as bevb: that region is packed to the byte, and this is cold
+// data touched twice a frame rather than once a pixel.
+static uint8_t palShadow[512 * 2];
+static int     palShadowValid;
+static uint8_t palShadowEffect, palShadowEvy;
+
 // ---- windows ----------------------------------------------------------------
 // Window bounds do not wrap. GBATEK:
 //
@@ -140,6 +148,7 @@ static bool inWindowRange(int value, uint16_t range) {
 static uint8_t winrow[WIDTH] __attribute__((aligned(4)));
 static int winrow_y;
 static int winrow_u;   // the row's uniform mask value, or -1 if not uniform
+static int winrow_filled;   // are winrow's bytes valid, or only winrow_u?
 
 static void winrowFill(uint16_t hrange, uint8_t val) {
     int start = hrange >> 8;
@@ -149,6 +158,24 @@ static void winrowFill(uint16_t hrange, uint8_t val) {
     if (start > end || end > WIDTH) end = WIDTH;
     if (start >= end) return;   // X1 at or past the right edge: nothing shown
     memset(&winrow[start], val, end - start);
+}
+
+// The same range, answered without writing anything. Both must use the clamping
+// rule above, or they disagree about the inverted and past-the-edge cases that
+// the note on inWindowRange describes, and the row's mask would then depend on
+// which function asked.
+static bool winrowCoversAll(uint16_t hrange) {
+    int start = hrange >> 8;
+    int end = hrange & 0xff;
+    if (start > end || end > WIDTH) end = WIDTH;
+    return start <= 0 && end >= WIDTH;
+}
+
+static bool winrowCoversNone(uint16_t hrange) {
+    int start = hrange >> 8;
+    int end = hrange & 0xff;
+    if (start > end || end > WIDTH) end = WIDTH;
+    return start >= end;
 }
 
 static void objWinFill(int y, uint8_t val);   // with the sprite list below
@@ -169,27 +196,66 @@ static void objWinFill(int y, uint8_t val);   // with the sprite list below
 static const uint8_t *winRowFor(int y) {
     if (!F.windowsOn) return NULL;
     if (winrow_y != y) {
+        const bool w0on = (F.dispcnt & 0x2000) && inWindowRange(y, F.win0v);
+        const bool w1on = (F.dispcnt & 0x4000) && inWindowRange(y, F.win1v);
+        const bool objwon = (F.dispcnt & 0x8000) != 0;
+
         winrow_y = y;
-        memset(winrow, F.winout & 0x3f, WIDTH);
-        if (F.dispcnt & 0x8000)
-            objWinFill(y, (F.winout >> 8) & 0x3f);
-        // win1 first, then win0 overwrites: matches the reference's win0-first
-        // priority check.
-        if ((F.dispcnt & 0x4000) && inWindowRange(y, F.win1v))
-            winrowFill(F.win1h, (F.winin >> 8) & 0x3f);
-        if ((F.dispcnt & 0x2000) && inWindowRange(y, F.win0v))
-            winrowFill(F.win0h, F.winin & 0x3f);
-        // Uniformity sweep (60 word compares). The overworld keeps WIN0
-        // covering the whole screen, so most gameplay lines are uniform and
-        // every pass on them can drop per-pixel masking (see passWinRow).
-        const uint32_t *p = (const uint32_t *)winrow;
-        uint32_t w0 = p[0];
-        winrow_u = (uint8_t)w0 * 0x01010101u == w0 ? (int)(w0 & 0xff) : -1;
-        if (winrow_u >= 0)
-            for (int i = 1; i < WIDTH / 4; i++)
-                if (p[i] != w0) { winrow_u = -1; break; }
+        winrow_filled = 0;
+
+        // Answer from the registers where the row can only hold one value. That
+        // is the usual case and it used to cost two 240-byte memsets and a
+        // 60-word sweep on every line, 76,800 bytes a frame, to rediscover
+        // something the window registers already say. The overworld keeps WIN0
+        // over the whole screen, so every one of its lines lands here.
+        //
+        // The fills run outside, then the OBJ window, then WIN1, then WIN0, so
+        // a window that covers the whole width hides everything below it. That
+        // is why the first two cases need not care about the OBJ window at all.
+        if (w0on && winrowCoversAll(F.win0h)) {
+            winrow_u = F.winin & 0x3f;
+        } else if ((!w0on || winrowCoversNone(F.win0h))
+                   && w1on && winrowCoversAll(F.win1h)) {
+            winrow_u = (F.winin >> 8) & 0x3f;
+        } else if (!objwon
+                   && (!w0on || winrowCoversNone(F.win0h))
+                   && (!w1on || winrowCoversNone(F.win1h))) {
+            winrow_u = F.winout & 0x3f;
+        } else {
+            memset(winrow, F.winout & 0x3f, WIDTH);
+            if (objwon)
+                objWinFill(y, (F.winout >> 8) & 0x3f);
+            // win1 first, then win0 overwrites: matches the reference's
+            // win0-first priority check.
+            if (w1on)
+                winrowFill(F.win1h, (F.winin >> 8) & 0x3f);
+            if (w0on)
+                winrowFill(F.win0h, F.winin & 0x3f);
+            winrow_filled = 1;
+
+            // Uniformity sweep (60 word compares). A partial row can still come
+            // out uniform, for example when the OBJ window stamps nothing on
+            // this line, and every pass on a uniform row can drop per-pixel
+            // masking (see passWinRow).
+            const uint32_t *p = (const uint32_t *)winrow;
+            uint32_t w = p[0];
+            winrow_u = (uint8_t)w * 0x01010101u == w ? (int)(w & 0xff) : -1;
+            if (winrow_u >= 0)
+                for (int i = 1; i < WIDTH / 4; i++)
+                    if (p[i] != w) { winrow_u = -1; break; }
+        }
     }
     return winrow;
+}
+
+// A uniform row decided from the registers has no bytes yet. Only a pass that
+// masks per pixel reads them, which needs colour effects on a targeted layer,
+// so in the overworld this never runs.
+static void winrowEnsure(void) {
+    if (!winrow_filled) {
+        memset(winrow, (uint8_t)winrow_u, WIDTH);
+        winrow_filled = 1;
+    }
 }
 
 static int g_passLayer;   // tentative; defined with the emit machinery below
@@ -207,24 +273,50 @@ static const uint8_t *passWinRow(int y, bool *skip) {
     if (!wr || winrow_u < 0) return wr;
     if (!(winrow_u & g_passLayer)) { *skip = true; return wr; }
     if (g_passMode == 0 || (winrow_u & 0x20)) return NULL;
+    winrowEnsure();   // this pass is the one that reads the bytes
     return wr;
 }
 
 // ---- scanline buffers --------------------------------------------------------
 // The current scanline is composed here and flushed to the framebuffer whole.
-static uint16_t line565[WIDTH]     PPU_EWRAM;
+static uint16_t line565buf[WIDTH]  PPU_EWRAM;
 static uint8_t  line888[WIDTH * 3] PPU_EWRAM;
+
+// Where the passes compose. Normally line565buf, but in direct mode it points
+// straight at the target's row and the two memcpys below disappear. It is a
+// pointer, not an array, so a hot loop that also stores through a uint8_t (the
+// layer bytes) must take a local copy of it, exactly as the affine fast path
+// already does for c->pa and friends. Otherwise the char store forces a reload
+// of this pointer on every pixel.
+static uint16_t *line565 = line565buf;
+
 static int g_rowBase;   // y * WIDTH: g_layer index of the line's first pixel
+static int g_fbStride = WIDTH;   // the 565 target's row stride, >= WIDTH
+static int g_fbDirect;           // compose in the target, with no line buffer
 
 static inline void lineInit(int y) {
     g_rowBase = y * WIDTH;
+
+    // Compose in place. The seed below keeps pixels that nothing draws to, and
+    // in the target those pixels ALREADY hold what the seed would have copied,
+    // so both memcpys are pure cost here. Only a target that is scanned out
+    // while a line is half composed needs the private buffer; see the note at
+    // the top of this file. A caller that reads the picture through a texture
+    // upload, which cannot start until the render has returned, does not.
+    if (g_fbDirect) {
+        line565 = &g_fb565[y * g_fbStride];
+        return;
+    }
+
     // Seed from the framebuffer so pixels nothing draws to (window-masked
     // backdrop) keep their previous contents, as the reference leaves them.
+    line565 = line565buf;
     if (g_fb888) memcpy(line888, &g_fb888[g_rowBase * 3], WIDTH * 3);
     else memcpy(line565, &g_fb565[g_rowBase], WIDTH * 2);
 }
 
 static inline void lineFlush(int y) {
+    if (g_fbDirect) return;   // the pixels are already where they belong
     if (g_fb888) memcpy(&g_fb888[y * WIDTH * 3], line888, WIDTH * 3);
     else memcpy(&g_fb565[y * WIDTH], line565, WIDTH * 2);
 }
@@ -366,10 +458,30 @@ static void buildFrameState(void) {
     F.win0v = reg16(0x44); F.win1v = reg16(0x46);
     F.winin = reg16(0x48); F.winout = reg16(0x4a);
     winrow_y = -1;
-    if (F.effect == 1) {
+    // These feed emitBlend565 and nothing else, and setPass() can only put a
+    // pass in blend mode when that layer is a BLDCNT first target. With no
+    // first targets the effect is inert, so building these would be pure waste.
+    // Emerald's overworld does exactly that: effect 1 with srcTargets 0.
+    if (F.effect == 1 && F.srcTargets != 0) {
         for (int i = 0; i < 32; i++) bevb5[i] = (uint16_t)(i * 255 / 31 * F.evb);
         for (int i = 0; i < 64; i++) bevb6[i] = (uint16_t)(i * 255 / 63 * F.evb);
     }
+
+    // 512 entries with six divisions each, every frame, and the result changes
+    // only when palette RAM, the effect or its level changes. A fade writes
+    // palette RAM every frame; standing still in the overworld does not. So ask
+    // first: 512 bytes of compare against 512 conversions.
+    //
+    // The effect and evy are part of the question because pal565fx is built
+    // from them, not from palette RAM alone.
+    if (palShadowValid && palShadowEffect == F.effect && palShadowEvy == F.evy
+        && memcmp(palShadow, PALb, sizeof palShadow) == 0)
+        return;
+
+    memcpy(palShadow, PALb, sizeof palShadow);
+    palShadowEffect = (uint8_t)F.effect;
+    palShadowEvy    = (uint8_t)F.evy;
+    palShadowValid  = 1;
 
     for (int i = 0; i < 512; i++) {
         uint16_t v = ld16(PALb, i * 2);
@@ -692,6 +804,7 @@ static void affineBgLine(const bgcfg_t *c, int y) {
         const uint8_t *map = VRAMb + c->screenBase;
         const uint8_t *chr = VRAMb + c->charBase;
         uint8_t *ly = &g_layer[g_rowBase];
+        uint16_t *const lrow = line565;   // see the note on line565's type
         const uint8_t lb = (uint8_t)g_passLayer;
         if (pa == 256 && pc == 0) {
             // Pure translation (identity matrix, just scrolled) -- how games
@@ -717,7 +830,7 @@ static void affineBgLine(const bgcfg_t *c, int y) {
                     const uint8_t *trow = crow + (uint32_t)mrow[sx >> 3] * 64 + (sx & 7);
                     for (int k = 0; k < span; k++) {
                         uint32_t ci = trow[k];
-                        if (ci) { line565[x + k] = pal565[ci]; ly[x + k] = lb; }
+                        if (ci) { lrow[x + k] = pal565[ci]; ly[x + k] = lb; }
                     }
                     x += span;
                     sx = (sx + (uint32_t)span) & m;   // spans end on tile
@@ -739,7 +852,7 @@ static void affineBgLine(const bgcfg_t *c, int y) {
                 const uint8_t *trow = crow + (uint32_t)mrow[sx >> 3] * 64 + (sx & 7);
                 for (int k = 0; k < span; k++) {
                     uint32_t ci = trow[k];
-                    if (ci) { line565[x + k] = pal565[ci]; ly[x + k] = lb; }
+                    if (ci) { lrow[x + k] = pal565[ci]; ly[x + k] = lb; }
                 }
                 x += span;
             }
@@ -752,7 +865,7 @@ static void affineBgLine(const bgcfg_t *c, int y) {
                 uint32_t sy = (uint32_t)(cy >> 8) & m;
                 uint32_t tile = map[(sy >> 3) * tpr + (sx >> 3)];
                 uint32_t ci = chr[tile * 64 + (sy & 7) * 8 + (sx & 7)];
-                if (ci) { line565[x] = pal565[ci]; ly[x] = lb; }
+                if (ci) { lrow[x] = pal565[ci]; ly[x] = lb; }
             }
         } else {
             const uint32_t sz = (uint32_t)c->asize;
@@ -762,7 +875,7 @@ static void affineBgLine(const bgcfg_t *c, int y) {
                 if ((uint32_t)sx >= sz || (uint32_t)sy >= sz) continue;
                 uint32_t tile = map[((uint32_t)sy >> 3) * tpr + ((uint32_t)sx >> 3)];
                 uint32_t ci = chr[tile * 64 + ((uint32_t)sy & 7) * 8 + ((uint32_t)sx & 7)];
-                if (ci) { line565[x] = pal565[ci]; ly[x] = lb; }
+                if (ci) { lrow[x] = pal565[ci]; ly[x] = lb; }
             }
         }
         return;
@@ -1108,5 +1221,20 @@ void ppu_render_rgb565(uint16_t *out, uint8_t *layer) {
     g_fb888 = NULL;
     g_fb565 = out;
     g_layer = layer;
+    g_fbStride = WIDTH;
+    g_fbDirect = 0;
     renderFrame();
+}
+
+void ppu_render_rgb565_direct(uint16_t *out, int stride, uint8_t *layer) {
+    g_fb888 = NULL;
+    g_fb565 = out;
+    g_layer = layer;
+    g_fbStride = stride < WIDTH ? WIDTH : stride;
+    g_fbDirect = 1;
+    renderFrame();
+    // Leave the globals as ppu_render_rgb565 expects to find them, so the two
+    // entry points cannot affect each other.
+    g_fbStride = WIDTH;
+    g_fbDirect = 0;
 }

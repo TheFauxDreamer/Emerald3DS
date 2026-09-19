@@ -2125,21 +2125,23 @@ static void DequeueRecvCmds(u16 (*recvCmds)[CMD_LENGTH])
 // as fatal: it shows the communication error and closes the link. The cable
 // path is far more forgiving than that. Its slave allows more than 10 VBlanks
 // with no serial interrupt before it calls it lag (see the #else branch of
-// LinkVSync below), and its master tests one frame's worth of transfers. So
-// count consecutive misses here and use the same tolerance. Without this, one
-// late wireless frame ends the session.
-#define CTR_LINK_MISS_LIMIT 10
-
-static u8 sCtrLinkMisses;
-
-// Report lag only once the misses pass the limit. Returns nothing: it writes
-// gLink.lag, which is what LinkMain1 reads.
+// LinkVSync below), and its master tests one frame's worth of transfers.
+// Without a tolerance here, one late wireless frame ends the session.
+//
+// The tolerance is wall clock, not a count of frames, and the clock lives
+// host-side in 3ds/host/link.c. A count cannot be right for both consoles at
+// once, because they do not run at the same frame rate: a base 3DS holds 30 fps
+// where a New 3DS holds 60, so the same count meant two different real
+// timeouts. It also has to outlast a save flush, which blocks a console for
+// more than 100 ms and happens repeatedly during a trade.
+//
+// This function only decides. It writes gLink.lag, which is what LinkMain1
+// reads.
 static void Ctr3dsLinkMiss(void)
 {
-    if (sCtrLinkMisses <= CTR_LINK_MISS_LIMIT)
-        sCtrLinkMisses++;
+    Ctr3dsLinkNoteMiss();
 
-    if (sCtrLinkMisses > CTR_LINK_MISS_LIMIT)
+    if (Ctr3dsLinkLagged())
         gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
 }
 
@@ -2179,7 +2181,7 @@ static void Ctr3dsLinkPump(void)
     {
         gLink.state = LINK_STATE_CONN_ESTABLISHED;
         gLink.lag = 0;
-        sCtrLinkMisses = 0;
+        Ctr3dsLinkNoteOk();
     }
 
     if (gLink.state != LINK_STATE_CONN_ESTABLISHED)
@@ -2206,7 +2208,7 @@ static void Ctr3dsLinkPump(void)
     }
 
     gLink.lag = 0;
-    sCtrLinkMisses = 0;
+    Ctr3dsLinkNoteOk();
 
     if (gLink.sendQueue.count > 0)
     {

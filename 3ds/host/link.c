@@ -694,25 +694,58 @@ static int peers_ready(uint32_t target, int players, int local)
     return 1;
 }
 
+// How long a peer may go quiet before the game is told the link has lagged.
+//
+// This used to be a count of 10 frames, game-side. A frame count cannot be
+// right for both consoles at once: 10 frames is 167 ms on a 60 fps New 3DS and
+// 333 ms on a 30 fps Old 3DS, so a mixed pair did not even agree on when to
+// give up. Worse, either console blocks for more than 100 ms whenever it
+// flushes its save to the card, and a trade does that repeatedly, so the old
+// limit ended the session on the first save of every trade.
+//
+// Three seconds is far longer than any save flush and far shorter than a
+// player's patience. A peer that is merely slow stalls this console instead,
+// which is what the lockstep is for.
+#define LINK_LAG_TOLERANCE_MS 3000
+#define LINK_LAG_MIN_MISSES   2
+
 // One line for each run of missed frames, not one for each miss. A miss storm
 // must not fill the log, and the run length is what tells a late peer from a
 // dead one.
-static unsigned sMissRun;
+static unsigned     sMissRun;
+static unsigned int sMissStartMs;
 
-static void note_exchange(int ready)
+// src/link.c drives these three: it is the only caller that sees every miss.
+// Ctr3dsLinkExchange() cannot, because it returns early, and reports nothing,
+// when the worker owns the wireless or the link is already down.
+void Ctr3dsLinkNoteMiss(void)
 {
-    if (!ready) {
-        if (sMissRun == 0)
-            CtrLog("emerald3ds: link missed frame %lu\n", (unsigned long)sFrame);
-        if (sMissRun < 0xFFFFFFFFu)
-            sMissRun++;
-        return;
+    if (sMissRun == 0) {
+        sMissStartMs = CtrTimeNowMs();
+        CtrLog("emerald3ds: link missed frame %lu\n", (unsigned long)sFrame);
     }
 
+    if (sMissRun < 0xFFFFFFFFu)
+        sMissRun++;
+}
+
+void Ctr3dsLinkNoteOk(void)
+{
     if (sMissRun > 0) {
-        CtrLog("emerald3ds: link caught up after %u missed frames\n", sMissRun);
+        CtrLog("emerald3ds: link caught up after %u missed frames (%u ms)\n",
+               sMissRun, CtrTimeNowMs() - sMissStartMs);
         sMissRun = 0;
     }
+}
+
+// A run of at least LINK_LAG_MIN_MISSES, so one long frame can never trip it,
+// AND longer than the tolerance.
+int Ctr3dsLinkLagged(void)
+{
+    if (sMissRun < LINK_LAG_MIN_MISSES)
+        return 0;
+
+    return (CtrTimeNowMs() - sMissStartMs) >= LINK_LAG_TOLERANCE_MS;
 }
 
 int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
@@ -750,7 +783,6 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
         // reports the miss and we send this same frame again next time. The
         // counter must NOT advance here, or this console runs ahead of a peer
         // that never saw the frame. See the note at the end of this function.
-        note_exchange(0);
         return 0;
     }
 
@@ -807,7 +839,6 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     if (ready)
         sFrame++;
 
-    note_exchange(ready);
     return ready;
 }
 

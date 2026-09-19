@@ -40,6 +40,7 @@ int  CtrVideoInit(void);
 void CtrVideoExit(void);
 void CtrVideoRenderBegin(void);
 void CtrVideoPresent(void);
+unsigned long long CtrVideoLastWaitTicks(void);
 void CtrAudioInit(void);
 void CtrAudioExit(void);
 void CtrAudioFrame(void);
@@ -195,6 +196,101 @@ void Ctr3dsGetClock(CtrClock *out)
 static int sSpeed     = 1;  // game frames for each displayed frame, now
 static int sBaseSpeed = 1;  // the GAME SPEED choice; turbo overrides it
 static int sSubFrame;       // 0 .. sSpeed-1, wraps on the displayed frame
+
+// ---- the display divider ---------------------------------------------------
+//
+// An Old 3DS cannot always fit a frame into 16.6 ms, and the way it fails looks
+// worse than it measures: the work crosses the line and comes back, so the
+// period alternates between one VBlank and two and the picture judders. A
+// steady half rate reads far better than an irregular full one.
+//
+// Engaged, the game still runs one frame for each iteration and keeps its 60 Hz
+// rate, but only every second iteration renders and presents. The pair needs
+// one sync point, not two, and the one it has does the whole job: the render
+// frame's C3D_FrameBegin lands on the first VBlank boundary after the PAIR's
+// work is done, so two game frames take exactly two VBlanks. The skipped frame
+// must therefore NOT wait for a VBlank of its own. Adding one there was the
+// first attempt and it gives three VBlanks for each pair, 20 Hz, whenever the
+// render overruns, which is exactly when the divider is on.
+//
+// The one thing this relies on is that a pair's work always exceeds one VBlank.
+// Below that the single sync point would pace the pair to one VBlank and the
+// game would run at double speed. The thresholds keep a margin of nearly two
+// against it, and DIV_PAIR_FLOOR_TICKS catches a scene that collapses between
+// decisions, a fade to black for one.
+//
+// The signal is the work a frame WOULD cost with no divider. That matters: the
+// obvious signal, frames that missed VBlank, reads zero as soon as the divider
+// engages, so the divider could never let go again. This one does not change
+// when it engages, because it adds the mean game frame, measured over every
+// frame, to the mean cost of a presenting frame, measured over those only.
+// The budget is one VBlank, 16.67 ms. Engage only when the mean frame is at it,
+// not merely near it: a mean of 15 ms still fits, and dropping such a scene to
+// 30 Hz would give away a frame rate the console could have held. The Old 3DS
+// overworld is expected to land around 15 ms once the rasterizer's copies are
+// gone, so that margin is the difference between this feature helping and this
+// feature being the problem. Retune against a log, not against a guess.
+#define DIV_WINDOW    60      // presenting frames between decisions
+#define DIV_ON_US  16000      // engage above this estimate
+#define DIV_OFF_US 14000      // and let go below it, with the gap as hysteresis
+
+// A little above one VBlank: below this a pair no longer needs two of them.
+#define DIV_PAIR_FLOOR_TICKS ((unsigned long long)SYSCLOCK_ARM11 / 55)
+
+static int sDivide;    // 1 when every second frame skips the render
+static int sDivPhase;  // 0 renders, 1 skips
+static unsigned long long sPairWork;
+
+static unsigned long long sHookEnd;   // ticks when the last hook returned
+static unsigned long long sGameSum, sHookSum;
+static unsigned sGameN, sHookN;
+
+static void divider_sample(unsigned long long gameTicks,
+                           unsigned long long hookWork, int rendered)
+{
+    unsigned est;
+    int want;
+
+    sGameSum += gameTicks;
+    sGameN++;
+
+    if (rendered) {
+        sHookSum += hookWork;
+        sHookN++;
+        sPairWork = gameTicks + hookWork;
+    } else {
+        sPairWork += gameTicks + hookWork;
+
+        // The pair stopped needing two VBlanks. Let go now: the next decision
+        // is a second away, and a second of double-speed audio is not a thing
+        // to wait out.
+        if (sDivide && sPairWork < DIV_PAIR_FLOOR_TICKS) {
+            sDivide = 0;
+            sDivPhase = 0;
+            sGameSum = sHookSum = 0;
+            sGameN = sHookN = 0;
+            CtrLog("emerald3ds: display full rate, 60 Hz (scene got cheap)\n");
+            return;
+        }
+    }
+
+    if (sHookN < DIV_WINDOW || sGameN == 0)
+        return;
+
+    est = (unsigned)((sGameSum / sGameN + sHookSum / sHookN)
+                     / (SYSCLOCK_ARM11 / 1000000));
+
+    want = sDivide ? (est > DIV_OFF_US) : (est > DIV_ON_US);
+    if (want != sDivide) {
+        sDivide = want;
+        sDivPhase = 0;
+        CtrLog("emerald3ds: display %s (frame work %u us)\n",
+               want ? "halved, 30 Hz" : "full rate, 60 Hz", est);
+    }
+
+    sGameSum = sHookSum = 0;
+    sGameN = sHookN = 0;
+}
 
 // The bind of each button: CTR_BIND_OFF, a speed, or CTR_BIND_MOD. The index is
 // CTR_TURBO_*.
@@ -751,6 +847,12 @@ static int effective_speed(uint32_t held)
 
 void Rp2350PresentFrame(void)
 {
+    // For the display divider. The span since the last return is the game's own
+    // frame, and nothing in it blocks, so it is work by definition.
+    unsigned long long tHook = CtrTicksNow();
+    unsigned long long gameTicks = (sHookEnd != 0) ? tHook - sHookEnd : 0;
+    unsigned long long blockTicks = 0;
+
     // Only the first frames matter. Frame 1 shows that the game's init did not
     // hang, and a rising count shows that the frame loop did not hang. More
     // lines add nothing.
@@ -788,6 +890,7 @@ void Rp2350PresentFrame(void)
     // gives one JOY_NEW and then held frames.
     static uint16_t keys;
     int presenting;
+    int rendering;
 
     if (sSubFrame == 0) {
         hidScanInput();
@@ -803,12 +906,25 @@ void Rp2350PresentFrame(void)
     // render start and the present both use it. Two decisions would let a tap
     // on EXTRA's speed buttons start a render that nothing waits for.
     presenting = (sSubFrame + 1 >= sSpeed);
+    rendering = presenting;
+
+    // The divider rides on top of the group, and leaves sSubFrame alone: that
+    // counter drives the input scan and the bottom screen, which must keep
+    // running at the full rate so that controls stay as responsive as ever.
+    //
+    // Fast-forward is exempt. It already drops renders by a factor the player
+    // asked for, and halving that again would be a speed nobody chose.
+    if (sDivide && sSpeed == 1) {
+        if (sDivPhase)
+            rendering = 0;
+        sDivPhase ^= 1;
+    }
 
     // Start the rasterizer on the other core now, before the bottom screen
     // paints, so the two run at the same time. The rasterizer first copies the
     // video state, so the touch handlers below cannot tear it. See
     // CtrVideoRenderBegin in 3ds/host/video.c.
-    if (presenting)
+    if (rendering)
         CtrVideoRenderBegin();
 
     if (sSubFrame == 0) {
@@ -826,14 +942,18 @@ void Rp2350PresentFrame(void)
     if (Ctr3dsIsAudioFrame())
         CtrAudioFrame();
 
-    if (presenting) {
+    if (presenting)
         sSubFrame = 0;
+    else
+        sSubFrame++;
 
+    if (rendering) {
         // Collect the render, upload and present. C3D_FrameBegin waits for
         // VBlank, which paces the game to 60 Hz. Fast-forward skips this call.
         // That skips the rasterize (the expensive part) and the pacing, so the
         // other frames cost only game logic.
         CtrVideoPresent();
+        blockTicks += CtrVideoLastWaitTicks();
 
         // Write the save image after the sector writes stop, and give the
         // settings to the I/O thread after the player stops changing them. Both
@@ -841,8 +961,13 @@ void Rp2350PresentFrame(void)
         CtrSaveFlush(0);
         CtrSettingsFlush(0);
         CtrAchFlush(0);
-    } else {
-        sSubFrame++;
+    }
+
+    sHookEnd = CtrTicksNow();
+    if (sSpeed == 1) {
+        unsigned long long span = sHookEnd - tHook;
+        divider_sample(gameTicks, span > blockTicks ? span - blockTicks : 0,
+                       rendering);
     }
 }
 

@@ -302,6 +302,14 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 // fault otherwise look the same afterwards: the game stops talking and nothing
 // says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
+
+// The lag tolerance. The host keeps the clock, because it is the side with one;
+// this side decides what to do when Ctr3dsLinkLagged() finally answers yes.
+// Call NoteMiss on every missed frame and NoteOk on every good one, or the run
+// never ends and a healthy link reports lag.
+void Ctr3dsLinkNoteMiss(void);
+void Ctr3dsLinkNoteOk(void);
+int  Ctr3dsLinkLagged(void);
 #endif
 
 u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENGTH]);

@@ -94,13 +94,20 @@ static C2D_Image           sTopImage, sBotImage;
 static uint16_t *sTopStage;   // TOP_TEX_W x CTR_GBA_HEIGHT, linear
 static uint16_t *sBotStage;   // BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear
 
-// The PPU output and its per-pixel layer bytes (see ppu.h).
+// The rasterizer's per-pixel layer bytes (see ppu.h).
 //
-// The rasterizer owns them. In threaded mode, the worker writes both, and the
-// main thread reads sGbaFrame only after it collects the render. They keep
-// state between frames (masked pixels keep their old color, and the blend reads
-// the old layer byte). Thus they are one pair and never double-buffered.
-static uint16_t sGbaFrame[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
+// The picture itself has no buffer of its own here. The rasterizer composes
+// straight into sTopStage, the buffer the texture upload already needed, at its
+// 256 stride. That removes two full-frame copies from every frame: the line
+// buffer's seed and flush inside the PPU, and the 240-to-256 copy that
+// upload() used to make. See ppu_render_rgb565_direct in rp2350/ppu.h for the
+// one rule it asks of a caller, which this file meets because nothing reads the
+// picture until the render has returned.
+//
+// The rasterizer owns both. In threaded mode the worker writes them, and the
+// main thread reads them only after it collects the render. They keep state
+// between frames (masked pixels keep their old colour, and the blend reads the
+// old layer byte), so neither is ever double-buffered.
 static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
 
 static int sReady;
@@ -113,8 +120,9 @@ static int sReady;
 //
 //   New 3DS: core 2, the second application core. CanAccessCore2 in
 //            3ds/emerald3ds.rsf permits it.
-//   Old 3DS: core 1, the system core, after APT_SetAppCpuTimeLimit() gives the
-//            game a share of it. One application thread is allowed there.
+//   Old 3DS: nothing. The firmware refuses an application any share of the
+//            system core, so this is always the inline case there. See
+//            ppu_thread_start() for what was tried.
 //   Neither: inline on core 0, as before. CTR_PPU_THREAD=0 builds this too.
 //
 // The same frame, not a pipeline. The render starts when the game's frame is
@@ -124,7 +132,7 @@ static int sReady;
 // the audio.
 //
 // The isolation rule, which makes this thread safe: the worker reads only the
-// snapshot below and writes only sGbaFrame and sGbaLayer. It never reads
+// snapshot below and writes only sTopStage and sGbaLayer. It never reads
 // gGbaMem, so nothing that the main thread does can tear the picture. A change
 // from a touch handler shows in the next frame. The worker never calls
 // CtrProfile, CtrLogSlow or CtrLog, because their tables have no lock and are
@@ -198,7 +206,7 @@ static void ppu_worker(void *arg)
         __dmb();
 
         t = svcGetSystemTick();
-        ppu_render_rgb565(sGbaFrame, sGbaLayer);
+        ppu_render_rgb565_direct(sTopStage, TOP_TEX_W, sGbaLayer);
         sPpuTicks = svcGetSystemTick() - t;
 
         // The picture must be visible to the main thread before the signal.
@@ -226,8 +234,15 @@ static int ppu_try_core(int core, volatile int *start)
     *start = PPU_START_PENDING;
     t = threadCreate(ppu_worker, (void *)start, PPU_STACK_SIZE,
                      PPU_THREAD_PRIO, core, false);
-    if (t == NULL)
+    if (t == NULL) {
+        // Say which refusal this is. A kernel that will not put a thread on
+        // this core at all and a thread that runs but gets no time both end
+        // with the rasterizer inline, and the fallback line alone cannot tell
+        // them apart.
+        CtrLog("emerald3ds: rasteriser thread on core %d refused by the "
+               "kernel\n", core);
         return 0;
+    }
 
     for (int ms = 0; ms < PPU_START_WAIT_MS && *start == PPU_START_PENDING; ms++)
         svcSleepThread(1000000LL);
@@ -310,6 +325,16 @@ static void ppu_thread_stop(void)
     threadFree(sPpuThread);
     sPpuThread = NULL;
     sPpuCore = -1;
+}
+
+// How long the last present blocked at its sync point. The display divider in
+// 3ds/host/main.c subtracts it to see the work alone, because what it decides
+// from must not change when it engages.
+static unsigned long long sWaitTicks;
+
+unsigned long long CtrVideoLastWaitTicks(void)
+{
+    return sWaitTicks;
 }
 
 // Set once, by ppu_thread_start() in CtrVideoInit(), which main() calls before
@@ -533,7 +558,7 @@ void CtrVideoExit(void)
     if (!sReady)
         return;
 
-    // First: the worker can still be writing to sGbaFrame.
+    // First: the worker can still be writing to sTopStage.
     ppu_thread_stop();
 
     linearFree(sTopStage);
@@ -600,10 +625,16 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
 {
     unsigned long long t = CtrTicksNow();
 
-    for (int y = 0; y < h; y++)
-        memcpy(stage + (size_t)y * stageW, src + (size_t)y * w, (size_t)w * 2);
+    // A NULL src means the caller already composed into the stage, which is
+    // what the top screen does now. There is then nothing to copy and no
+    // prof[0] sample to take, so that stage simply stops appearing in the log.
+    if (src != NULL) {
+        for (int y = 0; y < h; y++)
+            memcpy(stage + (size_t)y * stageW, src + (size_t)y * w,
+                   (size_t)w * 2);
+        CtrProfile(prof[0], t);
+    }
 
-    CtrProfile(prof[0], t);
     t = CtrTicksNow();
 
     // This flushes the full stage, the padding too. The value of stageW is 512
@@ -782,7 +813,7 @@ void CtrVideoPresent(void)
         CtrProfile("ppu", CtrTicksNow() - ppuTicks);
     } else {
         unsigned long long tp = CtrTicksNow();
-        ppu_render_rgb565(sGbaFrame, sGbaLayer);
+        ppu_render_rgb565_direct(sTopStage, TOP_TEX_W, sGbaLayer);
         ppuTicks = CtrTicksNow() - tp;
         CtrProfile("ppu", tp);
     }
@@ -801,8 +832,9 @@ void CtrVideoPresent(void)
         if (frame <= 3 || frame == 60 || frame == 600) {
             uint16_t dispcnt = sRegBase ? (uint16_t)(sRegBase[0] | (sRegBase[1] << 8)) : 0xFFFF;
             unsigned nonblack = 0;
-            for (int i = 0; i < CTR_GBA_WIDTH * CTR_GBA_HEIGHT; i++)
-                if (sGbaFrame[i]) nonblack++;
+            for (int y = 0; y < CTR_GBA_HEIGHT; y++)
+                for (int x = 0; x < CTR_GBA_WIDTH; x++)
+                    if (sTopStage[y * TOP_TEX_W + x]) nonblack++;
             CtrTrace("emerald3ds: frame %u DISPCNT=%04x nonblack=%u/%u\n",
                      frame, dispcnt, nonblack,
                      (unsigned)(CTR_GBA_WIDTH * CTR_GBA_HEIGHT));
@@ -810,7 +842,7 @@ void CtrVideoPresent(void)
     }
 #endif
     t0 = CtrTimeNowMs();
-    upload(sTopStage, TOP_TEX_W, sGbaFrame, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
+    upload(sTopStage, TOP_TEX_W, NULL, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
            &sTopTex, kProfTop);
     CtrLogSlow("upload.top", t0);
 
@@ -846,6 +878,7 @@ void CtrVideoPresent(void)
     {
         unsigned long long tb = CtrTicksNow();
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        sWaitTicks = CtrTicksNow() - tb;
         CtrProfile("framebegin", tb);
         note_frame_period();
     }

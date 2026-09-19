@@ -303,9 +303,12 @@ being the paint itself rather than the upload. It fits or misses depending on
 where the rasteriser's 7 to 10 ms lands that frame, which is why the symptom was
 a wobbly 55fps rather than a clean halving.
 
-That table was measured with everything on core 0. **The rasteriser now runs on
-a second core** (core 2 on a New 3DS, core 1 otherwise; `3ds/host/video.c`), and
-the frame is ordered so the two overlap:
+That table was measured with everything on core 0. **On a New 3DS the
+rasteriser now runs on core 2** (`3ds/host/video.c`), and the frame is ordered
+so the two overlap. An Old 3DS gets no second core: the firmware refuses an
+application any share of the system core, so everything below still describes
+that console. It stays on the single-core path and falls back to the display
+divider in `3ds/host/main.c` when a scene will not fit a frame.
 
 ```
 game frame + VBlankIntr                   core 0

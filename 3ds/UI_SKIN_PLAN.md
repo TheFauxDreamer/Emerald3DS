@@ -384,8 +384,9 @@ new thing here that moves, and it is drawn after.
 
 ### What a repaint may cost now
 
-The frame model changed under this plan twice. The rasteriser runs on a second
-core (core 2 on a New 3DS, core 1 otherwise) while `CtrBottomUpdate` paints.
+The frame model changed under this plan twice. The rasteriser runs on core 2 of
+a New 3DS while `CtrBottomUpdate` paints; an Old 3DS has no second core to give
+it and keeps the inline path.
 Then the second-screen animation stages (`59a0ba6`) moved the whole bottom
 upload before the join, so core 0's share of the overlap is now **paint plus
 upload**. A repaint is free while that sum finishes before `ppu` does, and a
