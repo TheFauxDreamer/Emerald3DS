@@ -114,6 +114,42 @@ static int                sScanCount;
 static CtrLinkStatus sStatus = { CTR_LINK_IDLE, 1, 0, 0 };
 static uint64_t      sStatusStamp;
 
+// ---- telemetry -------------------------------------------------------------
+//
+// The event lines in this file say when a link BROKE. They say nothing about
+// how one that still works is behaving, and a wireless fault is nearly always
+// visible as drift before it is visible as a failure. So count the traffic and
+// report it on a period, the way the frame profiler does.
+//
+// Reported only while the game is pumping a link, so an idle session stays
+// silent.
+//
+// Everything here is written on the main thread, from the pump, and read there
+// too. It is diagnostics: no lock, and no claim to be exact across a tear.
+#define LINK_STAT_PERIOD 600   // pumped frames for each report
+
+enum { MISS_UNKNOWN = 0, MISS_DOWN, MISS_BUSY, MISS_SEND, MISS_LATE,
+       MISS_KINDS };
+
+static const char *const kMissWhy[MISS_KINDS] = {
+    "unknown", "link down", "pairing busy", "send failed", "peer late"
+};
+
+static int      sMissWhy;                // one of the above, set at the source
+static unsigned sMissBy[MISS_KINDS];     // how many of each in this period
+
+static unsigned sStatFrames, sStatOk;
+static unsigned sStatusFailRun;
+static int      sLoggedPlayers = -1;
+
+// The bounded wait, which is where a marginal link shows itself first.
+static unsigned long long sWaitSum, sWaitWorst;
+static unsigned sWaitN, sDeadlineHits;
+
+// The receive side. A short or duplicated packet is invisible otherwise: both
+// look exactly like "the peer said nothing".
+static unsigned sRxPackets, sRxShort, sRxStale;
+
 // ---- the worker ------------------------------------------------------------
 
 enum { REQ_NONE = 0, REQ_HOST, REQ_SCAN, REQ_JOIN, REQ_STOP };
@@ -212,6 +248,15 @@ static void reset_frames(void)
     sFrame = 0;
     memset(sHave, 0, sizeof(sHave));
     memset(sLatest, 0, sizeof(sLatest));
+
+    // A new session counts from zero, and reports its roster again.
+    sLoggedPlayers = -1;
+    sStatusFailRun = 0;
+    sStatFrames = sStatOk = 0;
+    sWaitSum = sWaitWorst = 0;
+    sWaitN = sDeadlineHits = 0;
+    sRxPackets = sRxShort = sRxStale = 0;
+    memset(sMissBy, 0, sizeof sMissBy);
 }
 
 // UDS node ids are 1-based with the host at 1; the GBA's are 0-based with the
@@ -573,13 +618,30 @@ static void refresh_status(void)
         return;
     }
 
-    if (R_FAILED(udsGetConnectionStatus(&st))) {
-        // Stamp it anyway. A link that answers with an error must not make
-        // every caller of this frame repeat the round trip.
-        LightLock_Lock(&sLock);
-        sStatusStamp = now;
-        LightLock_Unlock(&sLock);
-        return;
+    {
+        Result rc = udsGetConnectionStatus(&st);
+
+        if (R_FAILED(rc)) {
+            // One line for a run of these, not one for each frame. A link
+            // whose status call has started failing goes quiet in every other
+            // way, so without this the log simply stops mentioning it.
+            if (sStatusFailRun++ == 0)
+                CtrLog("emerald3ds: link status failed rc=0x%08lX\n",
+                       (unsigned long)rc);
+
+            // Stamp it anyway. A link that answers with an error must not make
+            // every caller of this frame repeat the round trip.
+            LightLock_Lock(&sLock);
+            sStatusStamp = now;
+            LightLock_Unlock(&sLock);
+            return;
+        }
+
+        if (sStatusFailRun > 0) {
+            CtrLog("emerald3ds: link status ok after %u failures\n",
+                   sStatusFailRun);
+            sStatusFailRun = 0;
+        }
     }
 
     {
@@ -608,6 +670,15 @@ static void refresh_status(void)
         sStatus.isHost      = (uint8_t)isHost;
         sStatusStamp        = now;
         LightLock_Unlock(&sLock);
+
+        // Who is on the network, logged when it changes and not before. This
+        // is the line that answers "did the other console actually arrive",
+        // and later "when exactly did it leave", which no other line says.
+        if (players != sLoggedPlayers) {
+            CtrLog("emerald3ds: link peers %d (this console id %d, %s)\n",
+                   players, local, isHost ? "host" : "client");
+            sLoggedPlayers = players;
+        }
     }
 }
 
@@ -631,9 +702,18 @@ void Ctr3dsLinkGetStatus(CtrLinkStatus *out)
 int Ctr3dsLinkIsConnected(void)
 {
     CtrLinkStatus st;
+    int up;
 
     Ctr3dsLinkGetStatus(&st);
-    return st.state == CTR_LINK_CONNECTED && st.playerCount >= 2;
+    up = st.state == CTR_LINK_CONNECTED && st.playerCount >= 2;
+
+    // The pump calls this first on every frame, and counts a miss when it says
+    // no. Claim the reason here; Ctr3dsLinkExchange overwrites it with a more
+    // exact one when it gets far enough to know better.
+    if (!up)
+        sMissWhy = MISS_DOWN;
+
+    return up;
 }
 
 int Ctr3dsLinkPlayerCount(void)
@@ -663,15 +743,30 @@ static int drain(void)
     u16 src = 0;
     int n = 0;
 
-    while (R_SUCCEEDED(udsPullPacket(&sBind, &pkt, sizeof(pkt), &got, &src))
-           && got == sizeof(pkt)) {
-        int p = node_to_player(src);
+    while (R_SUCCEEDED(udsPullPacket(&sBind, &pkt, sizeof(pkt), &got, &src))) {
+        int p;
+
+        if (got == 0)
+            break;            // nothing left, the usual way out
+
+        if (got != sizeof(pkt)) {
+            // Not one of ours, or truncated. Counted, because otherwise it is
+            // indistinguishable from the peer saying nothing at all.
+            sRxShort++;
+            got = 0;
+            continue;
+        }
+
+        sRxPackets++;
+        p = node_to_player(src);
 
         if (p >= 0 && p < CTR_LINK_MAX_PLAYERS) {
             // Keep the newest; an out-of-order duplicate must not go backwards.
             if (!sHave[p] || pkt.frame >= sLatest[p].frame) {
                 sLatest[p] = pkt;
                 sHave[p] = 1;
+            } else {
+                sRxStale++;
             }
         }
         n++;
@@ -715,18 +810,85 @@ static int peers_ready(uint32_t target, int players, int local)
 static unsigned     sMissRun;
 static unsigned int sMissStartMs;
 
+static void stats_report(void)
+{
+    unsigned waitMeanUs =
+        sWaitN ? (unsigned)(sWaitSum / sWaitN / TICKS_PER_US) : 0;
+    CtrLinkStatus st;
+
+    Ctr3dsLinkGetStatus(&st);
+
+    CtrLog("emerald3ds: link %u frames id=%u/%u frame=%lu ok=%u miss=%u "
+           "(late %u send %u busy %u down %u)\n",
+           sStatFrames, (unsigned)st.localId, (unsigned)st.playerCount,
+           (unsigned long)sFrame, sStatOk, sStatFrames - sStatOk,
+           sMissBy[MISS_LATE], sMissBy[MISS_SEND], sMissBy[MISS_BUSY],
+           sMissBy[MISS_DOWN]);
+
+    CtrLog("emerald3ds: link wait mean %u us worst %u us over %u, timeouts %u, "
+           "rx %u short %u stale %u\n",
+           waitMeanUs,
+           (unsigned)(sWaitWorst / TICKS_PER_US), sWaitN, sDeadlineHits,
+           sRxPackets, sRxShort, sRxStale);
+
+    // How far behind each peer is running. Zero is lockstep; a number that
+    // grows across reports is the drift that ends a session.
+    {
+        char buf[64];
+        int n = 0;
+
+        for (int pl = 0;
+             pl < st.playerCount && n < (int)sizeof buf - 12; pl++) {
+            if (pl == st.localId)
+                continue;
+            long behind = sHave[pl]
+                        ? (long)sFrame - (long)sLatest[pl].frame : -1L;
+
+            n += snprintf(buf + n, sizeof buf - (size_t)n, " p%d=%ld",
+                          pl, behind);
+        }
+        if (n > 0)
+            CtrLog("emerald3ds: link peer lag%s (frames behind, -1 = silent)\n",
+                   buf);
+    }
+
+    sStatFrames = sStatOk = 0;
+    sWaitSum = sWaitWorst = 0;
+    sWaitN = sDeadlineHits = 0;
+    sRxPackets = sRxShort = sRxStale = 0;
+    memset(sMissBy, 0, sizeof sMissBy);
+}
+
+// Once for each pumped frame: src/link.c calls exactly one of NoteOk and
+// NoteMiss every time round.
+static void stats_tick(void)
+{
+    if (++sStatFrames >= LINK_STAT_PERIOD)
+        stats_report();
+}
+
 // src/link.c drives these three: it is the only caller that sees every miss.
 // Ctr3dsLinkExchange() cannot, because it returns early, and reports nothing,
 // when the worker owns the wireless or the link is already down.
 void Ctr3dsLinkNoteMiss(void)
 {
+    if (sMissWhy < 0 || sMissWhy >= MISS_KINDS)
+        sMissWhy = MISS_UNKNOWN;
+
+    sMissBy[sMissWhy]++;
+
     if (sMissRun == 0) {
         sMissStartMs = CtrTimeNowMs();
-        CtrLog("emerald3ds: link missed frame %lu\n", (unsigned long)sFrame);
+        // With the reason. "Our send failed" and "the peer was late" point at
+        // different consoles, and the run used to report both the same way.
+        CtrLog("emerald3ds: link missed frame %lu (%s)\n",
+               (unsigned long)sFrame, kMissWhy[sMissWhy]);
     }
 
     if (sMissRun < 0xFFFFFFFFu)
         sMissRun++;
+
+    stats_tick();
 }
 
 void Ctr3dsLinkNoteOk(void)
@@ -736,6 +898,9 @@ void Ctr3dsLinkNoteOk(void)
                sMissRun, CtrTimeNowMs() - sMissStartMs);
         sMissRun = 0;
     }
+
+    sStatOk++;
+    stats_tick();
 }
 
 // A run of at least LINK_LAG_MIN_MISSES, so one long frame can never trip it,
@@ -762,14 +927,18 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
 
     // The worker owns UDS while a pairing call runs, and a pairing call means
     // there is no link to exchange over anyway.
-    if (sBusy)
+    if (sBusy) {
+        sMissWhy = MISS_BUSY;
         return 0;
+    }
 
     // The cache that Ctr3dsLinkIsConnected() refreshed at the top of this same
     // frame, in src/link.c's pump. Reading it costs a lock, not a round trip.
     Ctr3dsLinkGetStatus(&st);
-    if (st.state != CTR_LINK_CONNECTED || st.playerCount < 2)
+    if (st.state != CTR_LINK_CONNECTED || st.playerCount < 2) {
+        sMissWhy = MISS_DOWN;
         return 0;
+    }
 
     players = st.playerCount;
     local   = st.localId;
@@ -783,6 +952,7 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
         // reports the miss and we send this same frame again next time. The
         // counter must NOT advance here, or this console runs ahead of a peer
         // that never saw the frame. See the note at the end of this function.
+        sMissWhy = MISS_SEND;
         return 0;
     }
 
@@ -801,21 +971,44 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     // round trips. The bind event is what that call waits on, and
     // svcWaitSynchronization takes a timeout, so this sleeps instead and wakes
     // the moment a packet lands.
-    deadline = svcGetSystemTick() + LINK_WAIT_TICKS;
-    while (!ready) {
-        uint64_t now = svcGetSystemTick();
+    {
+        // Time the wait even when it turns out to be zero: the mean over a
+        // period is what says whether a link is comfortable or on the edge.
+        uint64_t tw = svcGetSystemTick();
 
-        if (now >= deadline)
-            break;
+        deadline = tw + LINK_WAIT_TICKS;
+        while (!ready) {
+            uint64_t now = svcGetSystemTick();
 
-        if (R_FAILED(svcWaitSynchronization(sBind.event,
-                                            (s64)((deadline - now) * 1000 / TICKS_PER_US))))
-            break;   // the budget ran out
+            if (now >= deadline) {
+                sDeadlineHits++;
+                break;
+            }
 
-        svcClearEvent(sBind.event);
-        drain();
-        ready = peers_ready(target, players, local);
+            s64 left = (s64)((deadline - now) * 1000 / TICKS_PER_US);
+
+            if (R_FAILED(svcWaitSynchronization(sBind.event, left))) {
+                sDeadlineHits++;
+                break;   // the budget ran out
+            }
+
+            svcClearEvent(sBind.event);
+            drain();
+            ready = peers_ready(target, players, local);
+        }
+
+        {
+            uint64_t spent = svcGetSystemTick() - tw;
+
+            sWaitSum += spent;
+            sWaitN++;
+            if (spent > sWaitWorst)
+                sWaitWorst = spent;
+        }
     }
+
+    if (!ready)
+        sMissWhy = MISS_LATE;
 
     for (int p = 0; p < players; p++) {
         if (p == local)
