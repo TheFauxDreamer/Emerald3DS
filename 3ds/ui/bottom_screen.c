@@ -34,6 +34,9 @@
 // uploaded the framebuffer yet. Do not merge them.
 static int sNeedsRepaint = 1;
 static int sDirty = 1;
+// Whether the screen currently holds a title paint, so the blink knows it has
+// black to draw over. Cleared as soon as a tab paints.
+static int sTitlePainted;
 static u32 sLastStateHash;
 static u8  sTab = UI_TAB_PARTY;
 static u8  sSelectedMon;
@@ -735,7 +738,11 @@ static void Redraw(void)
         // The blink changes 2,488 pixels every 32 frames. Clearing all 76,800
         // for it cost an Old 3DS a frame roughly twice a second, which is the
         // stutter the title screen had.
-        if (UiTitleBlinkOnly())
+        //
+        // Only over a screen that already holds a title paint. The prompt is
+        // drawn over black, so painting it over anything else would leave what
+        // was there around it.
+        if (sTitlePainted && UiTitleBlinkOnly())
         {
             UiTitleDrawPrompt();
         }
@@ -743,6 +750,7 @@ static void Redraw(void)
         {
             UiClear(0);
             UiTitleDraw();
+            sTitlePainted = 1;
         }
 
         sNeedsRepaint = 0;
@@ -751,6 +759,8 @@ static void Redraw(void)
         CtrProfile("paint.blank", tp);
         return;
     }
+
+    sTitlePainted = 0;      // the screen holds a tab from here on
 
     EnsureTabVisible();
     n = VisibleTabs(vis);
@@ -851,6 +861,7 @@ void CtrBottomInit(void)
     sSelectedMon = 0;
     sLastStateHash = 0;
     sInGame = FALSE;
+    sTitlePainted = 0;
     sNoticeDismissed = 0;
     sNoticeDismissedSet = FALSE;
     Redraw();
