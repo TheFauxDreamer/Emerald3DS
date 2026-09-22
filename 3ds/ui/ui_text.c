@@ -56,10 +56,13 @@ static const struct UiFont sFontSmall = {
 // into a scale x scale block. There is no larger Latin font in the ROM, so this
 // scales the normal font.
 //
-// The loop gets the destination row pointer once for each destination row and
-// calls GlyphPixel once for each source pixel. Thus the scale-1 path (all other
-// callers) costs the same as before. Each destination pixel has a bounds test,
-// so a string can go off any edge safely.
+// Scale 1 is every caller but the title, and it gets its own loop.
+//
+// The general loop below tests each destination pixel against both edges,
+// inside the innermost loop, and calls GlyphPixel for each source pixel, which
+// recomputes the glyph index and reloads the row. Text is thousands of these
+// per repaint, so the scale-1 path clips its column span once per glyph and
+// loads the row's two words once per row.
 static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
                       u16 fg, u16 shadow, int scale)
 {
@@ -70,6 +73,44 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
         width = 16;
 
     UiTouchRows(y, font->height * scale);
+
+    if (scale == 1)
+    {
+        int col0 = (x < 0) ? -x : 0;
+        int col1 = (x + width > UI_W) ? UI_W - x : width;
+
+        for (int row = 0; row < font->height && col0 < col1; row++)
+        {
+            int py = y + row;
+            const u16 *w;
+            u16 *dst;
+            u32 wLo, wHi;
+
+            if (py < 0 || py >= UI_H)
+                continue;
+
+            // The glyph is four 8x8 tiles. A row's left half and right half are
+            // eight words apart; see GlyphPixel for the same arithmetic.
+            w = glyph + ((row >= 8) ? 0x10 : 0x00) + (row & 7);
+            wLo = w[0];
+            wHi = w[8];
+            dst = &UiFb()[py * UI_STRIDE];
+
+            for (int col = col0; col < col1; col++)
+            {
+                u32 bits = (col < 8) ? wLo : wHi;
+                u32 v = (bits >> (14 - 2 * (col & 7))) & 3;
+
+                // 0 is the background and 3 reads as background too.
+                if (v == 0 || v == 3)
+                    continue;
+
+                dst[x + col] = (v == 2) ? shadow : fg;
+            }
+        }
+
+        return;
+    }
 
     for (int row = 0; row < font->height; row++)
     {
