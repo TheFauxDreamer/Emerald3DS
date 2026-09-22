@@ -219,54 +219,106 @@ static int sSubFrame;       // 0 .. sSpeed-1, wraps on the displayed frame
 // against it, and DIV_PAIR_FLOOR_TICKS catches a scene that collapses between
 // decisions, a fade to black for one.
 //
-// The signal is the work a frame WOULD cost with no divider. That matters: the
-// obvious signal, frames that missed VBlank, reads zero as soon as the divider
-// engages, so the divider could never let go again. This one does not change
-// when it engages, because it adds the mean game frame, measured over every
-// frame, to the mean cost of a presenting frame, measured over those only.
-// The budget is one VBlank, 16.67 ms. Engage only when the mean frame is at it,
-// not merely near it: a mean of 15 ms still fits, and dropping such a scene to
-// 30 Hz would give away a frame rate the console could have held. The Old 3DS
-// overworld is expected to land around 15 ms once the rasterizer's copies are
-// gone, so that margin is the difference between this feature helping and this
-// feature being the problem. Retune against a log, not against a guess.
-#define DIV_WINDOW    60      // presenting frames between decisions
-#define DIV_ON_US  16000      // engage above this estimate
-#define DIV_OFF_US 14000      // and let go below it, with the gap as hysteresis
+// The signal is what a PAIR would cost: two game frames and one render. That
+// matters: the obvious signal, frames that missed VBlank, reads zero as soon as
+// the divider engages, so the divider could never let go again. This one does
+// not change when it engages, because the mean game frame is measured over
+// every frame and the mean render over presenting frames only, and the divider
+// changes neither.
+//
+// It must be the PAIR, not one frame, because that is the quantity every other
+// test here is about, and measuring two different things is what made this
+// oscillate. The engage threshold used to be 16 ms of single-frame work, which
+// is BELOW one VBlank: a scene at 16.1 ms fits a VBlank and needs no divider at
+// all, yet it engaged, then measured its pair at 18.1 ms against a floor of
+// 18.2, let go at once, and engaged again a second later. A console log caught
+// eleven of those in one session, several back to back, and a display flipping
+// between 30 and 60 Hz once a second looks far worse than either rate held.
+//
+// So all three thresholds below are pair spans, and they nest:
+//
+//   PANIC 16.9 < OFF/FLOOR 17.5 < ON 18.5 ms,  one VBlank being 16.71 ms
+//
+// Engage above ON, let go below OFF, and the gap between them is the
+// hysteresis. A pair under one VBlank would be paced to one VBlank by the
+// single sync point and run the game at double speed, which PANIC sits just
+// above. Retune against a log, not against a guess.
+#define DIV_WINDOW 60         // presenting frames between decisions
 
-// A little above one VBlank: below this a pair no longer needs two of them.
-#define DIV_PAIR_FLOOR_TICKS ((unsigned long long)SYSCLOCK_ARM11 / 55)
+#define DIV_PAIR_ON_TICKS    ((unsigned long long)SYSCLOCK_ARM11 / 54)
+#define DIV_PAIR_OFF_TICKS   ((unsigned long long)SYSCLOCK_ARM11 / 57)
+
+// The same level as OFF, for the collapse that happens between decisions: a
+// fade to black must not wait out the rest of the second.
+#define DIV_PAIR_FLOOR_TICKS DIV_PAIR_OFF_TICKS
+
+// Nearly one VBlank. Here the single sync point really would pace the pair to
+// one VBlank and run the game at double speed, so this cannot be waited out.
+#define DIV_PAIR_PANIC_TICKS ((unsigned long long)SYSCLOCK_ARM11 / 59)
+
+// Pairs below the floor before letting go, unless the panic level says now.
+//
+// Without this the escape had no hysteresis at all: engaging took 60 rendered
+// frames and letting go took one skipped frame. An Old 3DS sits exactly where
+// that matters, because the floor was only a mean game frame above it: it
+// engaged at an estimate of 16.1 ms, measured a pair at 18.1 against a floor of
+// 18.2, let go at once, and engaged again a second later. A console log caught
+// eleven of those in one session, several back to back, and a display flipping
+// between 30 and 60 Hz once a second looks far worse than either rate.
+//
+// Six pairs is a fifth of a second at half rate. A scene that has genuinely
+// collapsed stays collapsed for far longer than that, and one that is merely
+// sitting on the floor never gets six in a row.
+#define DIV_ESCAPE_PAIRS 6
 
 static int sDivide;    // 1 when every second frame skips the render
 static int sDivPhase;  // 0 renders, 1 skips
-static unsigned long long sPairWork;
+static int sEscapeRun; // consecutive pairs measured below the floor
+
+// How long the pair actually took, wall clock. NOT the work estimate: what
+// decides whether a pair still needs two VBlanks is the time it occupies, and a
+// frame that slept waiting on a link peer occupies that time even though the
+// sleep is not work.
+static unsigned long long sPairSpan;
 
 static unsigned long long sHookEnd;   // ticks when the last hook returned
 static unsigned long long sGameSum, sHookSum;
 static unsigned sGameN, sHookN;
 
-static void divider_sample(unsigned long long gameTicks,
-                           unsigned long long hookWork, int rendered)
+static void divider_sample(unsigned long long gameWork,
+                           unsigned long long hookWork, int rendered,
+                           unsigned long long frameSpan)
 {
+    unsigned long long pair;
     unsigned est;
     int want;
 
-    sGameSum += gameTicks;
+    sGameSum += gameWork;
     sGameN++;
 
     if (rendered) {
         sHookSum += hookWork;
         sHookN++;
-        sPairWork = gameTicks + hookWork;
+        sPairSpan = frameSpan;
     } else {
-        sPairWork += gameTicks + hookWork;
+        sPairSpan += frameSpan;
 
-        // The pair stopped needing two VBlanks. Let go now: the next decision
-        // is a second away, and a second of double-speed audio is not a thing
-        // to wait out.
-        if (sDivide && sPairWork < DIV_PAIR_FLOOR_TICKS) {
+        // Has the pair stopped needing two VBlanks?
+        if (sDivide && sPairSpan < DIV_PAIR_FLOOR_TICKS) {
+            // Near enough to one VBlank to risk double speed, or below the
+            // floor for long enough to believe it.
+            if (sPairSpan < DIV_PAIR_PANIC_TICKS)
+                sEscapeRun = DIV_ESCAPE_PAIRS;
+            else
+                sEscapeRun++;
+        } else {
+            sEscapeRun = 0;
+        }
+
+        if (sDivide && sEscapeRun >= DIV_ESCAPE_PAIRS) {
             sDivide = 0;
             sDivPhase = 0;
+            sEscapeRun = 0;
             sGameSum = sHookSum = 0;
             sGameN = sHookN = 0;
             CtrLog("emerald3ds: display full rate, 60 Hz (scene got cheap)\n");
@@ -277,14 +329,16 @@ static void divider_sample(unsigned long long gameTicks,
     if (sHookN < DIV_WINDOW || sGameN == 0)
         return;
 
-    est = (unsigned)((sGameSum / sGameN + sHookSum / sHookN)
-                     / (SYSCLOCK_ARM11 / 1000000));
+    // Two game frames and one render: what a pair costs, engaged or not.
+    pair = 2 * (sGameSum / sGameN) + (sHookSum / sHookN);
+    est = (unsigned)(pair / (SYSCLOCK_ARM11 / 1000000));
 
-    want = sDivide ? (est > DIV_OFF_US) : (est > DIV_ON_US);
+    want = sDivide ? (pair > DIV_PAIR_OFF_TICKS) : (pair > DIV_PAIR_ON_TICKS);
     if (want != sDivide) {
         sDivide = want;
         sDivPhase = 0;
-        CtrLog("emerald3ds: display %s (frame work %u us)\n",
+        sEscapeRun = 0;
+        CtrLog("emerald3ds: display %s (pair work %u us)\n",
                want ? "halved, 30 Hz" : "full rate, 60 Hz", est);
     }
 
@@ -847,18 +901,24 @@ static int effective_speed(uint32_t held)
 
 void Rp2350PresentFrame(void)
 {
-    // For the display divider. The span since the last return is the game's own
-    // frame. Almost all of it is work, with one exception: LinkVSync() runs in
-    // there, and a link exchange sleeps up to LINK_WAIT_US waiting on a peer.
-    // That sleep is not work, and counting it as work halved the display on
-    // scenes that were never expensive, which cost the pair two sleeps instead
-    // of one and made the peer later still.
+    // For the display divider, which wants two different things from this span.
+    //
+    // The span since the last return is the game's own frame. Almost all of it
+    // is work, with one exception: LinkVSync() runs in there, and a link
+    // exchange sleeps up to LINK_WAIT_US waiting on a peer. That sleep is not
+    // work, and counting it as work halved the display on scenes that were
+    // never expensive, which cost the pair two sleeps instead of one and made
+    // the peer later still.
+    //
+    // So the estimate takes the work, and the pair accounting takes the whole
+    // span. Whether a pair still needs two VBlanks is a question about the time
+    // it occupies, and a frame that slept occupies that time.
     unsigned long long tHook = CtrTicksNow();
-    unsigned long long gameTicks = (sHookEnd != 0) ? tHook - sHookEnd : 0;
+    unsigned long long gameSpan = (sHookEnd != 0) ? tHook - sHookEnd : 0;
     unsigned long long linkTicks = Ctr3dsLinkTakeBlockedTicks();
+    unsigned long long gameWork =
+        (gameSpan > linkTicks) ? gameSpan - linkTicks : 0;
     unsigned long long blockTicks = 0;
-
-    gameTicks = (gameTicks > linkTicks) ? gameTicks - linkTicks : 0;
 
     // Only the first frames matter. Frame 1 shows that the game's init did not
     // hang, and a rising count shows that the frame loop did not hang. More
@@ -973,8 +1033,13 @@ void Rp2350PresentFrame(void)
     sHookEnd = CtrTicksNow();
     if (sSpeed == 1) {
         unsigned long long span = sHookEnd - tHook;
-        divider_sample(gameTicks, span > blockTicks ? span - blockTicks : 0,
-                       rendering);
+        // blockTicks is the wait inside C3D_FrameBegin, which is the slack the
+        // divider is deciding how to spend. It comes out of both figures. The
+        // link's sleep does not: it comes out of the work only.
+        unsigned long long hookWork =
+            (span > blockTicks) ? span - blockTicks : 0;
+
+        divider_sample(gameWork, hookWork, rendering, gameSpan + hookWork);
     }
 }
 
