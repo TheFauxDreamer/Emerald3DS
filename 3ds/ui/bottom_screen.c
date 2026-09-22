@@ -1056,6 +1056,29 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     CtrLogSlow("bottom.update", t0);
 }
 
-int CtrBottomIsDirty(void)            { return sDirty; }
-void CtrBottomClearDirty(void)        { sDirty = 0; }
+// Dirty means "some row has been drawn into". The band says which, so a step
+// that moves two icons does not cost a 240-row upload.
+int CtrBottomIsDirty(void)
+{
+    int top, bot;
+
+    UiDirtyRows(&top, &bot);
+    return sDirty && top < bot;
+}
+
+void CtrBottomDirtyRows(int *top, int *bot)
+{
+    UiDirtyRows(top, bot);
+}
+
+void CtrBottomClearDirty(void)
+{
+    sDirty = 0;
+    UiClearDirtyRows();
+}
+
+void CtrBottomSetFramebuffer(u16 *fb)
+{
+    UiSetFb(fb);
+}
 const u16 *CtrBottomFramebuffer(void) { return UiFb(); }

@@ -20,9 +20,65 @@
 #include "ui_draw.h"
 #include "ui_shell.h"                 // UI_COL_SHADOW
 
-static u16 sFb[UI_W * UI_H];
+// The host's linear staging buffer, UI_STRIDE wide. See UI_STRIDE in ui_draw.h
+// and CTR_BOTTOM_STRIDE in ../bridge.h for why the UI paints into it directly.
+//
+// NULL until CtrVideoInit hands it over, which happens before CtrBottomInit
+// paints and before any frame runs. If that allocation fails, CtrVideoInit
+// returns 0 and main() exits, so nothing paints. There is deliberately no
+// fallback buffer: a write through NULL is a data abort on this console, which
+// is a loud immediate failure if the order is ever changed, where a
+// one-row scratch would silently take rows 1 to 239 past its end.
+static u16 *sFb;
 
 u16 *UiFb(void) { return sFb; }
+
+// Which rows have been drawn into since the host last took the picture.
+//
+// The host used to upload all 240 rows whenever anything at all had changed, so
+// an animation step that moved two icons cost the same as a tab switch. Every
+// primitive that writes the framebuffer widens this band, so no drawing site
+// can forget to report itself.
+//
+// Empty means clean: top >= bot.
+static int sDirtyTop = UI_H;
+static int sDirtyBot;
+
+void UiTouchRows(int y, int h)
+{
+    int top = y;
+    int bot = y + h;
+
+    if (top < 0)
+        top = 0;
+    if (bot > UI_H)
+        bot = UI_H;
+    if (top >= bot)
+        return;
+
+    if (top < sDirtyTop)
+        sDirtyTop = top;
+    if (bot > sDirtyBot)
+        sDirtyBot = bot;
+}
+
+void UiDirtyRows(int *top, int *bot)
+{
+    *top = sDirtyTop;
+    *bot = sDirtyBot;
+}
+
+void UiClearDirtyRows(void)
+{
+    sDirtyTop = UI_H;
+    sDirtyBot = 0;
+}
+
+void UiSetFb(u16 *fb)
+{
+    if (fb != NULL)
+        sFb = fb;
+}
 
 // GBA palettes are BGR555 and the high bit is not used. The 3DS texture is
 // RGB565. Green gets one more bit, so copy the top bit into it.
@@ -40,19 +96,29 @@ void UiLoadPal(u16 *dst, const u16 *src, int count)
         dst[i] = UiBgr555ToRgb565(src[i]);
 }
 
-// Two pixels for each store, for UiFillRect below. UI_W is 320 and sFb is a u16
-// array at file scope, so y * UI_W is always even. The alignment of a row
-// depends only on x. Only an odd x or an odd width needs a single-pixel edge.
+// Two pixels for each store, for UiFillRect below. UI_STRIDE is 512 and the
+// host's buffer is linearAlloc'd, so y * UI_STRIDE is always even and every row
+// begins word aligned. The alignment of a run depends only on x. Only an odd x
+// or an odd width needs a single-pixel edge.
 #define UI_PIX2(c) (((u32)(c) << 16) | (u32)(c))
 
-// Keep this as a simple loop. The paired version below is slower here
-// (measured). The compiler already makes a good loop over one long array.
-// UiFillRect is different, because its rows are short. Measure again before you
-// change this.
+// A row at a time, because the buffer is wider than the screen. Clearing the
+// padding as well would be a third more work for pixels that never display.
+//
+// Keep the inner loop simple. The paired version below was slower here
+// (measured). UiFillRect is different, because its rows are short. Measure
+// again before you change this.
 void UiClear(u16 color)
 {
-    for (int i = 0; i < UI_W * UI_H; i++)
-        sFb[i] = color;
+    UiTouchRows(0, UI_H);
+
+    for (int y = 0; y < UI_H; y++)
+    {
+        u16 *dst = &sFb[y * UI_STRIDE];
+
+        for (int x = 0; x < UI_W; x++)
+            dst[x] = color;
+    }
 }
 
 void UiFillRect(int x, int y, int w, int h, u16 color)
@@ -66,9 +132,11 @@ void UiFillRect(int x, int y, int w, int h, u16 color)
     if (w <= 0 || h <= 0)
         return;
 
+    UiTouchRows(y, h);
+
     for (int row = 0; row < h; row++)
     {
-        u16 *dst = &sFb[(y + row) * UI_W + x];
+        u16 *dst = &sFb[(y + row) * UI_STRIDE + x];
         int col = 0;
 
         // An odd start: write one pixel to reach an aligned pair. UI_W is 320,
@@ -91,7 +159,10 @@ void UiFillRect(int x, int y, int w, int h, u16 color)
 static inline void UiPixel(int x, int y, u16 color)
 {
     if ((unsigned)x < (unsigned)UI_W && (unsigned)y < (unsigned)UI_H)
-        sFb[y * UI_W + x] = color;
+    {
+        UiTouchRows(y, 1);
+        sFb[y * UI_STRIDE + x] = color;
+    }
 }
 
 void UiRect(int x, int y, int w, int h, u16 color)
@@ -113,12 +184,14 @@ void UiRect(int x, int y, int w, int h, u16 color)
 // pixel. Only a tile that crosses an edge takes the slow path.
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparent0)
 {
+    UiTouchRows(y, 8);
+
     if (x >= 0 && y >= 0 && x + 8 <= UI_W && y + 8 <= UI_H)
     {
         for (int row = 0; row < 8; row++)
         {
             const u8 *src = tile + row * 4;   // 8 pixels, 2 in each byte
-            u16 *dst = &sFb[(y + row) * UI_W + x];
+            u16 *dst = &sFb[(y + row) * UI_STRIDE + x];
 
             for (int col = 0; col < 8; col += 2)
             {
@@ -143,7 +216,7 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
             continue;
 
         const u8 *src = tile + row * 4;
-        u16 *dst = &sFb[py * UI_W];
+        u16 *dst = &sFb[py * UI_STRIDE];
 
         for (int col = 0; col < 8; col++)
         {
@@ -171,12 +244,14 @@ void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
 {
     // The same clip outside the loop as the 4bpp path. The region map is 8bpp
     // and covers most of the MAP tab.
+    UiTouchRows(y, 8);
+
     if (x >= 0 && y >= 0 && x + 8 <= UI_W && y + 8 <= UI_H)
     {
         for (int row = 0; row < 8; row++)
         {
             const u8 *src = tile + row * 8;
-            u16 *dst = &sFb[(y + row) * UI_W + x];
+            u16 *dst = &sFb[(y + row) * UI_STRIDE + x];
 
             for (int col = 0; col < 8; col++)
                 if (src[col] != 0 || !transparent0)
@@ -192,7 +267,7 @@ void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
             continue;
 
         const u8 *src = tile + row * 8;
-        u16 *dst = &sFb[py * UI_W];
+        u16 *dst = &sFb[py * UI_STRIDE];
 
         for (int col = 0; col < 8; col++)
         {
@@ -953,10 +1028,15 @@ static int sSnapValid;
 
 void UiSnapshot(void)
 {
-    // memcpy, not a u16 loop. This moves 307,200 bytes and the compiler is not
-    // guaranteed to turn an element-wise loop into one; memcpy uses the load
-    // and store multiples that an ARM11 wants.
-    memcpy(sSnap, sFb, sizeof(sSnap));
+    // A row at a time: the framebuffer is UI_STRIDE wide and this is UI_W wide,
+    // because it is ordinary memory that the GPU never reads and there is no
+    // reason to keep 192 columns of padding per row.
+    //
+    // memcpy, not a u16 loop. The compiler is not guaranteed to turn an
+    // element-wise loop into one, and memcpy uses the load and store multiples
+    // that an ARM11 wants.
+    for (int y = 0; y < UI_H; y++)
+        memcpy(&sSnap[y * UI_W], &sFb[y * UI_STRIDE], UI_W * sizeof(sSnap[0]));
 
     sSnapValid = 1;
 }
@@ -978,11 +1058,13 @@ void UiRestoreRect(int x, int y, int w, int h)
     if (w <= 0 || h <= 0)
         return;
 
+    UiTouchRows(y, h);
+
     for (int row = 0; row < h; row++)
     {
-        int base = (y + row) * UI_W + x;
-
-        memcpy(&sFb[base], &sSnap[base], (size_t)w * sizeof(sFb[0]));
+        memcpy(&sFb[(y + row) * UI_STRIDE + x],
+               &sSnap[(y + row) * UI_W + x],
+               (size_t)w * sizeof(sFb[0]));
     }
 }
 
