@@ -606,6 +606,11 @@ int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 // every B Button: Cancel in the link-up chain.
 int Ctr3dsLinkHandshake(int asMaster);
 
+// How long the last frame's exchange spent asleep waiting on a peer, read and
+// cleared. The display divider subtracts it, because that time is not work and
+// counting it halves the display on a scene that never earned it.
+unsigned long long Ctr3dsLinkTakeBlockedTicks(void);
+
 // Report the player id this console ended up with. `local` is what UDS says,
 // `sio` is what GetMultiplayerId() reads back out of REG_SIOCNT. The two must
 // agree, and the log line is the only place that says whether they do.

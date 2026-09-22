@@ -848,10 +848,17 @@ static int effective_speed(uint32_t held)
 void Rp2350PresentFrame(void)
 {
     // For the display divider. The span since the last return is the game's own
-    // frame, and nothing in it blocks, so it is work by definition.
+    // frame. Almost all of it is work, with one exception: LinkVSync() runs in
+    // there, and a link exchange sleeps up to LINK_WAIT_US waiting on a peer.
+    // That sleep is not work, and counting it as work halved the display on
+    // scenes that were never expensive, which cost the pair two sleeps instead
+    // of one and made the peer later still.
     unsigned long long tHook = CtrTicksNow();
     unsigned long long gameTicks = (sHookEnd != 0) ? tHook - sHookEnd : 0;
+    unsigned long long linkTicks = Ctr3dsLinkTakeBlockedTicks();
     unsigned long long blockTicks = 0;
+
+    gameTicks = (gameTicks > linkTicks) ? gameTicks - linkTicks : 0;
 
     // Only the first frames matter. Frame 1 shows that the game's init did not
     // hang, and a rising count shows that the frame loop did not hang. More
