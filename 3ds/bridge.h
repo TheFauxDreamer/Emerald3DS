@@ -592,7 +592,12 @@ int  Ctr3dsLinkLocalId(void);
 // which case the caller reports lag rather than treating it as fatal. A cable
 // is synchronous and UDS is not, so this blocks briefly waiting for peers: that
 // stall IS the lockstep, and is what stops the two consoles drifting apart.
-int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+//
+// `tookCmd` (may be NULL) says whether `sendCmd` was the command actually
+// transmitted. A frame number has to mean one command, so a retry re-sends what
+// it sent before and ignores a newer offer. The caller must not drop a command
+// this reports as untaken; it will be taken on a later frame.
+int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 
 // The handshake, which decides WHEN the link goes live.
 //

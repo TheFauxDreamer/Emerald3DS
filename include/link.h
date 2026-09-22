@@ -296,7 +296,10 @@ void ResetSerial(void);
 int Ctr3dsLinkIsConnected(void);
 int Ctr3dsLinkPlayerCount(void);
 int Ctr3dsLinkLocalId(void);
-int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
+// `tookCmd` says whether sendCmd was the command actually transmitted. A retry
+// re-sends what it sent before, because a frame number has to mean exactly one
+// command, so the pump must not pop its send queue when this reports 0.
+int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 
 // Report a link error to the port's log. Emerald's own error screen and a real
 // fault otherwise look the same afterwards: the game stops talking and nothing

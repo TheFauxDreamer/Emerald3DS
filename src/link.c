@@ -2172,6 +2172,7 @@ static void Ctr3dsLinkPump(void)
     u8 i, j, players;
     u8 index;
     u16 nonzero = 0;
+    int tookCmd = 0;
 
     // First, and once: this refreshes the host-side status cache that
     // Ctr3dsLinkPlayerCount(), Ctr3dsLinkLocalId() and Ctr3dsLinkExchange()
@@ -2252,7 +2253,7 @@ static void Ctr3dsLinkPump(void)
             send[j] = 0;
     }
 
-    if (!Ctr3dsLinkExchange(send, recv))
+    if (!Ctr3dsLinkExchange(send, recv, &tookCmd))
     {
         // A frame the peers did not deliver in time. The send queue is left
         // intact, so nothing is lost and the same command goes again next
@@ -2264,7 +2265,14 @@ static void Ctr3dsLinkPump(void)
     gLink.lag = 0;
     Ctr3dsLinkNoteOk();
 
-    if (gLink.sendQueue.count > 0)
+    // Pop only what actually went out.
+    //
+    // A frame number has to mean one command, so the transport latches the
+    // first command offered for a frame and re-sends that one while the frame
+    // is retried. The head of this queue is not stable across a retry: it is
+    // empty when the queue is empty, and the real command arrives behind it.
+    // Popping regardless would drop a command that was never transmitted.
+    if (tookCmd && gLink.sendQueue.count > 0)
     {
         gLink.sendQueue.count--;
         if (++gLink.sendQueue.pos >= QUEUE_CAPACITY)
