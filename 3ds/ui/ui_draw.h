@@ -14,11 +14,30 @@
 #include "global.h"
 #include "../bridge.h"
 
-#define UI_W CTR_BOTTOM_WIDTH
-#define UI_H CTR_BOTTOM_HEIGHT
+// UI_W is what is visible and what everything clips against. UI_STRIDE is how
+// far apart two rows are. They differ because the UI paints straight into the
+// host's linear staging buffer, whose width the GPU forces to a power of two.
+// Address a row with UI_STRIDE; test a coordinate against UI_W.
+#define UI_W      CTR_BOTTOM_WIDTH
+#define UI_H      CTR_BOTTOM_HEIGHT
+#define UI_STRIDE CTR_BOTTOM_STRIDE
 
-// The framebuffer that the host gets each frame. Its address does not change.
+// The framebuffer that the host gets each frame. Its address does not change
+// once the host has set it.
 u16 *UiFb(void);
+
+// The host's buffer, set once before anything paints.
+void UiSetFb(u16 *fb);
+
+// ---- the dirty band -------------------------------------------------------
+//
+// Which rows have been drawn into since the host last took the picture, so a
+// step that moves two icons does not upload all 240 rows. Every primitive that
+// writes the framebuffer calls UiTouchRows, so no drawing site can forget.
+// Empty means clean: top >= bot.
+void UiTouchRows(int y, int h);
+void UiDirtyRows(int *top, int *bot);
+void UiClearDirtyRows(void);
 
 u16  UiBgr555ToRgb565(u16 bgr555);
 

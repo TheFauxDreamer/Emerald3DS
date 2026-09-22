@@ -23,6 +23,19 @@
 #define CTR_BOTTOM_WIDTH   320
 #define CTR_BOTTOM_HEIGHT  240
 
+// The row stride of the UI's framebuffer, in pixels.
+//
+// Wider than the screen because the UI paints straight into the buffer the GPU
+// transfer reads, and a PICA200 texture's width must be a power of two. 512 is
+// the smallest that holds 320, so each row carries 192 pixels of padding that
+// nothing displays.
+//
+// It used to paint into its own 320-wide array and the host copied 153,600
+// bytes into the wide one every repaint. The top screen never paid that: the
+// rasteriser composes straight into its staging buffer (ppu_render_rgb565_direct,
+// rp2350/ppu.h). This is the same arrangement for the bottom screen.
+#define CTR_BOTTOM_STRIDE  512
+
 // ---------------------------------------------------------------- game side --
 
 // Allocate and clear the GBA memory regions. Call this before any other game
@@ -62,6 +75,15 @@ void CtrBottomClearDirty(void);
 // The framebuffer is 320x240 RGB565, in row order. The pointer does not change.
 // Valid after CtrBottomInit().
 const uint16_t *CtrBottomFramebuffer(void);
+
+// Which rows have been drawn into since the last CtrBottomClearDirty. Only
+// meaningful while CtrBottomIsDirty(); empty means clean, with top >= bot.
+void CtrBottomDirtyRows(int *top, int *bot);
+
+// Hand the UI the buffer it paints into. The host owns it, because it has to be
+// linear memory that the GPU transfer can read. Called once, from CtrVideoInit,
+// before CtrBottomInit.
+void CtrBottomSetFramebuffer(uint16_t *fb);
 
 // ---------------------------------------------------------------- host side --
 

@@ -69,6 +69,8 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
     if (width > 16)
         width = 16;
 
+    UiTouchRows(y, font->height * scale);
+
     for (int row = 0; row < font->height; row++)
     {
         for (int sy = 0; sy < scale; sy++)
@@ -79,7 +81,7 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
             if (py < 0 || py >= UI_H)
                 continue;
 
-            dst = &UiFb()[py * UI_W];
+            dst = &UiFb()[py * UI_STRIDE];
 
             for (int col = 0; col < width; col++)
             {

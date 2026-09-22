@@ -92,7 +92,11 @@ static Tex3DS_SubTexture   sTopSub, sBotSub;
 static C2D_Image           sTopImage, sBotImage;
 
 static uint16_t *sTopStage;   // TOP_TEX_W x CTR_GBA_HEIGHT, linear
-static uint16_t *sBotStage;   // BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear
+// BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear. This IS the UI's framebuffer: the UI
+// paints into it directly, the way the rasterizer composes into sTopStage. It
+// used to paint into a 320-wide array of its own and this file copied 153,600
+// bytes into here on every repaint.
+static uint16_t *sBotStage;
 
 // The rasterizer's per-pixel layer bytes (see ppu.h).
 //
@@ -521,6 +525,10 @@ int CtrVideoInit(void)
     memset(sTopStage, 0, TOP_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
     memset(sBotStage, 0, BOT_TEX_W * CTR_BOTTOM_HEIGHT * sizeof(uint16_t));
 
+    // Hand the UI its framebuffer before anything paints into it. CtrBottomInit
+    // is called after this function (3ds/host/main.c).
+    CtrBottomSetFramebuffer(sBotStage);
+
     // Point the PPU at its input. This must occur after Ctr3dsInitGbaMemory().
     //
     // Do this once: the snapshot when a second core rasterizes, the game's own
@@ -665,6 +673,11 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
 // is 49,152 bytes. A repaint takes five frames to reach the panel. On this path
 // the animations step five times a second, so the delay is not visible.
 //
+// Only the rows that changed move. The UI reports a dirty band
+// (CtrBottomDirtyRows), so an animation step that restores two icons uploads
+// its own few rows instead of all 240. A full repaint still takes five frames;
+// a step takes one.
+//
 // The value 48 is a multiple of 8. A tiled texture stores eight rows in a
 // strip, and the strips are in order. Thus any band that starts on an 8-row
 // boundary is one contiguous run in both buffers. The source is at row *
@@ -677,28 +690,47 @@ static void upload(uint16_t *stage, int stageW, const uint16_t *src,
 // else.
 #define BOT_CHUNK_ROWS 48
 
-static int sBotRow = CTR_BOTTOM_HEIGHT;   // next row; the height means idle
+// The run in flight: rows [sBotRow, sBotEnd). Equal means idle.
+//
+// There is no snapshot any more. The UI paints straight into sBotStage, so a
+// repaint during a run reaches rows that have already gone and rows that have
+// not, and for those few frames the panel can show a seam. The next run carries
+// the band it left behind, so it converges. Taking the band only when idle is
+// what stops a screen that repaints every frame from restarting the run for
+// ever and never finishing one.
+static int sBotRow = CTR_BOTTOM_HEIGHT;
+static int sBotEnd = CTR_BOTTOM_HEIGHT;
 
-// Copy the full image and slice only the transfer. The UI can repaint again
-// during a run. A source copied in pieces over several frames would tear. The
-// copy of 153,600 bytes is cheap.
-static void snapshot_bottom(void)
+// Start a run over the rows the UI says it has drawn into.
+//
+// Rounded out to the 8-row strips that a tiled texture stores, so a band is one
+// contiguous run in both buffers.
+static void begin_bottom_run(void)
 {
-    const uint16_t *fb = CtrBottomFramebuffer();
-    unsigned long long t = CtrTicksNow();
+    int top = 0, bot = CTR_BOTTOM_HEIGHT;
 
-    for (int y = 0; y < CTR_BOTTOM_HEIGHT; y++)
-        memcpy(sBotStage + (size_t)y * BOT_TEX_W,
-               fb + (size_t)y * CTR_BOTTOM_WIDTH,
-               CTR_BOTTOM_WIDTH * sizeof(uint16_t));
+    CtrBottomDirtyRows(&top, &bot);
+    CtrBottomClearDirty();
 
-    CtrProfile(kProfBot[0], t);
+    top &= ~7;
+    bot = (bot + 7) & ~7;
+
+    if (top < 0)
+        top = 0;
+    if (bot > CTR_BOTTOM_HEIGHT)
+        bot = CTR_BOTTOM_HEIGHT;
+
+    sBotRow = top;
+    sBotEnd = (bot > top) ? bot : top;
 }
 
-static void upload_bottom_slice(void)
+// Move up to maxRows of the run. Both counts are multiples of 8, because
+// begin_bottom_run rounds the band out to the strips a tiled texture stores in,
+// so a band is one contiguous run in both buffers.
+static void upload_bottom_rows(int maxRows)
 {
-    const int left = CTR_BOTTOM_HEIGHT - sBotRow;
-    const int rows = (left < BOT_CHUNK_ROWS) ? left : BOT_CHUNK_ROWS;
+    const int left = sBotEnd - sBotRow;
+    const int rows = (left < maxRows) ? left : maxRows;
 
     uint16_t *src = sBotStage + (size_t)sBotRow * BOT_TEX_W;
     uint8_t  *dst = (uint8_t *)sBotTex.data
@@ -777,10 +809,13 @@ void CtrVideoPresent(void)
     // the bottom texture, so this can run during the render. Its ~2 ms comes
     // from time that `ppu.wait` would spend idle.
     if (sPpuCore >= 0 && CtrBottomIsDirty()) {
+        // The whole band in one flush and one transfer: there is idle time here
+        // to hide it in, and no copy to make, because the UI painted straight
+        // into sBotStage. One call, not five, because both of these cost more
+        // per call than per byte.
         t0 = CtrTimeNowMs();
-        upload(sBotStage, BOT_TEX_W, CtrBottomFramebuffer(),
-               CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, &sBotTex, kProfBot);
-        CtrBottomClearDirty();
+        begin_bottom_run();
+        upload_bottom_rows(CTR_BOTTOM_HEIGHT);
         CtrLogSlow("upload.bot", t0);
     }
 
@@ -855,15 +890,12 @@ void CtrVideoPresent(void)
     // repaint during a run is a new picture. It gets its own run after this
     // one, and does not tear into this one.
     if (sPpuCore < 0) {
-        if (sBotRow >= CTR_BOTTOM_HEIGHT && CtrBottomIsDirty()) {
-            snapshot_bottom();
-            CtrBottomClearDirty();
-            sBotRow = 0;
-        }
+        if (sBotRow >= sBotEnd && CtrBottomIsDirty())
+            begin_bottom_run();
 
-        if (sBotRow < CTR_BOTTOM_HEIGHT) {
+        if (sBotRow < sBotEnd) {
             t0 = CtrTimeNowMs();
-            upload_bottom_slice();
+            upload_bottom_rows(BOT_CHUNK_ROWS);
             CtrLogSlow("upload.bot", t0);
         }
     }
