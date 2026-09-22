@@ -2203,14 +2203,39 @@ static void Ctr3dsLinkPump(void)
     Ctr3dsSetSioMultiId(gLink.localId);
     Ctr3dsLinkLogIds(gLink.localId, GetMultiplayerId(), gLink.isMaster);
 
-    // LINK_STATE_INIT_TIMER exists only to start timer 3 for the master's
-    // transfer cadence, which has no meaning over wireless, so the handshake
-    // completes straight into CONN_ESTABLISHED once the peers are present.
+    // The handshake decides WHEN the link goes live, and it must not be
+    // skipped.
+    //
+    // This used to jump straight to CONN_ESTABLISHED as soon as UDS reported
+    // two nodes, on the grounds that LINK_STATE_INIT_TIMER only starts timer 3
+    // and timer 3 means nothing over wireless. That is true of the timer and
+    // wrong about the handshake. On a cable the state leaves HANDSHAKE only
+    // after the master asserts handshakeAsMaster, which the game does when the
+    // host player confirms, so establishing at pairing time broke two things:
+    // every cancel in cable_club.c is guarded by IsLinkConnectionEstablished()
+    // == FALSE, so B Button: Cancel died the moment two consoles saw each
+    // other, and the two consoles went live on different frames, which left
+    // their link callbacks out of step.
+    //
+    // DoHandshake() consumes handshakeAsMaster on each serial interrupt and
+    // keeps driving the word until the network agrees; the host side latches it
+    // for the same reason.
     if (gLink.state == LINK_STATE_HANDSHAKE)
     {
-        gLink.state = LINK_STATE_CONN_ESTABLISHED;
+        int agreed = Ctr3dsLinkHandshake(gLink.handshakeAsMaster == TRUE);
+
+        gLink.handshakeAsMaster = FALSE;
+        if (!agreed)
+            return;
+
+        // INIT_TIMER, not CONN_ESTABLISHED: LinkMain1 runs InitTimer() there
+        // and falls through, so the game takes the same route it does on
+        // hardware. InitTimer() writes timer registers that nothing reads on
+        // this port.
+        gLink.state = LINK_STATE_INIT_TIMER;
         gLink.lag = 0;
         Ctr3dsLinkNoteOk();
+        return;
     }
 
     if (gLink.state != LINK_STATE_CONN_ESTABLISHED)

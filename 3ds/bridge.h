@@ -594,6 +594,18 @@ int  Ctr3dsLinkLocalId(void);
 // stall IS the lockstep, and is what stops the two consoles drifting apart.
 int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 
+// The handshake, which decides WHEN the link goes live.
+//
+// Call it once a frame while gLink.state is LINK_STATE_HANDSHAKE, passing
+// gLink.handshakeAsMaster, which the game raises once the host player confirms.
+// It puts this console's word on the wire and answers 1 when the network agrees,
+// using the same barrier as a cable: the master's word is present and the
+// player count has held steady for a frame.
+//
+// Without it the link went live the moment two consoles paired, which killed
+// every B Button: Cancel in the link-up chain.
+int Ctr3dsLinkHandshake(int asMaster);
+
 // Report the player id this console ended up with. `local` is what UDS says,
 // `sio` is what GetMultiplayerId() reads back out of REG_SIOCNT. The two must
 // agree, and the log line is the only place that says whether they do.

@@ -56,6 +56,11 @@
 #define LINK_SCAN_BUFSZ   0x4000
 #define LINK_MAX_SCAN     8
 
+// The handshake words, copied from include/link.h rather than shared, because
+// this file speaks no game types. MASTER_HANDSHAKE and SLAVE_HANDSHAKE.
+#define CTR_LINK_MASTER_HANDSHAKE 0x8FFFu
+#define CTR_LINK_SLAVE_HANDSHAKE  0xB9A0u
+
 // Half a frame. Long enough to absorb a late packet, short enough that a dead
 // peer costs visible slowdown rather than a hang.
 #define LINK_WAIT_US      8000
@@ -73,10 +78,31 @@
 
 // Tagged with the sender's frame so a late or duplicated packet can be placed
 // rather than guessed at.
+//
+// `hs` carries the handshake word, which is what a cable puts on the wire
+// during LINK_STATE_HANDSHAKE in place of a command. It rides every packet
+// because a console has to keep saying it until the whole network agrees, the
+// same way DoHandshake() re-drives REG_SIOMLT_SEND on every serial interrupt.
+// A console that stopped once it was satisfied would strand a peer that had
+// not heard it yet.
+//
+// `phase` is why the word needs its own field rather than a reserved frame
+// number. A handshake packet carries no command, so it must not enter the
+// command ring: doing so would fill frame 0's slot with an empty command and
+// the peer's real first command would be dropped on top of it.
+//
+// Adding it changed the packet size, so two consoles must run the same build.
+// A mismatched pair reads as a short packet and shows up as `short` in the
+// period line rather than as silence.
 typedef struct {
     uint32_t frame;
+    uint16_t hs;                      // handshake word, on every packet
+    uint8_t  phase;                   // PHASE_HANDSHAKE or PHASE_LIVE
+    uint8_t  pad;
     uint8_t  cmd[CTR_LINK_CMD_BYTES];
 } LinkPacket;
+
+enum { PHASE_HANDSHAKE = 0, PHASE_LIVE = 1 };
 
 // ---- state -----------------------------------------------------------------
 //
@@ -149,6 +175,27 @@ static uint8_t    sRingFull[CTR_LINK_MAX_PLAYERS][LINK_RING];
 // would read as silent the moment its command was delivered.
 static uint32_t sPeerNewest[CTR_LINK_MAX_PLAYERS];
 static uint8_t  sPeerSeen[CTR_LINK_MAX_PLAYERS];
+
+// ---- the handshake ---------------------------------------------------------
+//
+// This file used to declare the link established as soon as UDS reported two
+// nodes. That is far too early. On a cable the state leaves HANDSHAKE only
+// after the master asserts handshakeAsMaster, which the game does when the host
+// player confirms, and DoHandshake() then sees MASTER_HANDSHAKE on the wire
+// with the player count unchanged across two frames.
+//
+// Establishing at pairing time broke the Cable Club in two ways. Every cancel
+// in the link-up chain is guarded by IsLinkConnectionEstablished() == FALSE, so
+// B Button: Cancel did nothing from the moment two consoles saw each other. And
+// the two consoles went live on different frames, so their link callbacks began
+// out of step.
+//
+// What each console currently puts on the wire, and what it has seen.
+static uint16_t sHsOut;                  // 0 until the game asks for one
+static uint16_t sHsFrom[CTR_LINK_MAX_PLAYERS];
+static int      sHsStablePlayers;        // the count seen on the last frame
+static int      sHsDone;
+static uint8_t  sHsLogged;
 
 // Scan results, kept so the UI can list them across frames.
 static udsNetworkScanInfo sScan[LINK_MAX_SCAN];
@@ -255,6 +302,12 @@ static void reset_frames(void)
     memset(sRing, 0, sizeof(sRing));
     memset(sPeerSeen, 0, sizeof(sPeerSeen));
     memset(sPeerNewest, 0, sizeof(sPeerNewest));
+
+    sHsOut = 0;
+    sHsDone = 0;
+    sHsLogged = 0;
+    sHsStablePlayers = 0;
+    memset(sHsFrom, 0, sizeof(sHsFrom));
 
     // A new session counts from zero, and reports its roster and its ids again.
     sLoggedPlayers = -1;
@@ -792,6 +845,17 @@ static int drain(void)
                 sPeerSeen[p] = 1;
             }
 
+            // The handshake word is not part of the command stream, so take it
+            // off every packet, including the ones the ring discards.
+            if (pkt.hs != 0)
+                sHsFrom[p] = pkt.hs;
+
+            if (pkt.phase != PHASE_LIVE) {
+                n++;
+                got = 0;
+                continue;         // no command to file
+            }
+
             if (ahead < 0) {
                 // Already delivered. This is the peer repeating a frame it had
                 // sent before we took it, which its own retry does.
@@ -988,6 +1052,78 @@ int Ctr3dsLinkLagged(void)
     return (CtrTimeNowMs() - sMissStartMs) >= LINK_LAG_TOLERANCE_MS;
 }
 
+// One frame of the handshake, which is what SerialCB does in
+// LINK_STATE_HANDSHAKE: put this console's word on the wire, read what came
+// back, and say whether the network has agreed.
+//
+// `asMaster` is gLink.handshakeAsMaster, which LinkMain1 raises when the game
+// asks the link to advance. It latches here because a cable clears the flag on
+// every serial interrupt but keeps driving the word until every console has
+// seen it.
+//
+// Returns 1 once the barrier passes: the master's word is on the wire AND the
+// player count has not changed since the last frame. The stability test is
+// DoHandshake()'s, and it stops a console arriving mid-handshake from being
+// counted into a link that is already forming.
+int Ctr3dsLinkHandshake(int asMaster)
+{
+    CtrLinkStatus st;
+    LinkPacket out;
+    int stable;
+
+    if (asMaster)
+        sHsOut = CTR_LINK_MASTER_HANDSHAKE;
+    else if (sHsOut == 0)
+        sHsOut = CTR_LINK_SLAVE_HANDSHAKE;
+
+    // The worker owns UDS while a pairing call runs.
+    if (sBusy)
+        return 0;
+
+    Ctr3dsLinkGetStatus(&st);
+    if (st.state != CTR_LINK_CONNECTED || st.playerCount < 2) {
+        sHsStablePlayers = 0;
+        return 0;
+    }
+
+    memset(&out, 0, sizeof out);
+    out.frame = sFrame;
+    out.hs = sHsOut;
+    out.phase = PHASE_HANDSHAKE;
+    udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL, UDS_SENDFLAG_Default,
+              &out, sizeof(out));
+
+    drain();
+
+    if (sHsDone)
+        return 1;
+
+    stable = (sHsStablePlayers == st.playerCount);
+    sHsStablePlayers = st.playerCount;
+    if (!stable)
+        return 0;
+
+    // Node 0 is the host, and the host is the master. Every console waits on
+    // the MASTER word, the master included: on a cable it reads its own word
+    // back off the shared bus.
+    if (st.localId == 0) {
+        if (sHsOut != CTR_LINK_MASTER_HANDSHAKE)
+            return 0;
+    } else if (sHsFrom[0] != CTR_LINK_MASTER_HANDSHAKE) {
+        return 0;
+    }
+
+    sHsDone = 1;
+    if (!sHsLogged) {
+        sHsLogged = 1;
+        // The line that says the link went live when the host confirmed, and
+        // not when the two consoles first saw each other.
+        CtrLog("emerald3ds: link handshake done, players=%d, this console %s\n",
+               (int)st.playerCount, st.localId == 0 ? "master" : "slave");
+    }
+    return 1;
+}
+
 int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
 {
     CtrLinkStatus st;
@@ -1019,6 +1155,9 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     local   = st.localId;
 
     out.frame = sFrame;
+    out.hs = sHsOut;
+    out.phase = PHASE_LIVE;
+    out.pad = 0;
     memcpy(out.cmd, sendCmd, CTR_LINK_CMD_BYTES);
 
     if (R_FAILED(udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL,

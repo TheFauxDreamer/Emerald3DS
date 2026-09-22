@@ -303,6 +303,12 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 // says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 
+// One frame of the handshake, called while gLink.state is LINK_STATE_HANDSHAKE
+// with gLink.handshakeAsMaster. It answers 1 with the same barrier DoHandshake()
+// uses on a cable. Without it the link went live at pairing time rather than
+// when the host confirmed.
+int Ctr3dsLinkHandshake(int asMaster);
+
 // Report the player id this console ended up with, so a log can show whether
 // GetMultiplayerId() agrees with what UDS says. They did not agree before the
 // pump started writing REG_SIOCNT.
