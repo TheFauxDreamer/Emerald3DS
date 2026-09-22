@@ -64,19 +64,38 @@ shows up one frame later**, never half-drawn. If no second core can be had, or
 the build is `CTR_PPU_THREAD=0`, it rasterises inline inside
 `CtrVideoPresent()`, which is the old single-core path.
 
-With a second core, the bottom screen is uploaded **whole, before the join**.
-`CtrVideoPresent()` sends it while the rasteriser is still running, which is
-safe because the rasteriser never touches the UI's framebuffer or the bottom
-texture, so its ~2 ms comes out of what would otherwise be `ppu.wait`, and a
-repaint reaches the panel on the frame it was painted.
-`Ctr3dsRasteriserOnOwnCore()` ([bridge.h](bridge.h)) is how the game side
-knows which path it is on.
+**The UI paints straight into the buffer the GPU transfer reads.** `sFb` is the
+host's `linearAlloc`'d stage, handed over by `CtrVideoInit` before anything
+paints, at a row stride of `UI_STRIDE` (512) because a PICA200 texture's width
+must be a power of two. `UI_W` (320) is still what everything clips against.
+Address a row with `UI_STRIDE`; test a coordinate against `UI_W`. There is no
+copy: the top screen never had one, because the rasteriser composes into its
+own stage, and this is the same arrangement.
 
-On the inline path the bottom screen is uploaded **a slice per frame, not
-whole**. The top screen has to hold 60fps and there is no idle time to hide the
-upload in, so a repaint reaches the panel five frames after it was painted. See
-`upload` and `BOT_CHUNK_ROWS` in [video.c](host/video.c) for why 48 rows, and
-section 7 for what it cost before.
+**Only the rows that changed are uploaded.** Every primitive that writes the
+framebuffer widens a dirty band (`UiTouchRows`, `ui_draw.c`), so no drawing site
+can forget to report itself, and the host takes the band through
+`CtrBottomDirtyRows`. A band is rounded out to the 8-row strips a tiled texture
+stores in, so it is one contiguous run in both buffers.
+
+With a second core, the band goes **whole, before the join**. `CtrVideoPresent()`
+sends it while the rasteriser is still running, which is safe because the
+rasteriser never touches the UI's framebuffer or the bottom texture, so its cost
+comes out of what would otherwise be `ppu.wait`, and a repaint reaches the panel
+on the frame it was painted. `Ctr3dsRasteriserOnOwnCore()` ([bridge.h](bridge.h))
+is how the game side knows which path it is on.
+
+On the inline path the band goes **a slice per frame**. The top screen has to
+hold 60fps and there is no idle time to hide the upload in. A full repaint
+therefore reaches the panel five frames after it was painted; an animation step,
+whose band is a few rows, reaches it on the next frame. See `BOT_CHUNK_ROWS` in
+[video.c](host/video.c) for why 48 rows.
+
+There is no snapshot to upload from, so a repaint during a run reaches rows that
+have already gone and rows that have not, and the panel can show a seam for
+those frames. The next run carries the band left behind, so it converges. The
+band is taken only when the run is idle, which is what stops a screen that
+repaints every frame from restarting the run for ever and never finishing one.
 
 The two flushes are at the bottom for a reason: this is after the frame has been
 presented. The save flush still writes there. The settings flush only hands a
@@ -428,7 +447,22 @@ A full repaint is 76,800 pixels of software fill. Two separate flags in
 - `sNeedsRepaint`: the framebuffer contents are stale.
 - `sDirty`: the host has not uploaded the current contents yet.
 
-Do not conflate them. Three ways to get a repaint:
+Do not conflate them. `sDirty` is paired with the dirty row band that
+`ui_draw.c` keeps: `CtrBottomIsDirty()` is true only when some row was actually
+drawn into, so a step that writes no pixels uploads nothing.
+
+**A repaint that nothing will read is not free.** Two were being paid for:
+
+- `UiSnapshot()` is only ever restored from by the animated layer, which draws
+  nothing unless the shiny notice is up or the tab is PARTY. It is taken only
+  when `AnimatedLayerActive()` says something will read it; the same predicate
+  gates the cheap step path, so the two cannot drift.
+- The title's blink repaints its own 232x14 rect
+  (`UiTitleDrawPrompt`, [ui_title.c](ui/ui_title.c)), not the screen. It used to
+  go through this policy and clear all 76,800 pixels to change 2,488, once every
+  32 frames, which cost an Old 3DS a frame roughly twice a second.
+
+Three ways to get a repaint:
 
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
@@ -579,6 +613,13 @@ So: the cost is per-repaint work that is neither the upload nor the sync, which
 leaves the **paint** (`Redraw()`), and that is now instrumented too. Profile
 before optimising, and be suspicious of a model that only fits.
 
+The stages are finer now. `Redraw()` reports `paint.clear`, `paint.tab`,
+`paint.bar` and `paint.snap`, and `CtrBottomUpdate` reports `bottom.tick`, which
+is everything that is not the paint: the touch handlers, seven ticks and
+`UiStateHash`, all of which run on every displayed frame whether anything
+repaints or not. A console that feels slow with the screen merely open could not
+be told from one that is slow because it repaints.
+
 Then the missing stages were added and the answer fell out:
 
 | Stage | Mean | |
@@ -586,7 +627,7 @@ Then the missing stages were added and the answer fell out:
 | `ppu` | **~9000 µs** | every frame, the GBA rasteriser |
 | `framebegin` | **~5700 µs** | every frame -- **this is the slack** |
 | `paint` | **~4900 µs** | per bottom-screen repaint |
-| `upload.bot.copy` | 500 µs | per repaint |
+| `upload.bot.copy` | 500 µs | per repaint; **gone now**, the UI paints into the stage |
 
 **A frame has 5.7 ms spare and a full repaint costs 5.6 ms of it**, 87% of that
 being `paint`. It fits or misses depending on how the PPU's 7-10 ms lands that
