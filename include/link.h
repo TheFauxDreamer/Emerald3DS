@@ -303,6 +303,11 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 // says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 
+// Report the player id this console ended up with, so a log can show whether
+// GetMultiplayerId() agrees with what UDS says. They did not agree before the
+// pump started writing REG_SIOCNT.
+void Ctr3dsLinkLogIds(int local, int sio, int isMaster);
+
 // The lag tolerance. The host keeps the clock, because it is the side with one;
 // this side decides what to do when Ctr3dsLinkLagged() finally answers yes.
 // Call NoteMiss on every missed frame and NoteOk on every good one, or the run

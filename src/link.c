@@ -1996,6 +1996,24 @@ u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENG
     return retVal2;
 }
 
+#if PLATFORM_3DS
+// Put this console's player id where the game reads it.
+//
+// GetMultiplayerId() returns SIO_MULTI_CNT->id, which is bits 4-5 of
+// REG_SIOCNT. On a GBA the hardware fills that field and SerialCB copies it
+// into gLink. This port has neither, and REG_SIOCNT is ordinary RAM inside
+// gGbaMem, so the field stays 0 on every console unless something writes it.
+//
+// A read-modify-write, not a struct store: EnableSerial() puts the mode and
+// baud bits there and they must survive.
+#define CTR_SIO_MULTI_ID 0x0030   // struct SioMultiCnt .id, bits 4-5
+
+static void Ctr3dsSetSioMultiId(u8 id)
+{
+    REG_SIOCNT = (REG_SIOCNT & ~(u16)CTR_SIO_MULTI_ID) | ((u16)(id & 3) << 4);
+}
+#endif
+
 static void CheckMasterOrSlave(void)
 {
 #if PLATFORM_3DS
@@ -2004,7 +2022,9 @@ static void CheckMasterOrSlave(void)
     // the console that created the network is node 1, and node 1 is the master.
     // REG_SIOCNT reads as zeros on this port, so the original test would elect
     // everyone a slave and the handshake would never complete.
-    gLink.isMaster = (Ctr3dsLinkLocalId() == 0) ? LINK_MASTER : LINK_SLAVE;
+    gLink.localId = (u8)Ctr3dsLinkLocalId();
+    gLink.isMaster = (gLink.localId == 0) ? LINK_MASTER : LINK_SLAVE;
+    Ctr3dsSetSioMultiId(gLink.localId);
 #else
     u32 terminals;
 
@@ -2173,6 +2193,15 @@ static void Ctr3dsLinkPump(void)
     gLink.localId = (u8)Ctr3dsLinkLocalId();
     gLink.playerCount = players;
     gLink.isMaster = (gLink.localId == 0) ? LINK_MASTER : LINK_SLAVE;
+
+    // SerialCB copied the id the other way (gLink.localId = SIO_MULTI_CNT->id)
+    // on every serial interrupt. There is no serial interrupt here, and
+    // GetMultiplayerId() reads the register rather than gLink, so without this
+    // write every console answers 0 and every "am I player 1?" test in trade.c,
+    // the battle controllers and record mixing takes the same branch on both
+    // sides.
+    Ctr3dsSetSioMultiId(gLink.localId);
+    Ctr3dsLinkLogIds(gLink.localId, GetMultiplayerId(), gLink.isMaster);
 
     // LINK_STATE_INIT_TIMER exists only to start timer 3 for the master's
     // transfer cadence, which has no meaning over wireless, so the handshake
