@@ -100,18 +100,12 @@ static void DrawBuildId(void)
                 id, UI_COL_DIM, UI_COL_SHADOW);
 }
 
-void UiTitleDraw(void)
+// Which half of the blink the screen currently holds, so the shell can tell a
+// blink from a first paint. PROMPT_NONE means nothing has been drawn.
+static u32 sDrawn = PROMPT_NONE;
+
+static void DrawPromptArt(void)
 {
-    u32 state = PromptState();
-
-    if (state == PROMPT_NONE)
-        return;
-
-    DrawBuildId();
-
-    if (state != PROMPT_LIT)
-        return;
-
     if (!sPalLoaded)
     {
         UiLoadPal(sPal, gTitleScreenPressStartPal, TITLE_PAL_COUNT);
@@ -134,6 +128,61 @@ void UiTitleDraw(void)
                        TITLE_SCALE, TITLE_SCALE, sPal[c - '0']);
         }
     }
+}
+
+void UiTitleDraw(void)
+{
+    u32 state = PromptState();
+
+    sDrawn = state;
+
+    if (state == PROMPT_NONE)
+        return;
+
+    DrawBuildId();
+
+    if (state != PROMPT_LIT)
+        return;
+
+    DrawPromptArt();
+}
+
+// The blink on its own, over the black the prompt already sits on.
+//
+// The blink used to run through the shell's full repaint, which clears all
+// 76,800 pixels to change 2,488 of them, once every 32 frames. On an Old 3DS
+// that cost a frame roughly twice a second, which is what the stutter on the
+// title screen was.
+void UiTitleDrawPrompt(void)
+{
+    u32 state = PromptState();
+
+    sDrawn = state;
+
+    UiFillRect(TITLE_X, TITLE_Y, TITLE_ART_W * TITLE_SCALE,
+               TITLE_ART_H * TITLE_SCALE, 0);
+
+    if (state == PROMPT_LIT)
+        DrawPromptArt();
+}
+
+void UiTitlePromptRect(int *x, int *y, int *w, int *h)
+{
+    *x = TITLE_X;
+    *y = TITLE_Y;
+    *w = TITLE_ART_W * TITLE_SCALE;
+    *h = TITLE_ART_H * TITLE_SCALE;
+}
+
+// Is the prompt's own rect the only thing that has changed?
+//
+// Only once the screen already holds a drawn prompt, because the first paint
+// also puts up the build id, which is outside the rect. Both halves of the
+// blink count as drawn: the dark half leaves the rect black, which is what the
+// lit half is drawn over.
+int UiTitleBlinkOnly(void)
+{
+    return sDrawn != PROMPT_NONE && PromptState() != PROMPT_NONE;
 }
 
 // Act on release, like every control on this screen. Here the full screen is

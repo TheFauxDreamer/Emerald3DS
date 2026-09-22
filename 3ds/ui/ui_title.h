@@ -24,6 +24,19 @@
 // the game, over a cleared screen.
 void UiTitleDraw(void);
 
+// The blink on its own: fills the prompt's rect black and draws the prompt into
+// it. For the shell's repaint when nothing but the blink has changed, which is
+// every 32 frames. A full clear to move 2,488 pixels cost an Old 3DS a frame
+// twice a second.
+void UiTitleDrawPrompt(void);
+
+// The prompt's rect, so the shell can say which rows it dirtied.
+void UiTitlePromptRect(int *x, int *y, int *w, int *h);
+
+// TRUE when that rect is the only thing that has changed, so UiTitleDrawPrompt
+// is enough. FALSE for the first paint, which also puts up the build id.
+int UiTitleBlinkOnly(void);
+
 // A release anywhere on the screen, while the prompt is up, is START. It counts
 // in the dark half of the blink too, as a START press does.
 void UiTitleTouch(const CtrTouchState *t);
