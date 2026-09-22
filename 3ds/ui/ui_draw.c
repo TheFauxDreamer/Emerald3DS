@@ -953,8 +953,10 @@ static int sSnapValid;
 
 void UiSnapshot(void)
 {
-    for (int i = 0; i < UI_W * UI_H; i++)
-        sSnap[i] = sFb[i];
+    // memcpy, not a u16 loop. This moves 307,200 bytes and the compiler is not
+    // guaranteed to turn an element-wise loop into one; memcpy uses the load
+    // and store multiples that an ARM11 wants.
+    memcpy(sSnap, sFb, sizeof(sSnap));
 
     sSnapValid = 1;
 }
@@ -980,8 +982,7 @@ void UiRestoreRect(int x, int y, int w, int h)
     {
         int base = (y + row) * UI_W + x;
 
-        for (int col = 0; col < w; col++)
-            sFb[base + col] = sSnap[base + col];
+        memcpy(&sFb[base], &sSnap[base], (size_t)w * sizeof(sFb[0]));
     }
 }
 

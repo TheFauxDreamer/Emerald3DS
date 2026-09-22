@@ -693,10 +693,30 @@ static void DrawTabBar(const u8 *vis, u32 n)
 // Defined below, next to the animation-step path.
 static void DrawAnimatedLayer(void);
 
+// Has the animated layer anything to draw?
+//
+// This is the same test DrawAnimatedLayer makes, in one place so the two cannot
+// drift. It decides three things: whether a full paint needs to keep a snapshot
+// at all, whether a step can take the cheap path, and whether a step is worth
+// making. The snapshot is 307,200 bytes of traffic and on five tabs of six the
+// layer draws nothing, so taking it there was pure waste.
+static int AnimatedLayerActive(void)
+{
+    if (NoticeActive(NULL, NULL))
+        return 1;
+
+    // Not while the quick-throw strip is up. The snapshot contains the strip,
+    // and the bottom row of party icons is under it. A redraw there puts the
+    // icons on top of the strip. The achievement toast has the same problem
+    // with the top row.
+    return !UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY;
+}
+
 static void Redraw(void)
 {
     u8 vis[UI_TAB_COUNT];
     u32 n;
+    unsigned long long tabTicks;
     u16 noticeSpecies = SPECIES_NONE;
     u32 noticePersonality = 0;
     // A repaint fills 76,800 pixels and draws the active tab. Each touch
@@ -712,8 +732,19 @@ static void Redraw(void)
     // half of its blink. While it is up, also show the build id in the corner.
     if (!sInGame)
     {
-        UiClear(0);
-        UiTitleDraw();
+        // The blink changes 2,488 pixels every 32 frames. Clearing all 76,800
+        // for it cost an Old 3DS a frame roughly twice a second, which is the
+        // stutter the title screen had.
+        if (UiTitleBlinkOnly())
+        {
+            UiTitleDrawPrompt();
+        }
+        else
+        {
+            UiClear(0);
+            UiTitleDraw();
+        }
+
         sNeedsRepaint = 0;
         sDirty = 1;
         CtrLogSlow("redraw", t0);
@@ -724,7 +755,13 @@ static void Redraw(void)
     EnsureTabVisible();
     n = VisibleTabs(vis);
 
-    UiClear(UI_COL_BG);
+    {
+        unsigned long long ts = CtrTicksNow();
+        UiClear(UI_COL_BG);
+        CtrProfile("paint.clear", ts);
+    }
+
+    tabTicks = CtrTicksNow();
 
     switch (sTab)
     {
@@ -748,7 +785,13 @@ static void Redraw(void)
     if (NoticeActive(&noticeSpecies, &noticePersonality))
         DrawNotice(noticeSpecies, noticePersonality);
 
-    DrawTabBar(vis, n);
+    CtrProfile("paint.tab", tabTicks);
+
+    {
+        unsigned long long ts = CtrTicksNow();
+        DrawTabBar(vis, n);
+        CtrProfile("paint.bar", ts);
+    }
 
     sNeedsRepaint = 0;
     sDirty = 1;          // tell the host to upload again
@@ -756,7 +799,17 @@ static void Redraw(void)
     // Keep the finished screen, so that an animation step can restore a rect
     // and not repaint everything. The snapshot contains the tab, the overlay
     // and the bar.
-    UiSnapshot();
+    //
+    // Only when something will restore from it. It is 307,200 bytes of traffic
+    // and on BAG, MAP, DEX, TROPHY and EXTRA the animated layer draws nothing,
+    // so it was being taken and never read. UiHasSnapshot() guards the reader,
+    // which falls back to a full repaint, so a missing one is correct.
+    if (AnimatedLayerActive())
+    {
+        unsigned long long ts = CtrTicksNow();
+        UiSnapshot();
+        CtrProfile("paint.snap", ts);
+    }
 
     // The moving parts come after the snapshot, so a step never restores them.
     DrawAnimatedLayer();
@@ -775,11 +828,7 @@ static void DrawAnimatedLayer(void)
 {
     if (NoticeActive(NULL, NULL))
         RedrawNoticeSparkles();
-    // Not while the quick-throw strip is up. The snapshot contains the strip,
-    // and the bottom row of party icons is under it. A redraw here puts the
-    // icons on top of the strip. The achievement toast has the same problem
-    // with the top row.
-    else if (!UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY)
+    else if (AnimatedLayerActive())
         UiPartyRedrawAnimated();
 }
 
@@ -815,6 +864,13 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // The full touch response. If `update` is slow and `redraw` is fast, the
     // cost is in a touch handler or in UiStateHash.
     unsigned int t0 = CtrTimeNowMs();
+    // The part that is NOT the paint: the touch handlers, seven ticks and
+    // UiStateHash, which run on every displayed frame whether anything
+    // repaints or not. On the party tab the hash alone is about thirty
+    // GetMonData decrypt round trips. Nothing measured this before, so a
+    // console that feels slow with the screen merely open could not be told
+    // from one that is slow because it repaints.
+    unsigned long long tt = CtrTicksNow();
 
     UpdateInGameLatch();
 
@@ -971,18 +1027,30 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         sNeedsRepaint = 1;
     }
 
+    CtrProfile("bottom.tick", tt);
+
     // A full repaint includes everything that the cheap path draws, and
     // refreshes the snapshot.
     if (sNeedsRepaint)
         Redraw();
     else if (animParty || animNotice)
     {
+        // Nothing for the layer to draw, so nothing to repaint. A tick can ask
+        // for a step on a tab the layer ignores; repainting for that would cost
+        // a full paint to change no pixels.
+        if (!AnimatedLayerActive())
+        {
+        }
         // No snapshot yet (the first paint, or just after the title screen):
         // make one.
-        if (UiHasSnapshot())
+        else if (UiHasSnapshot())
+        {
             RedrawAnimated();
+        }
         else
+        {
             Redraw();
+        }
     }
 
     CtrLogSlow("bottom.update", t0);
