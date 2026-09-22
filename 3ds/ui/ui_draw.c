@@ -188,21 +188,43 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
 
     if (x >= 0 && y >= 0 && x + 8 <= UI_W && y + 8 <= UI_H)
     {
+        // Two loops, because transparent0 does not change inside one and the
+        // opaque case is the busiest caller here: a window frame is hundreds of
+        // tiles and passes FALSE, so every one of its pixels was paying for a
+        // branch that can never be taken.
+        if (!transparent0)
+        {
+            for (int row = 0; row < 8; row++)
+            {
+                const u8 *src = tile + row * 4;   // 8 pixels, 2 in each byte
+                u16 *dst = &sFb[(y + row) * UI_STRIDE + x];
+
+                for (int col = 0; col < 8; col += 2)
+                {
+                    // The low nibble is the left pixel of each byte.
+                    u8 b = src[col >> 1];
+
+                    dst[col]     = pal[b & 0xF];
+                    dst[col + 1] = pal[b >> 4];
+                }
+            }
+            return;
+        }
+
         for (int row = 0; row < 8; row++)
         {
-            const u8 *src = tile + row * 4;   // 8 pixels, 2 in each byte
+            const u8 *src = tile + row * 4;
             u16 *dst = &sFb[(y + row) * UI_STRIDE + x];
 
             for (int col = 0; col < 8; col += 2)
             {
-                // The low nibble is the left pixel of each byte.
                 u8 b = src[col >> 1];
                 u32 lo = b & 0xF;
                 u32 hi = b >> 4;
 
-                if (lo != 0 || !transparent0)
+                if (lo != 0)
                     dst[col] = pal[lo];
-                if (hi != 0 || !transparent0)
+                if (hi != 0)
                     dst[col + 1] = pal[hi];
             }
         }
@@ -314,18 +336,55 @@ void UiWindowFrame(int tx, int ty, int wTiles, int hTiles)
     // setting at any time, and a stale palette does not match the tiles.
     static u16 pal[16];
     static int cachedId = -1;
+    // Whether this frame's centre tile is a single colour, and which. Cached
+    // with the palette, because both depend on the frame id and nothing else.
+    static int centreFlat;
+    static u16 centreColor;
 
     u8 frameId = UiFrameId();
     const struct TilesPal *frame = GetWindowFrameTilesPal(frameId);
 
     if (cachedId != (int)frameId)
     {
+        const u8 *centre = frame->tiles + (1 * 3 + 1) * 32;
+        u8 idx = centre[0] & 0xF;
+
         UiLoadPal(pal, frame->pal, 16);
         cachedId = (int)frameId;
+
+        // 32 bytes, two 4-bit pixels in each. All 64 the same index means the
+        // interior is flat and a rect fill draws it exactly.
+        centreFlat = 1;
+        for (int i = 0; i < 32; i++)
+        {
+            if ((centre[i] & 0xF) != idx || (centre[i] >> 4) != idx)
+            {
+                centreFlat = 0;
+                break;
+            }
+        }
+        centreColor = pal[idx];
     }
 
     if (wTiles < 2 || hTiles < 2)
         return;
+
+    // The interior is one flat colour in every frame the game ships, so fill it
+    // instead of blitting the same tile hundreds of times.
+    //
+    // A full-screen frame is 40x24 tiles, and 38x22 of them are the centre:
+    // 836 blits of 64 pixels each, 53 KB of the 61 KB, through the slowest
+    // primitive in this file. On an Old 3DS that was most of the two
+    // milliseconds a tab draw spent before it drew anything of its own.
+    //
+    // Checked, not assumed. A frame whose centre is patterned still takes the
+    // tile loop, and the answer is cached with the palette because both depend
+    // on the same setting.
+    if (centreFlat)
+    {
+        UiFillRect((tx + 1) * 8, (ty + 1) * 8,
+                   (wTiles - 2) * 8, (hTiles - 2) * 8, centreColor);
+    }
 
     for (int row = 0; row < hTiles; row++)
     {
@@ -333,8 +392,16 @@ void UiWindowFrame(int tx, int ty, int wTiles, int hTiles)
 
         for (int col = 0; col < wTiles; col++)
         {
-            int sx = (col == 0) ? 0 : (col == wTiles - 1 ? 2 : 1);
-            const u8 *tile = frame->tiles + (sy * 3 + sx) * 32;
+            int sx, edge;
+            const u8 *tile;
+
+            edge = (row == 0 || row == hTiles - 1 ||
+                    col == 0 || col == wTiles - 1);
+            if (!edge && centreFlat)
+                continue;            // the fill above did it
+
+            sx = (col == 0) ? 0 : (col == wTiles - 1 ? 2 : 1);
+            tile = frame->tiles + (sy * 3 + sx) * 32;
 
             // Opaque: the frame is the background, and nothing shows through
             // it.
