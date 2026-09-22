@@ -152,6 +152,7 @@ static unsigned sMissBy[MISS_KINDS];     // how many of each in this period
 static unsigned sStatFrames, sStatOk;
 static unsigned sStatusFailRun;
 static int      sLoggedPlayers = -1;
+static int      sLoggedIds = -1;
 
 // The bounded wait, which is where a marginal link shows itself first.
 static unsigned long long sWaitSum, sWaitWorst;
@@ -215,8 +216,9 @@ static void reset_frames(void)
     memset(sHave, 0, sizeof(sHave));
     memset(sLatest, 0, sizeof(sLatest));
 
-    // A new session counts from zero, and reports its roster again.
+    // A new session counts from zero, and reports its roster and its ids again.
     sLoggedPlayers = -1;
+    sLoggedIds = -1;
     sStatusFailRun = 0;
     sStatFrames = sStatOk = 0;
     sWaitSum = sWaitWorst = 0;
@@ -1019,6 +1021,26 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
 // Called from TrySetLinkErrorBuffer() in src/link.c, the one place every link
 // error passes through. Without it, Emerald's own error screen and a real fault
 // look the same in a log: the game stops talking and nothing says why.
+// Proof that the multiplayer id reached the register the game reads.
+//
+// `local` is what UDS says this console is; `sio` is what GetMultiplayerId()
+// answers, read back from REG_SIOCNT. They must agree. They did not before
+// Ctr3dsSetSioMultiId() existed: `sio` was 0 on every console, so both sides
+// of a trade took the player-0 branch.
+//
+// Logged when it changes, not every frame, the same way the roster line is.
+void Ctr3dsLinkLogIds(int local, int sio, int isMaster)
+{
+    int packed = (local & 3) | ((sio & 3) << 2) | ((isMaster ? 1 : 0) << 4);
+
+    if (packed == sLoggedIds)
+        return;
+
+    sLoggedIds = packed;
+    CtrLog("emerald3ds: link ids: local=%d sio=%d master=%d\n",
+           local, sio, isMaster ? 1 : 0);
+}
+
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount)
 {
     CtrLog("emerald3ds: link error status=%08X send=%d recv=%d missrun=%u "

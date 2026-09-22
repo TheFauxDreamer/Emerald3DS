@@ -594,6 +594,11 @@ int  Ctr3dsLinkLocalId(void);
 // stall IS the lockstep, and is what stops the two consoles drifting apart.
 int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds);
 
+// Report the player id this console ended up with. `local` is what UDS says,
+// `sio` is what GetMultiplayerId() reads back out of REG_SIOCNT. The two must
+// agree, and the log line is the only place that says whether they do.
+void Ctr3dsLinkLogIds(int local, int sio, int isMaster);
+
 // Called from TrySetLinkErrorBuffer() in src/link.c, where every link error
 // passes. Emerald's own error screen and a real fault otherwise look the same
 // in a log: the game stops talking and nothing says why.
