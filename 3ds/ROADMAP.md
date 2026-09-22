@@ -15,7 +15,7 @@ Checked against `d482f2a` on 2026-09-18.
 | D: Gameplay tweaks | **Done.** |
 | Save durability | **Done.** |
 | The busy-wait audit | **Done.** |
-| C: Local wireless | **Pairs and links on hardware.** The trade error was a save stall against a 10-frame lag limit; the limit is wall clock now. On the `local-wireless` branch. |
+| C: Local wireless | **Pairs and links on hardware; a trade is waiting on a console test.** The transport now delivers each command once, the handshake waits for the host's confirm, and `GetMultiplayerId()` answers correctly. On the `local-wireless` branch. |
 | E: Achievements | **Built in.** Two items are left. |
 
 The done parts stay in this file because their facts are recorded nowhere else.
@@ -33,10 +33,13 @@ The large pieces:
   rules from the follower work. Item 1, the follower options, is done.
 - **Part C, the Cable Club over local wireless.** The `local-wireless` branch
   now carries main. C.3 is decided: LINK is page 5 of EXTRA. Pairing and the
-  transport both run on hardware. A direct-connect trade still ends in
-  Emerald's communication error, and the cause is not yet known: the port now
-  logs the status bits and the queue counts at `TrySetLinkErrorBuffer`, which
-  is what the next run must capture.
+  transport both run on hardware. Three faults that stopped a trade are fixed
+  and waiting on a console test: the transport lost and repeated commands, the
+  link went live at pairing time instead of at the host's confirm, and
+  `GetMultiplayerId()` answered 0 on both consoles. The next run must show
+  `lost 0` on every period line, `local` and `sio` agreeing in the `link ids`
+  line, and `link handshake done` arriving when the host presses A rather than
+  when the consoles pair.
 - **Part E:** the trade-dependent achievements, and a RetroAchievements
   provider.
 - **[NULL_CRASHES_PLAN.md](NULL_CRASHES_PLAN.md):** the crash class that keeps
@@ -675,15 +678,43 @@ bridge functions in game types in `include/link.h`, the way
 - `LinkVSync()` (line 2094) becomes the pump. It already runs once per frame from
   `VBlankIntr()` (`src/main.c:452`) whenever `gWirelessCommType == 0` and
   `gLinkVSyncDisabled` is clear, which is exactly the cable case.
-- Drive `gLink.state` from UDS connection status instead of the SIO handshake:
-  `LINK_STATE_HANDSHAKE` completes when `total_nodes` matches and holds steady
-  for a few frames, then goes straight to `LINK_STATE_CONN_ESTABLISHED`.
-  `LINK_STATE_INIT_TIMER` exists only to start timer 3, which has no meaning
-  here.
+- Carry the SIO handshake over UDS; do not replace it with the connection
+  status. `LINK_STATE_HANDSHAKE` completes when the master's `MASTER_HANDSHAKE`
+  word is on the wire and `total_nodes` has held steady for a frame, which is
+  `DoHandshake()`'s own barrier, and then runs through `LINK_STATE_INIT_TIMER`
+  as hardware does. `InitTimer()` writes timer registers that only the e-reader
+  reads, so it is inert here.
+
+  **Do not shortcut this, and this was got wrong first time.** Declaring the
+  link established as soon as two nodes appeared looked harmless, because
+  `LINK_STATE_INIT_TIMER` really does exist only to start timer 3. But the
+  state also says WHEN the link went live, and the Cable Club reads it: every
+  cancel in the link-up chain is guarded by `IsLinkConnectionEstablished() ==
+  FALSE`, so B Button: Cancel died the moment two consoles saw each other, and
+  `Task_LinkupConfirmWhenReady` has no timeout to escape through. The two
+  consoles also went live on different frames, so their link callbacks started
+  out of step.
 - Reproduce `DoSend`/`DoRecv` at whole-command granularity rather than one u16 at
   a time: pop one entry from `gLink.sendQueue`, push each peer's command into
   `gLink.recvQueue`. Keep the `receivedNothing` and `queueFull` bookkeeping,
   since the layers above read both.
+- **A cable delivers each command exactly once, in order, and the layers above
+  have no way to repair a transport that does not.** `LINKCMD_CONT_BLOCK`
+  carries no sequence number, just 14 bytes appended at `sBlockRecv[i].pos`, so
+  a dropped command leaves a block that never completes and a repeated one
+  fills it with rubbish that fails its magic check. Keep a ring for each peer
+  indexed by the sender's frame, consume a slot as the game takes it, and test
+  `peers_ready` for the exact frame owed rather than "has reached".
+
+  Keeping only the newest packet per peer looked sufficient and is not. A peer
+  may legitimately lead by a frame, so two of its packets land between two
+  pumps: the older was lost and the newer was handed up twice. A client logged
+  `rx 621` over 600 frames and a host `ok=576` from `rx 568`, which is the whole
+  bug in two numbers.
+- **`GetMultiplayerId()` reads `SIO_MULTI_CNT->id`, not `gLink.localId`.** The
+  hardware fills that field and `SerialCB` mirrors it into `gLink`; this port
+  has no serial interrupt, so the pump must write the register itself or all
+  147 call sites answer 0 and both sides of a trade take the player-0 branch.
 - `EnableSerial`, `DisableSerial`, `StartTransfer`, `InitTimer`, `StopTimer` and
   `CheckMasterOrSlave` become UDS equivalents or no-ops. `SerialCB` and
   `Timer3Intr` keep their signatures, because `gIntrTable` still references them,
