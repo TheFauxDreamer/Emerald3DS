@@ -239,6 +239,19 @@ static int      sLoggedIds = -1;
 static unsigned long long sWaitSum, sWaitWorst;
 static unsigned sWaitN, sDeadlineHits;
 
+// The same ticks again, for the display divider rather than for the report.
+//
+// The divider in 3ds/host/main.c measures the game's frame as the span between
+// two of its hooks and calls all of it work. The link's wait is inside that
+// span and is not work: it is this console asleep, waiting on a peer. Counted
+// as work it pushes the estimate past the threshold and halves the display on a
+// scene that was never expensive, which then costs the pair two waits instead
+// of one and makes the peer later still.
+//
+// Read and cleared by the divider each frame, the way CtrVideoLastWaitTicks()
+// serves the same purpose for the wait inside C3D_FrameBegin.
+static unsigned long long sBlockedTicks;
+
 // The receive side. A short, repeated or dropped packet is invisible
 // otherwise: all three look exactly like "the peer said nothing".
 //
@@ -1231,6 +1244,7 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
 
             sWaitSum += spent;
             sWaitN++;
+            sBlockedTicks += spent;
             if (spent > sWaitWorst)
                 sWaitWorst = spent;
         }
@@ -1293,6 +1307,16 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
 // of a trade took the player-0 branch.
 //
 // Logged when it changes, not every frame, the same way the roster line is.
+// How long this frame's exchange spent asleep waiting on a peer. Read and
+// cleared, so each frame's figure is counted once.
+unsigned long long Ctr3dsLinkTakeBlockedTicks(void)
+{
+    unsigned long long t = sBlockedTicks;
+
+    sBlockedTicks = 0;
+    return t;
+}
+
 void Ctr3dsLinkLogIds(int local, int sio, int isMaster)
 {
     int packed = (local & 3) | ((sio & 3) << 2) | ((isMaster ? 1 : 0) << 4);
