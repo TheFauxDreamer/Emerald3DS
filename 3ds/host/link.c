@@ -94,12 +94,32 @@
 // Adding it changed the packet size, so two consoles must run the same build.
 // A mismatched pair reads as a short packet and shows up as `short` in the
 // period line rather than as silence.
+//
+// Every packet also repeats the commands before it, and that repetition is
+// what makes the transport reliable rather than merely ordered.
+//
+// A cable cannot lose a transfer. UDS can, and a lockstep that only ever sends
+// its current frame cannot recover from one: the peer that needed the lost
+// frame waits for a number the sender has already moved past, and the sender
+// waits for the frame the peer can no longer produce. Both sides then sit
+// there until the lag tolerance closes the link. A console test deadlocked
+// exactly that way, the host stranded at frame 27 wanting 26 while the client
+// sat at 25 wanting 24.
+//
+// Carrying the last LINK_HISTORY commands repairs a gap with no acknowledgement
+// and no retransmit request: the next packet through already holds what was
+// lost. The lockstep keeps the two within about two frames of each other, so
+// this depth is many times what a healthy pair needs, and it is the margin that
+// a console dropping a third of its frames actually spends.
+#define LINK_HISTORY 8
+
 typedef struct {
-    uint32_t frame;
+    uint32_t frame;                   // the newest command here
     uint16_t hs;                      // handshake word, on every packet
     uint8_t  phase;                   // PHASE_HANDSHAKE or PHASE_LIVE
-    uint8_t  pad;
-    uint8_t  cmd[CTR_LINK_CMD_BYTES];
+    uint8_t  count;                   // commands present, 0..LINK_HISTORY
+    // [0] is `frame`, [1] is frame - 1, and so on.
+    uint8_t  cmd[LINK_HISTORY][CTR_LINK_CMD_BYTES];
 } LinkPacket;
 
 enum { PHASE_HANDSHAKE = 0, PHASE_LIVE = 1 };
@@ -167,8 +187,27 @@ static uint32_t sFrame;                                  // our own counter
 // absorbed.
 #define LINK_RING 16
 
-static LinkPacket sRing[CTR_LINK_MAX_PLAYERS][LINK_RING];
-static uint8_t    sRingFull[CTR_LINK_MAX_PLAYERS][LINK_RING];
+static uint8_t  sRingFull[CTR_LINK_MAX_PLAYERS][LINK_RING];
+static uint32_t sRingFrame[CTR_LINK_MAX_PLAYERS][LINK_RING];
+static uint8_t  sRingCmd[CTR_LINK_MAX_PLAYERS][LINK_RING][CTR_LINK_CMD_BYTES];
+
+// The send side: what this console has said, so it can say it again.
+//
+// sHeld is the command for the frame in flight. It latches on the first
+// transmission and does not change while that frame is retried, because a frame
+// number has to mean one command. The pump builds each send from the head of
+// gLink.sendQueue and that head changes when the queue was empty on the first
+// attempt and filled before the second, so without the latch the peer could
+// take the empty command for a frame while the pump popped the real one.
+// Ctr3dsLinkExchange() reports through `tookCmd` whether the caller's command
+// was the one that went out, and the pump pops only then.
+static uint8_t sHeld[CTR_LINK_CMD_BYTES];
+static int     sHeldValid;
+
+// The last LINK_HISTORY commands, for the repetition that repairs a peer's gap.
+static uint8_t  sSentCmd[LINK_HISTORY][CTR_LINK_CMD_BYTES];
+static uint32_t sSentFrame[LINK_HISTORY];
+static uint8_t  sSentValid[LINK_HISTORY];
 
 // The newest frame each peer has sent, kept for the report alone. The ring
 // cannot answer this: a slot is cleared as the game takes it, so a healthy peer
@@ -312,7 +351,14 @@ static void reset_frames(void)
 {
     sFrame = 0;
     memset(sRingFull, 0, sizeof(sRingFull));
-    memset(sRing, 0, sizeof(sRing));
+    memset(sRingFrame, 0, sizeof(sRingFrame));
+    memset(sRingCmd, 0, sizeof(sRingCmd));
+
+    sHeldValid = 0;
+    memset(sHeld, 0, sizeof(sHeld));
+    memset(sSentValid, 0, sizeof(sSentValid));
+    memset(sSentFrame, 0, sizeof(sSentFrame));
+    memset(sSentCmd, 0, sizeof(sSentCmd));
     memset(sPeerSeen, 0, sizeof(sPeerSeen));
     memset(sPeerNewest, 0, sizeof(sPeerNewest));
 
@@ -863,47 +909,62 @@ static int drain(void)
             if (pkt.hs != 0)
                 sHsFrom[p] = pkt.hs;
 
+            (void)ahead;
+
             if (pkt.phase != PHASE_LIVE) {
                 n++;
                 got = 0;
                 continue;         // no command to file
             }
 
-            if (ahead < 0) {
-                // Already delivered. This is the peer repeating a frame it had
-                // sent before we took it, which its own retry does.
-                sRxStale++;
-            } else if (ahead >= LINK_RING) {
-                // The peer is a whole ring ahead of what we still owe. Filing
-                // it would land on an unread slot and corrupt the block being
-                // carried, so say so and let the lag path close the link.
-                //
-                // The lockstep makes this unreachable: a peer cannot pass our
-                // frame plus one, because its own wait needs a tag we have not
-                // sent. Reaching it means the lockstep itself has broken, and
-                // that is worth one loud line.
-                if (sRxLost++ == 0)
-                    CtrLog("emerald3ds: link ring lapped, p%d sent %lu while "
-                           "we still owe %lu\n",
-                           p, (unsigned long)pkt.frame,
-                           (unsigned long)want);
-            } else {
-                // The newest word for a frame wins.
-                //
-                // A retry may carry a different command from the attempt
-                // before it: the pump builds each send from the head of
-                // gLink.sendQueue, and the head changes when the queue was
-                // empty on the first attempt and filled before the second. The
-                // pump pops that head when the exchange finally succeeds, so
-                // keeping the FIRST packet for a frame would deliver the empty
-                // command and drop the real one.
-                unsigned slot = pkt.frame % LINK_RING;
+            // File the packet's newest command and every repeat behind it. The
+            // repeats are the repair: the one the peer still owes us is very
+            // often in there rather than in the packet that went missing.
+            {
+                unsigned count = pkt.count;
+                unsigned i;
 
-                if (sRingFull[p][slot] && sRing[p][slot].frame == pkt.frame)
-                    sRxStale++;
+                if (count > LINK_HISTORY)
+                    count = LINK_HISTORY;     // it came off the wire
 
-                sRing[p][slot] = pkt;
-                sRingFull[p][slot] = 1;
+                for (i = 0; i < count; i++) {
+                    uint32_t f;
+                    unsigned slot;
+
+                    if (pkt.frame < i)
+                        break;                // before the session began
+                    f = pkt.frame - i;
+
+                    if ((int32_t)(f - want) < 0) {
+                        // Already handed up. Every packet repeats these, so
+                        // count them once per packet, not once per entry.
+                        if (i == 0)
+                            sRxStale++;
+                        break;                // and everything older too
+                    }
+                    if ((int32_t)(f - want) >= LINK_RING) {
+                        // Further ahead than the ring can hold while we still
+                        // owe `want`. The lockstep keeps a peer within about
+                        // two frames, so this means the lockstep itself has
+                        // broken, and it is worth one loud line.
+                        if (sRxLost++ == 0)
+                            CtrLog("emerald3ds: link ring lapped, p%d sent %lu "
+                                   "while we still owe %lu\n",
+                                   p, (unsigned long)f, (unsigned long)want);
+                        continue;
+                    }
+
+                    slot = f % LINK_RING;
+                    if (sRingFull[p][slot] && sRingFrame[p][slot] == f) {
+                        if (i == 0)
+                            sRxStale++;
+                        continue;             // already have it
+                    }
+
+                    memcpy(sRingCmd[p][slot], pkt.cmd[i], CTR_LINK_CMD_BYTES);
+                    sRingFrame[p][slot] = f;
+                    sRingFull[p][slot] = 1;
+                }
             }
         }
         n++;
@@ -925,7 +986,7 @@ static int peers_ready(uint32_t target, int players, int local)
     for (int p = 0; p < players; p++) {
         if (p == local)
             continue;
-        if (!sRingFull[p][slot] || sRing[p][slot].frame != target)
+        if (!sRingFull[p][slot] || sRingFrame[p][slot] != target)
             return 0;
     }
 
@@ -956,6 +1017,10 @@ static long peer_behind(int p)
 // which is what the lockstep is for.
 #define LINK_LAG_TOLERANCE_MS 3000
 #define LINK_LAG_MIN_MISSES   2
+
+// One report partway through a stall, well before the tolerance gives up, so a
+// log shows what the link was waiting for while there was still a link.
+#define LINK_STALL_REPORT_MISSES 60
 
 // One line for each run of missed frames, not one for each miss. A miss storm
 // must not fill the log, and the run length is what tells a late peer from a
@@ -1039,6 +1104,30 @@ void Ctr3dsLinkNoteMiss(void)
 
     if (sMissRun < 0xFFFFFFFFu)
         sMissRun++;
+
+    // A stall that has lasted a second is not jitter. Say what this console is
+    // waiting for and what the peer has actually sent, because "peer late"
+    // alone cannot tell a slow peer from a gap that will never be filled.
+    //
+    // This is the line that would have named the deadlock: the host wanted
+    // frame 26 from a peer whose newest was 25, while the peer wanted 24 from
+    // a console that had moved to 27 and was no longer repeating it.
+    if (sMissRun == LINK_STALL_REPORT_MISSES) {
+        CtrLinkStatus st;
+        char buf[96];
+        int n = 0;
+
+        Ctr3dsLinkGetStatus(&st);
+        for (int p = 0; p < st.playerCount && n < (int)sizeof buf - 24; p++) {
+            if (p == st.localId)
+                continue;
+            n += snprintf(buf + n, sizeof buf - (size_t)n,
+                          " p%d newest=%ld", p,
+                          sPeerSeen[p] ? (long)sPeerNewest[p] : -1L);
+        }
+        CtrLog("emerald3ds: link stalled %u frames, we want %lu,%s\n",
+               sMissRun, (unsigned long)(sFrame ? sFrame - 1 : 0), buf);
+    }
 
     stats_tick();
 }
@@ -1137,7 +1226,30 @@ int Ctr3dsLinkHandshake(int asMaster)
     return 1;
 }
 
-int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
+// Copy this console's last commands into a packet, newest first, stopping at
+// the first frame it no longer holds. Returns how many it wrote.
+static int fill_history(uint8_t dst[LINK_HISTORY][CTR_LINK_CMD_BYTES],
+                        uint32_t newest)
+{
+    int i;
+
+    for (i = 0; i < LINK_HISTORY; i++) {
+        uint32_t f;
+        unsigned h;
+
+        if (newest < (uint32_t)i)
+            break;
+        f = newest - (uint32_t)i;
+        h = f % LINK_HISTORY;
+        if (!sSentValid[h] || sSentFrame[h] != f)
+            break;
+        memcpy(dst[i], sSentCmd[h], CTR_LINK_CMD_BYTES);
+    }
+
+    return i;
+}
+
+int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd)
 {
     CtrLinkStatus st;
     LinkPacket out;
@@ -1146,8 +1258,11 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     uint32_t target;
     int players, local;
     int ready;
+    int took = 0;
 
     memset(recvCmds, 0, CTR_LINK_MAX_PLAYERS * CTR_LINK_CMD_BYTES);
+    if (tookCmd != NULL)
+        *tookCmd = 0;
 
     // The worker owns UDS while a pairing call runs, and a pairing call means
     // there is no link to exchange over anyway.
@@ -1167,11 +1282,30 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     players = st.playerCount;
     local   = st.localId;
 
+    // Latch the command for this frame. A frame number has to mean exactly one
+    // command, and the caller's offer can change between a failed attempt and
+    // its retry, so only the first offer for a frame is taken. `tookCmd` tells
+    // the caller which happened, and the pump pops its send queue only when its
+    // command was the one that went out.
+    if (!sHeldValid) {
+        unsigned h = sFrame % LINK_HISTORY;
+
+        memcpy(sHeld, sendCmd, CTR_LINK_CMD_BYTES);
+        sHeldValid = 1;
+        took = 1;
+
+        memcpy(sSentCmd[h], sendCmd, CTR_LINK_CMD_BYTES);
+        sSentFrame[h] = sFrame;
+        sSentValid[h] = 1;
+    }
+    if (tookCmd != NULL)
+        *tookCmd = took;
+
+    memset(&out, 0, sizeof out);
     out.frame = sFrame;
     out.hs = sHsOut;
     out.phase = PHASE_LIVE;
-    out.pad = 0;
-    memcpy(out.cmd, sendCmd, CTR_LINK_CMD_BYTES);
+    out.count = (uint8_t)fill_history(out.cmd, sFrame);
 
     if (R_FAILED(udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL,
                            UDS_SENDFLAG_Default, &out, sizeof(out)))) {
@@ -1191,8 +1325,9 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     // The peer's first command reached the game twice.
     if (sFrame == 0) {
         drain();
-        memcpy(dst + local * CTR_LINK_CMD_BYTES, sendCmd, CTR_LINK_CMD_BYTES);
+        memcpy(dst + local * CTR_LINK_CMD_BYTES, sHeld, CTR_LINK_CMD_BYTES);
         sFrame++;
+        sHeldValid = 0;
         return 1;
     }
 
@@ -1265,11 +1400,12 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
         for (int p = 0; p < players; p++) {
             if (p == local) {
                 // Our own command comes back to us on a cable, off the shared
-                // bus. There is no bus here, so echo it.
-                memcpy(dst + p * CTR_LINK_CMD_BYTES, sendCmd,
+                // bus. There is no bus here, so echo it: the latched one, which
+                // is what actually went out.
+                memcpy(dst + p * CTR_LINK_CMD_BYTES, sHeld,
                        CTR_LINK_CMD_BYTES);
             } else {
-                memcpy(dst + p * CTR_LINK_CMD_BYTES, sRing[p][slot].cmd,
+                memcpy(dst + p * CTR_LINK_CMD_BYTES, sRingCmd[p][slot],
                        CTR_LINK_CMD_BYTES);
                 sRingFull[p][slot] = 0;
             }
@@ -1288,8 +1424,10 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds)
     //
     // Holding the counter back makes a stalled peer stall us too, which is the
     // point: the pair runs at the slower console's rate instead of drifting.
-    if (ready)
+    if (ready) {
         sFrame++;
+        sHeldValid = 0;     // the next frame may take a new command
+    }
 
     return ready;
 }
