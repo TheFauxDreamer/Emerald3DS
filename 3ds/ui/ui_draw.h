@@ -55,6 +55,17 @@ void UiRect(int x, int y, int w, int h, u16 color);   // 1px outline
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal565,
                     int transparent0);
 
+// A run of pixels the caller has already converted to RGB565, clipped to the
+// screen. For anything that composes its own colours instead of blitting GBA
+// art.
+void UiBlitRow(int x, int y, const u16 *src, int w);
+
+// The same, with a tilemap entry's flip bits. A GBA background map flips tiles
+// rather than storing four copies of each corner, so anything drawn from a real
+// tilemap needs this. No flip costs nothing: it calls the plain blit above.
+void UiBlit4bppTileFlip(int x, int y, const u8 *tile, const u16 *pal565,
+                        int transparent0, int hflip, int vflip);
+
 // One 8x8 8bpp tile, 64 bytes. `pal565` must have 256 entries, not 16. An 8bpp
 // GBA background has no palette bank, so each byte is an absolute index into
 // the BG palette. See the note above the definition.

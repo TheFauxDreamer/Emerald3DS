@@ -18,8 +18,14 @@
 #include "../bridge.h"
 
 // Draws in the content area of the EXTRA window. The caller draws the frame and
-// the pager, as it does for every other page.
+// the pager, as it does for every other page -- unless UiLinkPageFullBleed()
+// says otherwise.
 void UiLinkPageDraw(void);
+
+// TRUE while the trainer card view is up. A card is 240x160, a whole GBA
+// screen, and the window frame plus the pager do not leave room for one, so the
+// page takes the whole content area and draws its own way back.
+int UiLinkPageFullBleed(void);
 void UiLinkPageTouch(const CtrTouchState *t);
 
 // The panel shows the wireless state, which changes with no touch: a peer joins

@@ -678,6 +678,15 @@ static void DrawPager(void)
 
 void UiExtraDraw(void)
 {
+    // A page can ask for the whole content area. LINK does while its trainer
+    // card view is up: a card is a whole GBA screen and does not fit inside the
+    // frame with the pager beside it. The page then draws its own way back.
+    if (sPage == PAGE_LINK && UiLinkPageFullBleed())
+    {
+        UiLinkPageDraw();
+        return;
+    }
+
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
     if (sPage == 0)
@@ -892,6 +901,14 @@ void UiExtraTouch(const CtrTouchState *t)
 {
     if (!t->justReleased)
         return;
+
+    // Not while a page has the whole screen: the pager is not drawn then, and a
+    // control under where it would be must not be shadowed by it.
+    if (sPage == PAGE_LINK && UiLinkPageFullBleed())
+    {
+        UiLinkPageTouch(t);
+        return;
+    }
 
     // The pager is live on every page. Test it before the page's own controls,
     // so nothing can be under it.
