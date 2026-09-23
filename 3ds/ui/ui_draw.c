@@ -6,6 +6,7 @@
 #include "item_icon.h"
 #include "graphics.h"                 // gStatusGfx_Icons, gStatusPal_Icons
 #include "data.h"                     // gMonFrontPicTable, gMonPaletteTable
+#include "constants/trainers.h"        // TRAINER_PIC_*
 #include "battle.h"                   // struct DisableStruct
 #include "battle_interface.h"         // GetHPBarLevel
 #include "battle_anim.h"              // ItemIdToBallId
@@ -633,6 +634,43 @@ void UiMonPic(int x, int y, u16 species)
 
     // Frame 0 only. The tiles are in row order, so the first 64 are the top
     // 64x64 of the sheet. That is the still pose for the animated species too.
+    for (int t = 0; t < 64; t++)
+        UiBlit4bppTile(x + (t % 8) * 8, y + (t / 8) * 8, pic + t * 32, pal, TRUE);
+}
+
+// A trainer's front sprite, 64x64, the game's own art.
+//
+// The same shape as UiMonPic: 64 tiles in row order, so the first 64 are the
+// whole pose. Cached on the pic id, because the trainer card draws one and
+// keeps it there.
+//
+// `picId` is a TRAINER_PIC_* constant. TRAINER_PIC_RS_MAY is the last one the
+// tables define, so anything past it would index off the end.
+void UiTrainerPic(int x, int y, u16 picId)
+{
+    static u8  pic[TRAINER_PIC_SIZE];
+    static u16 pal[16];
+    static u16 cachedPic = 0xFFFF;
+
+    if (picId > TRAINER_PIC_RS_MAY)
+        return;
+
+    if (cachedPic != picId)
+    {
+        u16 gbaPal[16];
+
+        // Check both destinations against the size in the data, as UiMonPic
+        // does. Do not assume the tables agree with the buffers.
+        if (GetDecompressedDataSize(gTrainerFrontPicTable[picId].data) > sizeof(pic)
+         || GetDecompressedDataSize(gTrainerFrontPicPaletteTable[picId].data) > sizeof(gbaPal))
+            return;
+
+        LZDecompressWram(gTrainerFrontPicTable[picId].data, pic);
+        LZDecompressWram(gTrainerFrontPicPaletteTable[picId].data, gbaPal);
+        UiLoadPal(pal, gbaPal, 16);
+        cachedPic = picId;
+    }
+
     for (int t = 0; t < 64; t++)
         UiBlit4bppTile(x + (t % 8) * 8, y + (t / 8) * 8, pic + t * 32, pal, TRUE);
 }
