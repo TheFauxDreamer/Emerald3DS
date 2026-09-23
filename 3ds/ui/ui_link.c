@@ -241,10 +241,12 @@ static void DrawConnected(const CtrLinkStatus *st)
            UI_COL_DIM, UiThemeShadow());
     UiNum(ROW_X + 70, LIST_Y + 24, st->playerCount, UiThemeText(), UiThemeShadow());
 
+    // One line for both buttons below. Each state names the button it refuses
+    // and why, because a dim button with no reason reads as a broken one.
     UiText(ROW_X, LIST_Y + 48,
            UiAscii(label,
                    live                   ? "In a link. Cannot disconnect."
-                   : st->playerCount > 1  ? "Go to the Cable Club."
+                   : st->playerCount > 1  ? "Cards arrive at the Cable Club."
                                           : "Waiting for a player...",
                    sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -254,7 +256,8 @@ static void DrawConnected(const CtrLinkStatus *st)
     DrawButton(STOP_X, STOP_Y, STOP_W, "DISCONNECT",
                live ? UI_COL_DIM : UI_COL_ACCENT);
 
-    // The cards arrive at the end of the link-up, so this is dim until they do.
+    // The cards arrive at the end of the link-up, so this is dim until they
+    // do, and the line above says where they come from.
     DrawButton(CARDS_X, STOP_Y, CARDS_W, "TRAINER CARDS",
                CardsReady() ? UiThemeText() : UI_COL_DIM);
 }
