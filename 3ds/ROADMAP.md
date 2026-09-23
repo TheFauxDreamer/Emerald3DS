@@ -61,28 +61,38 @@ The small ones:
   (`3ds/host/main.c`) exists. `ppu_try_core()` now says which of the two
   refusals happened, if it is ever worth another look. ZL and ZR cannot be
   tested there.
-- **Save flushes stall a link.** `CTR_SAVE_QUIET_MS` (`3ds/host/save.c:36`) is
-  100 ms and a link save writes one sector every 6 frames, about 100 ms apart,
-  so the debounce expires between nearly every sector and each one writes the
-  whole 128 KB save to the card at 136 ms a time. A trade therefore carries
-  roughly 1.8 seconds of stalls and the matching SD wear. The lag tolerance now
-  rides over it, so nothing fails, but raising the quiet time above the
-  inter-sector gap would collapse the writes into one. `CtrSaveCommit` forces an
-  immediate write at the real save points either way.
+- **Save flushes stall a link: fixed.** `CTR_SAVE_QUIET_MS`
+  (`3ds/host/save.c`) is a second now, above the gap between a link save's
+  sectors, so a trade's writes collapse into one instead of rewriting the whole
+  128 KB about eight times at 130 ms each. `CtrSaveCommit` still forces an
+  immediate write at the real save points, so nothing waits on the debounce for
+  durability. A console log before the change caught the eight stalls on both
+  consoles.
 - **MAP extras not built:** the city zoom, the indoor icon blink and the
   fly-destination icons (Part B, stage 4).
-- **Only if core 0 needs time back.** None of these is necessary at the
-  measured numbers (cheatsheet section 7):
-  - Upload only the dirty 8-row bands of the bottom screen. Any 8-row band is
-    contiguous in the stage and in the texture. The estimate is an upload of
-    about 1.0 ms for a party step and 0.4 ms for a sparkle step, against about
-    1.6 ms for the whole screen.
+- **Bottom screen on core 0: done, and it was necessary after all.** An Old 3DS
+  was missing 190 to 206 VBlanks in every 600 in game. It is 1 to 9 now. What
+  landed: the UI paints straight into the 512-wide linear stage, so the 2.0 ms
+  copy is gone; the upload carries only the dirty rows; the title blink and
+  five tabs of six stopped taking a full repaint they never read; and the
+  window frame, tile blit and glyph loops got cheaper. See the cheatsheet,
+  sections 2 and 7.
+- **What is left of that list.** Neither is needed at the measured numbers:
   - Start the bottom transfer asynchronously, and wait for it before
     `C3D_FrameBegin`.
-  - Paint straight into the 512-wide linear stage. That removes the copy,
-    measured at 0.4 to 1.1 ms mean and 2.1 ms worst.
   - Trim `ppu.snap`, the one part of the rasterizer's cost still on core 0
-    (about 0.7 ms on the console).
+    (about 0.7 ms on the console). It does not exist on an Old 3DS, which
+    points the rasterizer at live memory instead.
+- **The Old 3DS title screen still stutters, and it is the rasteriser.** The
+  bottom screen is no longer involved: `paint.blank` is a few hundred
+  microseconds and the blink repaints its own rect. The log shows
+  `slow scene 16414 us ... affobj=11` and `prof ppu ... worst 23194 us` with
+  387 of 600 frames late, against 11.4 ms and 1 to 9 late in game. Eleven
+  affine sprites on one scene is what costs it: `ppu.c`'s affine sprite loop is
+  the only hot path in that file with no span batching, no transparent-row skip
+  and a per-pixel `objTileOffset`. That is the next measurement, and
+  `PPU_PROFILE` in `rp2350/ppu.c` already has the per-pass timers written; the
+  3DS build just does not define it.
 
 ---
 
