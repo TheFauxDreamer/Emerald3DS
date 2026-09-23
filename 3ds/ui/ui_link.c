@@ -21,6 +21,7 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "ui_card.h"
 #include "ui_link.h"
 
 #define BTN_H        30
@@ -39,6 +40,32 @@
 #define STOP_X       16
 #define STOP_W       130
 #define STOP_Y       150
+
+#define CARDS_X      162
+#define CARDS_W      130
+
+// ---- the card view ----------------------------------------------------------
+//
+// Both trainer cards, from the data the link-up already exchanged. A card is a
+// whole GBA screen, 240x160, and faithful tile art needs an integer scale, so
+// the one being read is drawn at 1:1 and the other is a 1:4 thumbnail beside
+// it. That does not fit inside the EXTRA window and its pager, so while this
+// view is up the page takes the whole content area and gives the pager back on
+// BACK. See UiLinkPageFullBleed.
+#define CV_CARD_X    4
+#define CV_CARD_Y    16
+#define CV_THUMB_X   252
+#define CV_THUMB_Y0  16
+#define CV_THUMB_DY  62
+#define CV_LABEL_DY  (UI_CARD_THUMB_H + 2)
+#define CV_BACK_X    252
+#define CV_BACK_Y    150
+#define CV_BACK_W    60
+#define CV_BACK_H    22
+
+static int sCardOpen;
+static int sCardWho;     // the player whose card is at 1:1
+static int sCardBack;    // the profile side
 
 static void DrawButton(int x, int y, int w, const char *text, u16 fg)
 {
@@ -97,6 +124,110 @@ static int LinkSessionLive(void)
     return IsLinkConnectionEstablished() || gReceivedRemoteLinkPlayers;
 }
 
+// Who the two thumbnails are. `slot` 0 is the partner, 1 is this console.
+//
+// With two players the partner is the other id, which is the game's own idiom
+// (gTrainerCards[GetMultiplayerId() ^ 1], src/union_room.c). With more, the
+// first id that is not ours stands for them; the view shows one partner, not
+// a roster.
+static int CardSlotId(int slot)
+{
+    int local = Ctr3dsLinkLocalId();
+
+    if (slot != 0)
+        return local;
+
+    for (int i = 0; i < CTR_LINK_MAX_PLAYERS; i++)
+        if (i != local)
+            return i;
+
+    return local;
+}
+
+// Is there a pair of cards to look at? The partner's is the one that can be
+// missing: it arrives at the end of the link-up, after the link is already up.
+static int CardsReady(void)
+{
+    return UiCardAvailable(CardSlotId(0)) && UiCardAvailable(CardSlotId(1));
+}
+
+static void DrawThumb(int slot, int y)
+{
+    int id = CardSlotId(slot);
+    u8 label[24];
+    int active = (id == sCardWho);
+
+    UiCardThumb(CV_THUMB_X, y, id);
+    UiRect(CV_THUMB_X - 1, y - 1, UI_CARD_THUMB_W + 2, UI_CARD_THUMB_H + 2,
+           active ? UI_COL_ACCENT : UI_COL_DIM);
+
+    UiAscii(label, (slot == 0) ? "THEM" : "YOU", sizeof(label));
+    UiTextSmall(CV_THUMB_X + (UI_CARD_THUMB_W - UiTextSmallWidth(label)) / 2,
+                y + CV_LABEL_DY, label,
+                active ? UI_COL_ACCENT : UI_COL_DIM, UiThemeShadow());
+}
+
+static void DrawCardView(void)
+{
+    u8 label[24];
+
+    // No window frame: the card is the panel, and it is the size of a whole
+    // GBA screen.
+    UiClear(UI_COL_BG);
+
+    UiCardDraw(CV_CARD_X, CV_CARD_Y, sCardWho, sCardBack);
+
+    DrawThumb(0, CV_THUMB_Y0);
+    DrawThumb(1, CV_THUMB_Y0 + CV_THUMB_DY);
+
+    UiRect(CV_BACK_X, CV_BACK_Y, CV_BACK_W, CV_BACK_H, UI_COL_DIM);
+    UiAscii(label, "BACK", sizeof(label));
+    UiText(CV_BACK_X + (CV_BACK_W - UiTextWidth(label)) / 2,
+           CV_BACK_Y + (CV_BACK_H - UI_GLYPH_H) / 2,
+           label, UiThemeText(), UiThemeShadow());
+
+    UiAscii(label, "tap the card to turn it", sizeof(label));
+    UiTextSmall(CV_THUMB_X - 4 - UiTextSmallWidth(label), CV_BACK_Y + 4, label,
+                UI_COL_DIM, UiThemeShadow());
+}
+
+static int TouchCardView(const CtrTouchState *t)
+{
+    if (UiHit(t, CV_BACK_X, CV_BACK_Y, CV_BACK_W, CV_BACK_H))
+    {
+        sCardOpen = 0;
+        UiMarkDirty();
+        return 1;
+    }
+
+    for (int slot = 0; slot < 2; slot++)
+    {
+        int y = CV_THUMB_Y0 + slot * CV_THUMB_DY;
+
+        if (UiHit(t, CV_THUMB_X, y, UI_CARD_THUMB_W, UI_CARD_THUMB_H))
+        {
+            int id = CardSlotId(slot);
+
+            if (id != sCardWho)
+            {
+                sCardWho = id;
+                sCardBack = 0;      // a different card starts at its front
+                UiMarkDirty();
+            }
+            return 1;
+        }
+    }
+
+    if (UiHit(t, CV_CARD_X, CV_CARD_Y, UI_CARD_W, UI_CARD_H))
+    {
+        sCardBack = !sCardBack;
+        UiMarkDirty();
+        return 1;
+    }
+
+    return 1;   // the view owns every touch while it is up
+}
+
 static void DrawConnected(const CtrLinkStatus *st)
 {
     u8 label[40];
@@ -122,12 +253,35 @@ static void DrawConnected(const CtrLinkStatus *st)
     // it; one that is visibly refused, with the line above saying why, does not.
     DrawButton(STOP_X, STOP_Y, STOP_W, "DISCONNECT",
                live ? UI_COL_DIM : UI_COL_ACCENT);
+
+    // The cards arrive at the end of the link-up, so this is dim until they do.
+    DrawButton(CARDS_X, STOP_Y, CARDS_W, "TRAINER CARDS",
+               CardsReady() ? UiThemeText() : UI_COL_DIM);
+}
+
+// While the card view is up the page needs the whole content area: a card is
+// 240x160 and the window frame plus the pager do not leave room for it.
+// UiExtraDraw asks before it draws either.
+int UiLinkPageFullBleed(void)
+{
+    return sCardOpen;
 }
 
 void UiLinkPageDraw(void)
 {
     CtrLinkStatus st;
     u8 label[40];
+
+    // It closes itself if the link goes away under it, so a dropped peer
+    // cannot leave a card on screen with no link behind it.
+    if (sCardOpen && !CardsReady())
+        sCardOpen = 0;
+
+    if (sCardOpen)
+    {
+        DrawCardView();
+        return;
+    }
 
     Ctr3dsLinkGetStatus(&st);
 
@@ -174,6 +328,14 @@ void UiLinkPageTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
+    // The card view owns the screen while it is up, including the area the
+    // pager would be in.
+    if (sCardOpen)
+    {
+        TouchCardView(t);
+        return;
+    }
+
     // The worker owns the wireless while a pairing call runs. link.c drops a
     // second request anyway; refusing here keeps the panel honest about it.
     if (Ctr3dsLinkBusy())
@@ -187,6 +349,15 @@ void UiLinkPageTouch(const CtrTouchState *t)
         // why; this is what makes the refusal real.
         if (LinkSessionLive())
             return;
+
+        if (UiHit(t, CARDS_X, STOP_Y, CARDS_W, BTN_H) && CardsReady())
+        {
+            sCardOpen = 1;
+            sCardWho = CardSlotId(0);   // the other player first
+            sCardBack = 0;
+            UiMarkDirty();
+            return;
+        }
 
         if (UiHit(t, STOP_X, STOP_Y, STOP_W, BTN_H))
         {
@@ -246,6 +417,13 @@ u32 UiLinkPageStateKey(void)
 
     // playerCount is 1..4 when connected, so minus 1 gives 0..3. It is 0 when
     // idle, which wraps to 3, but the state bits above tell those two apart.
+    // The top four bits are the scan count while there is a list to scan, and
+    // the card view once there is not. State 7 says which: a console in a link
+    // is not scanning, so the two can never both be meaningful, and the panel
+    // would otherwise not repaint on a card change.
+    if (state == 7)
+        n = (sCardOpen << 3) | ((sCardWho & 3) << 1) | (sCardBack ? 1 : 0);
+
     return (state << 19)
          | ((u32)((st.playerCount - 1) & 3) << 22)
          | ((u32)n << 28);

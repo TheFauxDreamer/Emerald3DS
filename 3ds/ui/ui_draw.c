@@ -262,6 +262,80 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
 // into the 256-entry BG palette. The region map's tiles use values near 112,
 // because the game loads its 32 colors at BG_PLTT_ID(7). `pal` must have 256
 // entries, with the part that the art uses filled.
+// A run of pixels that the caller has already converted to RGB565.
+//
+// For anything that composes its own colours rather than blitting GBA art: the
+// trainer card's thumbnail samples a tilemap down to a quarter and hands the
+// result over a row at a time, which is one call instead of one per pixel.
+void UiBlitRow(int x, int y, const u16 *src, int w)
+{
+    u16 *dst;
+
+    if (y < 0 || y >= UI_H)
+        return;
+
+    if (x < 0) { src -= x; w += x; x = 0; }
+    if (x + w > UI_W) w = UI_W - x;
+    if (w <= 0)
+        return;
+
+    UiTouchRows(y, 1);
+
+    dst = &sFb[y * UI_STRIDE + x];
+    memcpy(dst, src, (size_t)w * sizeof(dst[0]));
+}
+
+// The same tile, with a tilemap entry's flip bits applied.
+//
+// A GBA background tilemap flips tiles rather than storing four copies of each
+// corner, and it is not optional: the trainer card's own map flips 135 of its
+// 600 tiles. Without this its frame is drawn with the corners facing the wrong
+// way.
+//
+// No flip is the common case and goes straight to the plain blit above, so a
+// caller can hand every entry to this one and pay nothing for the ones that do
+// not flip.
+void UiBlit4bppTileFlip(int x, int y, const u8 *tile, const u16 *pal,
+                        int transparent0, int hflip, int vflip)
+{
+    if (!hflip && !vflip)
+    {
+        UiBlit4bppTile(x, y, tile, pal, transparent0);
+        return;
+    }
+
+    UiTouchRows(y, 8);
+
+    for (int row = 0; row < 8; row++)
+    {
+        int py = y + row;
+        const u8 *src;
+        u16 *dst;
+
+        if (py < 0 || py >= UI_H)
+            continue;
+
+        src = tile + (vflip ? (7 - row) : row) * 4;
+        dst = &sFb[py * UI_STRIDE];
+
+        for (int col = 0; col < 8; col++)
+        {
+            int px = x + col;
+            int sx = hflip ? (7 - col) : col;
+            u32 idx;
+
+            if (px < 0 || px >= UI_W)
+                continue;
+
+            idx = (sx & 1) ? (src[sx >> 1] >> 4) : (src[sx >> 1] & 0xF);
+            if (idx == 0 && transparent0)
+                continue;
+
+            dst[px] = pal[idx];
+        }
+    }
+}
+
 void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparent0)
 {
     // The same clip outside the loop as the 4bpp path. The region map is 8bpp
