@@ -40,6 +40,35 @@ The large pieces:
   `lost 0` on every period line, `local` and `sio` agreeing in the `link ids`
   line, and `link handshake done` arriving when the host presses A rather than
   when the consoles pair.
+- **Trainer cards before the link-up.** The LINK page can only show a card once
+  the Cable Club link-up has delivered one, because that is what fills
+  `gTrainerCards` (`Task_LinkupAwaitTrainerCardData`, `src/cable_club.c`). The
+  panel now says so instead of leaving a dim button unexplained. Having the port
+  carry the card itself is deferred until the trade above runs clean, with
+  `lost 0` and `short 0` across a session, because it puts a second kind of
+  traffic on a transport that is still the suspect for every link fault. What
+  the research settled, so it is not re-derived:
+  - `sizeof(struct TrainerCard)` is exactly 100 bytes and a `LinkPacket` already
+    carries 128 in its `cmd[8][16]`. One packet, no chunking, and the 136-byte
+    size stays, so the strict size filter in `drain()` and the meaning of
+    `short` in the period line both survive.
+  - **Nothing drains the wireless while merely paired.** `drain()` is the only
+    caller of `udsPullPacket` in the repo, and it is reachable only from
+    `Ctr3dsLinkExchange` and `Ctr3dsLinkHandshake`, which `Ctr3dsLinkPump` skips
+    unless `gLink.state` is `LINK_STATE_HANDSHAKE` or
+    `LINK_STATE_CONN_ESTABLISHED`. A pre-link message needs its own receive
+    path.
+  - **It must not hang off `LinkVSync`.** `gLinkVSyncDisabled` goes TRUE when a
+    link closes, so the pump stops until the next `OpenLink()`: an exchange
+    there would work before the first trade and go silent after it.
+    `Rp2350PresentFrame()` always runs, and it runs after `VBlankIntr()` in the
+    same frame, so a "the game pumped this frame" flag gates the two apart with
+    no lag.
+  - Two traps. `phase` values 2 to 255 are inert in `drain()`, but `hs` is taken
+    off every accepted packet before phase is read, so a new packet kind must
+    send `hs = 0`. And the player name must travel beside the card, because
+    `ui_card.c` reads `gLinkPlayers[].name` rather than `card->playerName` for
+    the `ConvertInternationalString` pass.
 - **Part E:** the trade-dependent achievements, and a RetroAchievements
   provider.
 - **[NULL_CRASHES_PLAN.md](NULL_CRASHES_PLAN.md):** the crash class that keeps
