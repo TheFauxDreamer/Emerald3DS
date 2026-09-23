@@ -51,6 +51,13 @@
 #define TEXT_X0     8
 #define TEXT_Y0     8
 
+// The trainer's own picture. Its window is at tile (19, 5) and the pic sits one
+// pixel into it, from sTrainerCardWindowTemplates and sTrainerPicOffset. It is
+// 64x64 in a 72x80 window, so it is the window that has the slack, not the
+// card.
+#define PIC_X       (19 * 8 + 1)
+#define PIC_Y       (5 * 8)
+
 // Hoenn front, from PrintNameOnCardFront, PrintIdOnCard, PrintMoneyOnCard,
 // PrintPokedexOnCard and PrintTimeOnCard. The value columns are right-aligned
 // edges, not left origins.
@@ -167,6 +174,29 @@ int UiCardAvailable(int cardId)
         return 0;
 
     return gTrainerCards[cardId].trainerId == (u16)gLinkPlayers[cardId].trainerId;
+}
+
+// Which trainer the card shows.
+//
+// Outside the Union Room the GBA card's face is purely a function of the card
+// type and the gender: Brendan or May, and their Ruby and Sapphire poses for a
+// partner on those games. It is never the player's own sprite, so this is the
+// whole of it. See sTrainerPicFacilityClass and CreateTrainerCardTrainerPic
+// (src/trainer_card.c); gFacilityClassToPicIndex maps each of these four
+// classes straight to the matching TRAINER_PIC_*, so there is no table to
+// index and no bound to get wrong.
+//
+// The union-room class the card also carries is deliberately not used: it would
+// show a different trainer from the one the game's own card shows for the same
+// player.
+static u16 CardTrainerPic(const struct TrainerCard *card)
+{
+    int rs = (card->version == VERSION_RUBY || card->version == VERSION_SAPPHIRE);
+
+    if (card->gender == FEMALE)
+        return rs ? TRAINER_PIC_RS_MAY : TRAINER_PIC_MAY;
+
+    return rs ? TRAINER_PIC_RS_BRENDAN : TRAINER_PIC_BRENDAN;
 }
 
 static int CardStars(const struct TrainerCard *card)
@@ -377,9 +407,17 @@ void UiCardDraw(int x, int y, int cardId, int back)
 
     if (!back)
     {
+        // Stars first, then the picture over them. They meet: the star row runs
+        // from tile 15 and the picture's window starts at tile 19, so a fifth
+        // star lands in the window's first column. On hardware the window's
+        // content is what sits on top there, and the picture keys on index 0,
+        // so the star still shows through its transparent corner. Five stars
+        // needs every frontier symbol, which is why this is rarely seen at all.
         for (int i = 0; i < stars; i++)
             UiBlit4bppTile(x + (STAR_TX + i) * 8, y + STAR_TY * 8,
                            sTiles + STAR_TILE * 32, sPalStar, TRUE);
+
+        UiTrainerPic(x + PIC_X, y + PIC_Y, CardTrainerPic(card));
 
         DrawFront(x, y, cardId, card);
     }

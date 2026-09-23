@@ -111,6 +111,13 @@ void UiItemIcon(int x, int y, u16 itemId);
 // cursor that moves through a list costs one decompress for each mon.
 void UiMonPic(int x, int y, u16 species);
 
+// A trainer's front sprite, 64x64, the game's own art. `picId` is a
+// TRAINER_PIC_* constant, not a facility class. Cached on the id.
+#define UI_TRAINER_PIC_W 64
+#define UI_TRAINER_PIC_H 64
+
+void UiTrainerPic(int x, int y, u16 picId);
+
 // The Pokedex "caught" marker, 7x7.
 #define UI_BALL_W 7
 #define UI_BALL_H 7
