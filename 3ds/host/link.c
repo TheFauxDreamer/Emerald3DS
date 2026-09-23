@@ -1117,6 +1117,12 @@ void Ctr3dsLinkNoteMiss(void)
         char buf[96];
         int n = 0;
 
+        // Empty until something is written into it. The loop below runs zero
+        // times when the roster has dropped to this console alone, which is
+        // exactly when a stall gets reported, and printing an unset buffer put
+        // random bytes in the log.
+        buf[0] = '\0';
+
         Ctr3dsLinkGetStatus(&st);
         for (int p = 0; p < st.playerCount && n < (int)sizeof buf - 24; p++) {
             if (p == st.localId)
@@ -1126,7 +1132,8 @@ void Ctr3dsLinkNoteMiss(void)
                           sPeerSeen[p] ? (long)sPeerNewest[p] : -1L);
         }
         CtrLog("emerald3ds: link stalled %u frames, we want %lu,%s\n",
-               sMissRun, (unsigned long)(sFrame ? sFrame - 1 : 0), buf);
+               sMissRun, (unsigned long)(sFrame ? sFrame - 1 : 0),
+               (n > 0) ? buf : " no peers on the network");
     }
 
     stats_tick();

@@ -15,6 +15,7 @@
 // suggest otherwise.
 
 #include "global.h"
+#include "link.h"                     // IsLinkConnectionEstablished, gReceivedRemoteLinkPlayers
 
 #include "../bridge.h"
 #include "ui_draw.h"
@@ -79,9 +80,27 @@ static void DrawScanList(void)
     }
 }
 
+// Is the game itself in a link, rather than merely paired?
+//
+// Pairing on this panel only puts the two consoles on the same network. The
+// session starts when the host confirms at the Cable Club counter, which is
+// what moves gLink to LINK_STATE_CONN_ESTABLISHED, and it ends at CloseLink.
+// Between those two, DISCONNECT would tear the wireless out from under a trade
+// or a battle: the peer sees the link drop and shows Emerald's communication
+// error, and a trade caught between the two consoles committing can lose the
+// Pokemon. So the button is refused for exactly that window.
+//
+// Both flags, because they bracket slightly different things and either one
+// being set means a session is under way.
+static int LinkSessionLive(void)
+{
+    return IsLinkConnectionEstablished() || gReceivedRemoteLinkPlayers;
+}
+
 static void DrawConnected(const CtrLinkStatus *st)
 {
     u8 label[40];
+    int live = LinkSessionLive();
 
     UiText(ROW_X, LIST_Y,
            UiAscii(label, st->isHost ? "Hosting." : "Connected.", sizeof(label)),
@@ -92,11 +111,17 @@ static void DrawConnected(const CtrLinkStatus *st)
     UiNum(ROW_X + 70, LIST_Y + 24, st->playerCount, UiThemeText(), UiThemeShadow());
 
     UiText(ROW_X, LIST_Y + 48,
-           UiAscii(label, st->playerCount > 1 ? "Go to the Cable Club."
-                                              : "Waiting for a player...", sizeof(label)),
+           UiAscii(label,
+                   live                   ? "In a link. Finish it first."
+                   : st->playerCount > 1  ? "Go to the Cable Club."
+                                          : "Waiting for a player...",
+                   sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
-    DrawButton(STOP_X, STOP_Y, STOP_W, "DISCONNECT", UI_COL_ACCENT);
+    // Dimmed, not hidden. A button that vanishes leaves the player looking for
+    // it; one that is visibly refused, with the line above saying why, does not.
+    DrawButton(STOP_X, STOP_Y, STOP_W, "DISCONNECT",
+               live ? UI_COL_DIM : UI_COL_ACCENT);
 }
 
 void UiLinkPageDraw(void)
@@ -158,6 +183,11 @@ void UiLinkPageTouch(const CtrTouchState *t)
 
     if (st.state == CTR_LINK_HOSTING || st.state == CTR_LINK_CONNECTED)
     {
+        // Not while the game is in a link. The panel dims the button and says
+        // why; this is what makes the refusal real.
+        if (LinkSessionLive())
+            return;
+
         if (UiHit(t, STOP_X, STOP_Y, STOP_W, BTN_H))
         {
             Ctr3dsLinkStop();
@@ -193,7 +223,8 @@ void UiLinkPageTouch(const CtrTouchState *t)
     }
 }
 
-// Bits 19-21 the state, 22-23 the player count, 28-31 the number of scan
+// Bits 19-21 the state, or 7 for "the game is in a link"; 22-23 the player
+// count; 28-31 the number of scan
 // results. UiExtraStateKey() owns every other bit of the value and calls this
 // only while the LINK page shows, so no other page polls the wireless.
 u32 UiLinkPageStateKey(void)
@@ -206,9 +237,16 @@ u32 UiLinkPageStateKey(void)
     if (n > 15)
         n = 15;
 
+    // Whether the game is in a link belongs in this key too, or the panel would
+    // not repaint when a trade starts and the button has to dim. There is no
+    // spare bit in this key's allocation (see UiExtraStateKey), and CTR_LINK_*
+    // stops at 6, so 7 is free to say it. Which of HOSTING and CONNECTED it was
+    // does not matter then: the panel draws the same thing either way.
+    u32 state = LinkSessionLive() ? 7u : (u32)(st.state & 7);
+
     // playerCount is 1..4 when connected, so minus 1 gives 0..3. It is 0 when
     // idle, which wraps to 3, but the state bits above tell those two apart.
-    return ((u32)(st.state & 7) << 19)
+    return (state << 19)
          | ((u32)((st.playerCount - 1) & 3) << 22)
          | ((u32)n << 28);
 }
