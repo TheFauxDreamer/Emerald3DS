@@ -243,7 +243,7 @@ static void DrawConnected(const CtrLinkStatus *st)
 
     UiText(ROW_X, LIST_Y + 48,
            UiAscii(label,
-                   live                   ? "In a link. Finish it first."
+                   live                   ? "In a link. Cannot disconnect."
                    : st->playerCount > 1  ? "Go to the Cable Club."
                                           : "Waiting for a player...",
                    sizeof(label)),
@@ -345,11 +345,11 @@ void UiLinkPageTouch(const CtrTouchState *t)
 
     if (st.state == CTR_LINK_HOSTING || st.state == CTR_LINK_CONNECTED)
     {
-        // Not while the game is in a link. The panel dims the button and says
-        // why; this is what makes the refusal real.
-        if (LinkSessionLive())
-            return;
-
+        // Before the DISCONNECT refusal below, not after it. The card view
+        // reads gTrainerCards and gLinkPlayers and calls no wireless, so it is
+        // safe during a link, and a live link is the only time there is a card
+        // to read: CardsReady() needs gReceivedRemoteLinkPlayers, which is also
+        // what LinkSessionLive() tests. Below that refusal, this is unreachable.
         if (UiHit(t, CARDS_X, STOP_Y, CARDS_W, BTN_H) && CardsReady())
         {
             sCardOpen = 1;
@@ -359,7 +359,9 @@ void UiLinkPageTouch(const CtrTouchState *t)
             return;
         }
 
-        if (UiHit(t, STOP_X, STOP_Y, STOP_W, BTN_H))
+        // Not while the game is in a link. The panel dims the button and says
+        // why; this is what makes the refusal real.
+        if (UiHit(t, STOP_X, STOP_Y, STOP_W, BTN_H) && !LinkSessionLive())
         {
             Ctr3dsLinkStop();
             UiMarkDirty();
