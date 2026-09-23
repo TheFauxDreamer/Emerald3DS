@@ -247,6 +247,26 @@ will not appear until something else happens to dirty the screen. The strip is
 the sharper version of this: nothing else in that hash moves when action
 selection opens or closes, so without `top[6]` it would never be drawn at all.
 
+### What a link already gives you
+
+Every cable-club link-up ends by copying each peer's trainer card into
+`gTrainerCards[]`, the local slot included, before the trade or battle starts
+(`Task_LinkupAwaitTrainerCardData`, `src/cable_club.c`). `gLinkPlayers[]` gets
+the name, trainer id, gender, language, version and the national-dex and
+champion flags. Both are plain EWRAM structs with no VRAM coupling, so a panel
+can read them directly; `ui/ui_card.c` does.
+
+**A link being up does not mean the card on hand is this partner's.**
+`gTrainerCards` is never cleared, and `IsLinkConnectionEstablished()` and
+`gReceivedRemoteLinkPlayers` both go true *before* the card block arrives, so a
+stale card from the last session reads as valid. Test the identity instead: the
+card carries the low 16 bits of the trainer id and the link player carries all
+32. That is `UiCardAvailable()`.
+
+Two things never cross and must not be faked: **badges**, which the GBA card
+also hides on a link card, and **`monSpecies`**, which is read from
+`gSelectedOrderFromParty` and is garbage outside the Battle Tower.
+
 Finally, `UiOverlayActive()` is not bookkeeping. A tab that defers drawing to
 the shell's animated layer paints those pieces into its own paint while it is
 TRUE, and the reason is that the layer paints over a snapshot which now
@@ -283,6 +303,13 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 sixth, so the bar is full. **Do not add a seventh.** There are two ways to add a
 view instead:
 
+- **A sub-view of a page**, cheapest of all: no page slot, no pager reflow, no
+  new state-key bits if the page's own bits can say which view is up. The
+  trainer card view does this inside LINK (`ui/ui_card.c`, `ui/ui_link.c`). A
+  sub-view that needs the whole screen returns TRUE from a full-bleed predicate
+  and `UiExtraDraw` then skips the frame and the pager for it; the sub-view owns
+  every touch while it is up, including where the pager would be, and must draw
+  its own way back.
 - **A page of EXTRA**, which is the cheap one and needs no refactor. Raise
   `PAGE_COUNT` in `ui/tab_extra.c` (both arms of the `CTR_DEBUG_MENU` guard),
   add a `#define` for the page index, and dispatch it in `UiExtraDraw`,
