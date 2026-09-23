@@ -13,9 +13,9 @@
 // close of the emulator window kills it, and aptMainLoop() does not report
 // that. Thus the exit flush does not run.
 //
-// The debounce is the second path, for writes outside a save (the special
-// sectors, a chunked link save between steps). It turns a burst into one file
-// write after CTR_SAVE_QUIET_MS of quiet.
+// The debounce is the second path, for writes outside a save. It turns a burst
+// into one file write after CTR_SAVE_QUIET_MS of quiet, which is why that has to
+// be longer than the gap between a link save's sectors.
 //
 // The burst is small: ProgramFlashSector_MX writes a full sector at once on
 // this port (src/agb_flash_mx.c), so a full save is 28 hook calls.
@@ -31,9 +31,22 @@
 #define GBA_SECTOR    4096u
 #define FLASH_ERR     0x80FF
 
-// The time after the last write before the file write. It is short because it
-// is only the second path. The important saves commit directly.
-#define CTR_SAVE_QUIET_MS 100
+// The time after the last write before the file write.
+//
+// Above the gap between a link save's sectors, which is the whole point. The
+// game writes one sector every six frames during a trade, about 100 ms apart
+// and further on a console that is dropping frames, so a 100 ms debounce
+// expired between nearly every sector and each one rewrote the whole 128 KB at
+// about 130 ms a time. A console log caught eight of those back to back, each
+// one a visible stall, and a trade carried roughly 1.8 seconds of them plus the
+// matching card wear.
+//
+// Raising it costs no durability. Every save that matters commits on the event
+// instead of waiting for this: TrySavingData, TryWriteSpecialSaveSector and the
+// signature step of Task_LinkFullSave all call CtrSaveCommit (src/save.c). This
+// is the backstop for writes that reach none of them, and a second late is the
+// right price for collapsing a trade's writes into one.
+#define CTR_SAVE_QUIET_MS 1000
 
 #define SAVE_DIR  "sdmc:/3ds/emerald3ds"
 #define SAVE_PATH SAVE_DIR "/pokeemerald.sav"
