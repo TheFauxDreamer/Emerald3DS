@@ -306,6 +306,19 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 // says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
 
+// The same, for the four routes to that screen that never touch the status
+// word, so a log names the route instead of going quiet. `why` is the route.
+void Ctr3dsLinkLogFault(const char *why);
+
+// Start a new LOGICAL link. OpenLink() and CloseLink() both call it.
+//
+// The transport keeps a frame counter, a ring for each peer and a handshake
+// latch, and all of it belongs to one link. The game opens and closes a link
+// many times on one network, so without this the second link-up on a network
+// agreed with itself on the first frame and the two consoles went live on
+// different frames. `why` names the caller for the log.
+void Ctr3dsLinkNewSession(const char *why);
+
 // One frame of the handshake, called while gLink.state is LINK_STATE_HANDSHAKE
 // with gLink.handshakeAsMaster. It answers 1 with the same barrier DoHandshake()
 // uses on a cable. Without it the link went live at pairing time rather than

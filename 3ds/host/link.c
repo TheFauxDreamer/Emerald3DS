@@ -256,6 +256,10 @@ static int      sHsStablePlayers;        // the count seen on the last frame
 static int      sHsDone;
 static uint8_t  sHsLogged;
 
+// Set when a peer sends a handshake packet, cleared with the session. It is the
+// proof that the peer is in THIS handshake. See drain().
+static uint8_t  sHsSeen[CTR_LINK_MAX_PLAYERS];
+
 // Scan results, kept so the UI can list them across frames.
 static udsNetworkScanInfo sScan[LINK_MAX_SCAN];
 static char               sScanName[LINK_MAX_SCAN][CTR_LINK_NAME_LEN];
@@ -395,31 +399,15 @@ static int ensure_uds(void)
     return 1;
 }
 
+// A new NETWORK. The transport goes with it, and so do the counters that
+// report on one network.
+//
+// The transport half is Ctr3dsLinkNewSession(), because the game also starts a
+// new link many times on one network. See that function.
 static void reset_frames(void)
 {
-    sFrame = 0;
-    memset(sRingFull, 0, sizeof(sRingFull));
-    memset(sRingFrame, 0, sizeof(sRingFrame));
-    memset(sRingCmd, 0, sizeof(sRingCmd));
+    Ctr3dsLinkNewSession("pairing");
 
-    sHeldValid = 0;
-    memset(sHeld, 0, sizeof(sHeld));
-    memset(sSentValid, 0, sizeof(sSentValid));
-    memset(sSentFrame, 0, sizeof(sSentFrame));
-    memset(sSentCmd, 0, sizeof(sSentCmd));
-    memset(sPeerSeen, 0, sizeof(sPeerSeen));
-    memset(sPeerNewest, 0, sizeof(sPeerNewest));
-
-    sPeerGone = 0;
-    sNodeIdBad = 0;
-
-    sHsOut = 0;
-    sHsDone = 0;
-    sHsLogged = 0;
-    sHsStablePlayers = 0;
-    memset(sHsFrom, 0, sizeof(sHsFrom));
-
-    // A new session counts from zero, and reports its roster and its ids again.
     sLoggedPlayers = -1;
     sLoggedIds = -1;
     sStatusFailRun = 0;
@@ -1025,9 +1013,23 @@ static int drain(void)
                 sPeerSeen[p] = 1;
             }
 
-            // The handshake word is not part of the command stream, so take it
-            // off every packet, including the ones the ring discards.
-            if (pkt.hs != 0)
+            // The handshake word is not part of the command stream, so take
+            // it off every packet, including the ones the ring discards. A
+            // handshake packet that is lost is then repaired by the live
+            // packets behind it.
+            //
+            // But a live packet can only REPAIR an agreement, never start one.
+            // The game opens and closes a link many times on one network, and
+            // a peer that has not closed yet still carries the old word on its
+            // live packets. Without this gate, a console that has just reset
+            // agrees with that stale word on its first frame, and the two go
+            // live on different frames again. A handshake packet is the proof
+            // that the peer is in THIS handshake, because it sends one only
+            // while it is.
+            if (pkt.phase == PHASE_HANDSHAKE)
+                sHsSeen[p] = 1;
+
+            if (pkt.hs != 0 && sHsSeen[p])
                 sHsFrom[p] = pkt.hs;
 
             (void)ahead;
@@ -1572,6 +1574,65 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd)
     return ready;
 }
 
+// A new LINK, which is not the same thing as a new network.
+//
+// The game opens and closes a logical link many times inside one wireless
+// session. A trade that is cancelled goes back to the Cable Club room, where
+// Task_ReestablishLink calls OpenLink() again (src/cable_club.c). Each link-up
+// that fails at the counter does the same, and one held A button is enough to
+// confirm before the partner and fail one.
+//
+// All of the state below belongs to one link, and none of it used to be
+// cleared between two. The result was that only the FIRST link on a network
+// worked:
+//
+// - sHsDone stayed set, so Ctr3dsLinkHandshake() agreed on its first call and
+//   did not wait for the peer. Each console then left LINK_STATE_HANDSHAKE on
+//   its own frame, which is the split that the handshake exists to prevent.
+// - sFrame, the rings and a latched sHeld carried over, so the first commands
+//   of the new link met leftovers from the old one.
+//
+// The player-data block that follows a link-up carries no sequence number, so
+// out of step it either never completes or fails its magic check. Both answers
+// are Emerald's communication error, on both consoles, and neither writes a
+// line to the log.
+//
+// sFrame going back to zero while the peer still counts is safe: drain() drops
+// a frame older than the one it owes, and handshake packets do not use the
+// ring at all. The pair agrees again as soon as the second console resets.
+void Ctr3dsLinkNewSession(const char *why)
+{
+    // Quiet when there is nothing to clear. OpenLink() and CloseLink() both
+    // call this, so a Cable Club visit that never links must not log twice.
+    if (sFrame != 0 || sHsDone)
+        CtrLog("emerald3ds: link session reset (%s) after %lu frames\n",
+               why, (unsigned long)sFrame);
+
+    sFrame = 0;
+    memset(sRingFull, 0, sizeof(sRingFull));
+    memset(sRingFrame, 0, sizeof(sRingFrame));
+    memset(sRingCmd, 0, sizeof(sRingCmd));
+
+    sHeldValid = 0;
+    memset(sHeld, 0, sizeof(sHeld));
+    memset(sSentValid, 0, sizeof(sSentValid));
+    memset(sSentFrame, 0, sizeof(sSentFrame));
+    memset(sSentCmd, 0, sizeof(sSentCmd));
+    memset(sPeerSeen, 0, sizeof(sPeerSeen));
+    memset(sPeerNewest, 0, sizeof(sPeerNewest));
+
+    sPeerGone = 0;
+    sNodeIdBad = 0;
+    sMissRun = 0;
+
+    sHsOut = 0;
+    sHsDone = 0;
+    sHsLogged = 0;
+    sHsStablePlayers = 0;
+    memset(sHsFrom, 0, sizeof(sHsFrom));
+    memset(sHsSeen, 0, sizeof(sHsSeen));
+}
+
 // The HOME menu is about to freeze this console. Tell the peer once, so it can
 // fail fast and correctly instead of calling us late for three seconds.
 //
@@ -1696,6 +1757,18 @@ void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount)
     CtrLog("emerald3ds: link error status=%08X send=%d recv=%d missrun=%u "
            "frame=%lu players=%u\n",
            status, sendCount, recvCount, sMissRun, (unsigned long)sFrame,
+           (unsigned)sStatus.playerCount);
+}
+
+// A link fault that does NOT pass TrySetLinkErrorBuffer().
+//
+// That function logs every error the status word can name: lag, a full queue, a
+// bad checksum. Four more routes reach the same error screen and said nothing,
+// so a log showed only a link that stopped talking. `why` names the route.
+void Ctr3dsLinkLogFault(const char *why)
+{
+    CtrLog("emerald3ds: link fault (%s) missrun=%u frame=%lu players=%u\n",
+           why, sMissRun, (unsigned long)sFrame,
            (unsigned)sStatus.playerCount);
 }
 

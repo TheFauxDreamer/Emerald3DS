@@ -1224,6 +1224,12 @@ void Task_WaitForLinkPlayerConnection(u8 taskId)
     task->tTimer++;
     if (task->tTimer > 300)
     {
+#if PLATFORM_3DS
+        // Five seconds with no player data. This is the quiet way a link-up
+        // fails, and it says nothing about the status word, so the port's own
+        // error log never saw it.
+        Ctr3dsLinkLogFault("no player data in 300 frames");
+#endif
         CloseLink();
         SetMainCallback2(CB2_LinkError);
         DestroyTask(taskId);
@@ -1236,6 +1242,9 @@ void Task_WaitForLinkPlayerConnection(u8 taskId)
         {
             if (!DoesLinkPlayerCountMatchSaved())
             {
+#if PLATFORM_3DS
+                Ctr3dsLinkLogFault("player count differs from saved");
+#endif
                 CloseLink();
                 SetMainCallback2(CB2_LinkError);
             }
