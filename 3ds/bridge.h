@@ -633,6 +633,13 @@ int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 // every B Button: Cancel in the link-up chain.
 int Ctr3dsLinkHandshake(int asMaster);
 
+// The HOME menu, either side of it. A suspended 3DS stays a UDS node and just
+// stops sending, so a peer cannot tell it from a slow one and waits out the
+// whole lag tolerance. Suspending tells the peer once; resuming ends the
+// session here, because a lockstep cannot survive the gap.
+void Ctr3dsLinkSuspending(void);
+void Ctr3dsLinkResumed(void);
+
 // How long the last frame's exchange spent asleep waiting on a peer, read and
 // cleared. The display divider subtracts it, because that time is not work and
 // counting it halves the display on a scene that never earned it.

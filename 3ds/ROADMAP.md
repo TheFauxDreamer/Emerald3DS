@@ -82,6 +82,34 @@ The small ones:
   path (cheatsheet section 5, "Single core"). The second-core path repaints for
   it. One full repaint when the slide ends would fix the single-core path, for
   the cost of that repaint.
+- **The display divider still flips between 30 and 60 Hz.** A console log from
+  `ad37408` caught about eleven changes in one session, at pair-work values of
+  18551 to 21030 us against an ON threshold of 18518. This is what `26c8ead` set
+  out to fix; that commit unified the *units* and the *quantity* of the two
+  tests, but not the statistic, and four things are left:
+  - **Engage compares a mean, release compares a single sample.** Engage tests a
+    60-to-120-sample mean against ON (`divider_sample`, `3ds/host/main.c`);
+    release tests individual pairs against FLOOR, or one pair against PANIC. The
+    band is ON minus PANIC, 1569 us, and the Old 3DS `ppu` spread is 11.4 ms
+    mean against 23.2 ms worst, so a scene whose mean sits at 18.6 ms produces
+    single pairs below 17.0 ms routinely. Both "engage" and "release now" are
+    true of the same scene, which is a limit cycle by construction.
+  - **The ON/OFF hysteresis never arbitrates.** Re-deciding needs 60 rendered
+    frames, about two seconds while engaged; the escape fires after six pairs
+    (0.2 s) or one at PANIC. Every release line in the log reads
+    `(scene got cheap)`, which only the escape path prints.
+  - **The model omits the skipped frame's hook.** `2*game + 1*hook` treats the
+    skipped half as free, but `sSubFrame` is always 0 at `sSpeed == 1`, so
+    input, touch, the bottom screen and audio all run on both halves. ON is
+    calibrated against a pair cost that cannot occur.
+  - **The escape path logs no number**, so a log cannot tell a FLOOR-times-six
+    release from a single PANIC, on the only path that ever fires.
+
+  The late-frame counter no longer hides this: it used to call every halved
+  frame a missed VBlank, so a working divider reported 600 of 600 and the flap
+  was invisible underneath it. `3ds/SECOND_SCREEN_CHEATSHEET.md` still does not
+  mention the divider at all, although its troubleshooting table is the first
+  stop for "the frame rate drops".
 - **The Old 3DS has no second core, and that is settled.** Two attempts:
   `APT_SetAppCpuTimeLimit` returns `0xD8E05BF4` (PM, permanent, **not
   implemented**), and setting the exheader `AffinityMask` to 3 changed nothing.
@@ -119,9 +147,16 @@ The small ones:
   387 of 600 frames late, against 11.4 ms and 1 to 9 late in game. Eleven
   affine sprites on one scene is what costs it: `ppu.c`'s affine sprite loop is
   the only hot path in that file with no span batching, no transparent-row skip
-  and a per-pixel `objTileOffset`. That is the next measurement, and
-  `PPU_PROFILE` in `rp2350/ppu.c` already has the per-pass timers written; the
-  3DS build just does not define it.
+  and a per-pixel `objTileOffset`.
+
+  **The measurement is now wired up:** `make -C 3ds CTR_PPU_PROFILE=1` compiles
+  `rp2350/ppu.c`'s per-pass timers in, `3ds/host/video.c` supplies the clock and
+  prints one `ppu passes` line every 600 frames. It is off by default and must
+  stay off in a build anyone plays, because the timing calls read 5 to 15% high.
+  Read the split, not the totals. What the run has to settle: whether the title
+  screen's cost really is `sprites`, which decides between span-batching the
+  affine sprite loop and giving `g_passMode == 2` the `fast` loop that
+  brightness effects still lack.
 
 ---
 
