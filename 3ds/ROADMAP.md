@@ -118,6 +118,31 @@ The small ones:
   (`3ds/host/main.c`) exists. `ppu_try_core()` now says which of the two
   refusals happened, if it is ever worth another look. ZL and ZR cannot be
   tested there.
+- **HOME during a live link ends it, and wireless stays dead until the game is
+  relaunched.** Accepted on 2026-09-24, not fixed. Sleep is refused for the
+  duration (`aptSetSleepAllowed(false)`, `3ds/host/main.c`) and that is
+  confirmed on hardware: closing the lid mid-trade no longer interrupts it.
+  HOME is left available on purpose, as the only escape from a link that has
+  wedged. `aeef93a` added a `sUdsStale` rebuild in `ensure_uds()`
+  (`3ds/host/link.c`) that does not recover the session in practice.
+
+  If it is ever revisited, one log line decides the approach: whether a second
+  `link udsInit` appears after the resume. Present and failing means UDS cannot
+  be re-initialised in this process once the system applet has taken it, and the
+  honest answer is to say so on the LINK page rather than offer a SCAN that
+  cannot work. Absent means the rebuild is never reached, and the cause is
+  upstream of it.
+- **A run of status failures leaves the panel claiming "Connected."** This one is
+  NOT specific to the HOME case above and is worth separating from it.
+  `refresh_status()` (`3ds/host/link.c`) preserves every field of `sStatus` when
+  `udsGetConnectionStatus()` fails: it stamps the cache and returns without
+  writing anything. So after any persistent fault the LINK page reads
+  "Connected." with the last known player count for the rest of the run, and
+  `Ctr3dsLinkIsConnected()` keeps answering yes to a game that has no partner. A
+  console photo caught it through the HOME case, but a peer powering off or
+  walking out of range reaches the same state. `sStatusFailRun` already counts
+  the run; publishing the link as down past a threshold, with `playerCount = 1`
+  to close `Ctr3dsLinkIsConnected()`, is the shape of the fix.
 - **Save flushes stall a link: fixed.** `CTR_SAVE_QUIET_MS`
   (`3ds/host/save.c`) is a second now, above the gap between a link save's
   sectors, so a trade's writes collapse into one instead of rewriting the whole
