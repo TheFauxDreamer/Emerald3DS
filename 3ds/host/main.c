@@ -41,6 +41,7 @@ void CtrVideoExit(void);
 void CtrVideoRenderBegin(void);
 void CtrVideoPresent(void);
 unsigned long long CtrVideoLastWaitTicks(void);
+void CtrVideoSetFrameVBlanks(int n);
 void CtrAudioInit(void);
 void CtrAudioExit(void);
 void CtrAudioFrame(void);
@@ -987,6 +988,11 @@ void Rp2350PresentFrame(void)
         sDivPhase ^= 1;
     }
 
+    // What a presented frame is supposed to cost, for the late-frame counter in
+    // video.c. Both terms: the divider is exempt during fast-forward, so
+    // sDivide on its own would call every turbo frame late.
+    CtrVideoSetFrameVBlanks((sDivide && sSpeed == 1) ? 2 : 1);
+
     // Start the rasterizer on the other core now, before the bottom screen
     // paints, so the two run at the same time. The rasterizer first copies the
     // video state, so the touch handlers below cannot tear it. See
@@ -1040,6 +1046,33 @@ void Rp2350PresentFrame(void)
             (span > blockTicks) ? span - blockTicks : 0;
 
         divider_sample(gameWork, hookWork, rendering, gameSpan + hookWork);
+    }
+}
+
+// The HOME menu, either side of it.
+//
+// libctru runs these from inside aptMainLoop() on the main thread, so the link
+// is not being pumped underneath them and a send here is safe. ONSUSPEND is the
+// last moment this console runs before it freezes: it is the only chance to
+// tell the peer, which otherwise cannot tell a suspended console from a slow
+// one and waits out the whole lag tolerance.
+static aptHookCookie sAptCookie;
+
+static void apt_hook(APT_HookType hook, void *param)
+{
+    (void)param;
+
+    switch (hook) {
+    case APTHOOK_ONSUSPEND:
+    case APTHOOK_ONSLEEP:
+        Ctr3dsLinkSuspending();
+        break;
+    case APTHOOK_ONRESTORE:
+    case APTHOOK_ONWAKEUP:
+        Ctr3dsLinkResumed();
+        break;
+    default:
+        break;
     }
 }
 
@@ -1104,6 +1137,9 @@ int main(int argc, char **argv)
             ptmSysmExit();
     }
     osSetSpeedupEnable(true);
+
+    // After the services, before the game loop. See apt_hook above.
+    aptHook(&sAptCookie, apt_hook, NULL);
 
     // It logs if audio started, and the reason if not. The usual reason is a
     // missing sdmc:/3ds/dspfirm.cdc, which is not fatal.

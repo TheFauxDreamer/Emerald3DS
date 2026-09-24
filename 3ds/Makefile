@@ -78,6 +78,22 @@ CTR_BOOT_DIAG ?= 0
 # host-only, so 3ds/build_objs.sh needs no matching flag.
 CTR_PPU_THREAD ?= 1
 
+# Per-pass timers inside the rasterizer, for finding where a slow scene spends
+# its time. rp2350/ppu.c has had them written all along behind PPU_PROFILE; this
+# is the switch that compiles them in, and 3ds/host/video.c supplies the clock
+# and prints one line every 600 frames.
+#
+# Off by default, and it must stay off in a build anyone plays. PSLOT fires per
+# background per priority per line, about 1440 svcGetSystemTick calls a frame,
+# which reads 5 to 15% high on an Old 3DS. The SPLIT is the measurement; the
+# totals are not comparable with a normal build's `prof ppu`.
+#
+# CI is the only full build here and does not parametrise this, so to take a
+# measurement: set this to 1, push, capture the log, then set it back.
+#   make -C 3ds CTR_PPU_PROFILE=1
+# Host-only, like CTR_PPU_THREAD: 3ds/build_objs.sh needs no matching flag.
+CTR_PPU_PROFILE ?= 0
+
 # Each make run sets these again, so the boot log always shows the correct
 # build. The git description identifies the build. The timestamp shows the
 # difference between two builds of the same tree. The description alone is
@@ -117,10 +133,17 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -ffunction-sections -fdata-sections -MMD -MP \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
             -DCTR_PPU_THREAD=$(CTR_PPU_THREAD) \
+            -DCTR_PPU_PROFILE=$(CTR_PPU_PROFILE) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -DCTR_BUILD_ID='"$(BUILD_ID)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
+
+# rp2350/ppu.c guards its timers on PPU_PROFILE, which the rp2350 build uses
+# too, so the 3DS knob maps onto that name rather than renaming the guard.
+ifeq ($(CTR_PPU_PROFILE),1)
+CFLAGS   += -DPPU_PROFILE
+endif
 
 # Point the tail jump of the original mixer at itself.
 #

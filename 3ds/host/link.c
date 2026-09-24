@@ -116,13 +116,21 @@
 typedef struct {
     uint32_t frame;                   // the newest command here
     uint16_t hs;                      // handshake word, on every packet
-    uint8_t  phase;                   // PHASE_HANDSHAKE or PHASE_LIVE
+    uint8_t  phase;                   // PHASE_HANDSHAKE, PHASE_LIVE or PHASE_BYE
     uint8_t  count;                   // commands present, 0..LINK_HISTORY
     // [0] is `frame`, [1] is frame - 1, and so on.
     uint8_t  cmd[LINK_HISTORY][CTR_LINK_CMD_BYTES];
 } LinkPacket;
 
-enum { PHASE_HANDSHAKE = 0, PHASE_LIVE = 1 };
+// PHASE_BYE says "this console is leaving", sent once when the HOME menu
+// suspends us. Without it a peer cannot tell a suspended console from a slow
+// one: a suspended 3DS stays a UDS node and simply stops sending, so
+// Ctr3dsLinkIsConnected() keeps answering yes and the peer spends the whole
+// LINK_LAG_TOLERANCE_MS before erroring. A console log of exactly that reported
+// 121 consecutive misses, every one of them called "peer late", with "down 0".
+//
+// An older build ignores it: drain() drops any phase that is not PHASE_LIVE.
+enum { PHASE_HANDSHAKE = 0, PHASE_LIVE = 1, PHASE_BYE = 2 };
 
 // ---- state -----------------------------------------------------------------
 //
@@ -260,11 +268,17 @@ static uint64_t      sStatusStamp;
 #define LINK_STAT_PERIOD 600   // pumped frames for each report
 
 enum { MISS_UNKNOWN = 0, MISS_DOWN, MISS_BUSY, MISS_SEND, MISS_LATE,
-       MISS_KINDS };
+       MISS_GONE, MISS_KINDS };
 
 static const char *const kMissWhy[MISS_KINDS] = {
-    "unknown", "link down", "pairing busy", "send failed", "peer late"
+    "unknown", "link down", "pairing busy", "send failed", "peer late",
+    "peer left"
 };
+
+// Set when a peer says PHASE_BYE. The lag tolerance is for a peer that is late,
+// and a peer that has said goodbye is not coming back, so waiting the full
+// three seconds only delays an error that is already certain.
+static int sPeerGone;
 
 static int      sMissWhy;                // one of the above, set at the source
 static unsigned sMissBy[MISS_KINDS];     // how many of each in this period
@@ -361,6 +375,8 @@ static void reset_frames(void)
     memset(sSentCmd, 0, sizeof(sSentCmd));
     memset(sPeerSeen, 0, sizeof(sPeerSeen));
     memset(sPeerNewest, 0, sizeof(sPeerNewest));
+
+    sPeerGone = 0;
 
     sHsOut = 0;
     sHsDone = 0;
@@ -894,6 +910,19 @@ static int drain(void)
         p = node_to_player(src);
 
         if (p >= 0 && p < CTR_LINK_MAX_PLAYERS) {
+            // A peer leaving, before any of the bookkeeping below: a goodbye
+            // carries no frame, no command and no handshake word, so none of it
+            // applies and letting it through would move sPeerNewest.
+            if (pkt.phase == PHASE_BYE) {
+                if (!sPeerGone) {
+                    sPeerGone = 1;
+                    CtrLog("emerald3ds: link peer %d left (suspended or quit)\n", p);
+                }
+                n++;
+                got = 0;
+                continue;
+            }
+
             // The oldest frame still owed to the game. Anything older has been
             // handed up already.
             uint32_t want = (sFrame == 0) ? 0 : sFrame - 1;
@@ -1037,11 +1066,11 @@ static void stats_report(void)
     Ctr3dsLinkGetStatus(&st);
 
     CtrLog("emerald3ds: link %u frames id=%u/%u frame=%lu ok=%u miss=%u "
-           "(late %u send %u busy %u down %u)\n",
+           "(late %u send %u busy %u down %u gone %u)\n",
            sStatFrames, (unsigned)st.localId, (unsigned)st.playerCount,
            (unsigned long)sFrame, sStatOk, sStatFrames - sStatOk,
            sMissBy[MISS_LATE], sMissBy[MISS_SEND], sMissBy[MISS_BUSY],
-           sMissBy[MISS_DOWN]);
+           sMissBy[MISS_DOWN], sMissBy[MISS_GONE]);
 
     CtrLog("emerald3ds: link wait mean %u us worst %u us over %u, timeouts %u, "
            "rx %u short %u stale %u lost %u\n",
@@ -1089,6 +1118,12 @@ static void stats_tick(void)
 // when the worker owns the wireless or the link is already down.
 void Ctr3dsLinkNoteMiss(void)
 {
+    // A peer that said goodbye is gone, whatever the source claimed. Without
+    // this every miss of a suspended peer reads "peer late", which is what made
+    // a console log show 121 of them and "down 0".
+    if (sPeerGone)
+        sMissWhy = MISS_GONE;
+
     if (sMissWhy < 0 || sMissWhy >= MISS_KINDS)
         sMissWhy = MISS_UNKNOWN;
 
@@ -1155,6 +1190,12 @@ void Ctr3dsLinkNoteOk(void)
 // AND longer than the tolerance.
 int Ctr3dsLinkLagged(void)
 {
+    // A peer that said goodbye is not late, it is gone. The tolerance exists
+    // for a console that is briefly behind; spending it here only delays an
+    // error that is already certain.
+    if (sPeerGone)
+        return 1;
+
     if (sMissRun < LINK_LAG_MIN_MISSES)
         return 0;
 
@@ -1437,6 +1478,57 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd)
     }
 
     return ready;
+}
+
+// The HOME menu is about to freeze this console. Tell the peer once, so it can
+// fail fast and correctly instead of calling us late for three seconds.
+//
+// Best effort by design: one broadcast, no retry, no wait for an answer. There
+// is no second chance, and a goodbye that does not arrive leaves the peer
+// exactly where it was before this existed.
+//
+// hs is zero because drain() harvests the handshake word off every accepted
+// packet before it looks at the phase, and the size stays sizeof(LinkPacket)
+// because the receiver rejects anything else as a short packet.
+void Ctr3dsLinkSuspending(void)
+{
+    LinkPacket out;
+    CtrLinkStatus st;
+
+    if (!sBound || sBusy)
+        return;
+
+    Ctr3dsLinkGetStatus(&st);
+    if (st.state != CTR_LINK_CONNECTED || st.playerCount < 2)
+        return;
+
+    memset(&out, 0, sizeof out);
+    out.phase = PHASE_BYE;
+    udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL, UDS_SENDFLAG_Default,
+              &out, sizeof(out));
+
+    CtrLog("emerald3ds: link goodbye sent (suspending)\n");
+}
+
+// Coming back from the HOME menu. A lockstep cannot survive a suspend: this
+// console has been still for however long the menu was open, and the peer has
+// either given up already or is about to. Treat the session as over rather than
+// resuming a clock that is arbitrarily far behind.
+void Ctr3dsLinkResumed(void)
+{
+    CtrLinkStatus st;
+
+    if (!sBound)
+        return;
+
+    Ctr3dsLinkGetStatus(&st);
+    if (st.state != CTR_LINK_CONNECTED && st.state != CTR_LINK_HOSTING)
+        return;
+
+    if (!sPeerGone) {
+        sPeerGone = 1;
+        CtrLog("emerald3ds: link ended by a suspend on this console\n");
+    }
 }
 
 // ------------------------------------------------------------ diagnostics ---

@@ -429,6 +429,47 @@ static uint16_t read16(const uint8_t *p, int off)
     return (uint16_t)(p[off] | (p[off + 1] << 8));
 }
 
+#if CTR_PPU_PROFILE
+// The clock rp2350/ppu.c's PSLOT() asks the host for. Its slots are named _us
+// and accumulate the deltas directly, so this answers in microseconds. The
+// conversion is CtrProfile's: SYSCLOCK_ARM11 is 268111856, so a division by 268
+// is within 0.04%.
+uint64_t ppu_prof_now(void)
+{
+    return svcGetSystemTick() / (SYSCLOCK_ARM11 / 1000000);
+}
+
+extern uint32_t ppu_prof_us[6];
+extern uint32_t ppu_prof_frames;
+
+// Where a rasterizer frame goes, per pass, averaged over the window and then
+// cleared. This is what says whether a slow scene is its sprites or its
+// backgrounds, which log_slow_scene below can only guess at from registers.
+//
+// The numbers read high: PSLOT fires per background per priority per line, so
+// the timing calls cost 5 to 15% on an Old 3DS. Read the split, not the totals.
+#define PPU_PASS_REPORT_EVERY 600
+
+static void report_ppu_passes(void)
+{
+    uint32_t f = ppu_prof_frames;
+
+    if (f < PPU_PASS_REPORT_EVERY)
+        return;
+
+    CtrLog("emerald3ds: ppu passes over %lu frames (us/frame): state %lu "
+           "lines %lu backdrop %lu textbg %lu affbg %lu sprites %lu\n",
+           (unsigned long)f,
+           (unsigned long)(ppu_prof_us[0] / f), (unsigned long)(ppu_prof_us[1] / f),
+           (unsigned long)(ppu_prof_us[2] / f), (unsigned long)(ppu_prof_us[3] / f),
+           (unsigned long)(ppu_prof_us[4] / f), (unsigned long)(ppu_prof_us[5] / f));
+
+    for (int i = 0; i < 6; i++)
+        ppu_prof_us[i] = 0;
+    ppu_prof_frames = 0;
+}
+#endif // CTR_PPU_PROFILE
+
 // A rasterizer frame longer than this cannot fit in a 16.6 ms budget when it
 // shares a core with the game. Report the first one, with the registers that
 // decide the cost, so that a log names the scene instead of leaving it to
@@ -761,33 +802,55 @@ static void upload_bottom_rows(int maxRows)
 // the mean and worst period. Every 600 frames, a line tells how many frames
 // were late. A stutter fix must bring that number to zero.
 //
-// Late means more than 25 ms, one and a half frames. A 33 ms period is one
-// missed VBlank. A HOME menu visit counts as one late frame, which is
-// acceptable.
-#define FRAME_LATE_TICKS    ((unsigned long long)SYSCLOCK_ARM11 / 40)
+// Late means half a VBlank past the period the divider INTENDS, not past a
+// fixed 25 ms.
+//
+// The fixed threshold was wrong the moment the display divider existed. This
+// runs once per presented frame, so a halved display presents every 33.4 ms by
+// design, which is past any threshold meant for a 16.7 ms period: a working
+// divider reported 600 of 600 frames missed, and an Old 3DS log could not be
+// read at all. The count tracked the halving, not the stutter.
+//
+// A HOME menu visit still counts as one late frame, which is acceptable.
+#define FRAME_VBLANK_TICKS  ((unsigned long long)SYSCLOCK_ARM11 / 60)
 #define FRAME_REPORT_EVERY  600
+
+// What the divider is doing, so the test above knows what on time means. One
+// VBlank per presented frame normally, two while the display is halved.
+static int sFrameVBlanks = 1;
+
+void CtrVideoSetFrameVBlanks(int n)
+{
+    sFrameVBlanks = (n > 1) ? 2 : 1;
+}
 
 static void note_frame_period(void)
 {
     static unsigned long long sLast;
-    static unsigned sFrames, sLate;
+    static unsigned sFrames, sLate, sHalved;
 
     unsigned long long now = CtrTicksNow();
+    unsigned long long want = (unsigned long long)sFrameVBlanks * FRAME_VBLANK_TICKS;
 
     if (sLast != 0) {
         CtrProfile("frame", sLast);
-        if (now - sLast > FRAME_LATE_TICKS)
+        if (sFrameVBlanks > 1)
+            sHalved++;
+        if (now - sLast > want + FRAME_VBLANK_TICKS / 2)
             sLate++;
     }
     sLast = now;
 
     if (++sFrames >= FRAME_REPORT_EVERY) {
         // No line means that no frame was late, so a normal log stays short.
+        // The second number says how much of the window the divider had halved,
+        // because a late count alone cannot tell a stutter from a rate change.
         if (sLate > 0)
-            CtrLog("emerald3ds: %u of the last %u frames missed VBlank\n",
-                   sLate, sFrames);
+            CtrLog("emerald3ds: %u of the last %u frames late (%u at 30 Hz)\n",
+                   sLate, sFrames, sHalved);
         sFrames = 0;
         sLate = 0;
+        sHalved = 0;
     }
 }
 
@@ -854,6 +917,9 @@ void CtrVideoPresent(void)
     }
     CtrLogSlow("ppu", t0);
     log_slow_scene(ppuTicks);
+#if CTR_PPU_PROFILE
+    report_ppu_passes();
+#endif
 
 #if CTR_BOOT_DIAG
     // Two facts show where a black screen comes from:
