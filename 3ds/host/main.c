@@ -993,6 +993,24 @@ void Rp2350PresentFrame(void)
     // sDivide on its own would call every turbo frame late.
     CtrVideoSetFrameVBlanks((sDivide && sSpeed == 1) ? 2 : 1);
 
+    // Refuse sleep while a link is up. Sleep takes the radio, which kills the
+    // link and the UDS session with it, and a console log caught exactly that
+    // on a console nobody had touched. HOME is deliberately still allowed: it
+    // is the only way out of a link that has wedged.
+    //
+    // Compared against a static so the APT call happens on a change, not every
+    // frame, and from the main thread rather than the link worker.
+    {
+        static int sSleepBlocked;
+        int block = Ctr3dsLinkNoSleep();
+
+        if (block != sSleepBlocked) {
+            sSleepBlocked = block;
+            aptSetSleepAllowed(!block);
+            CtrLog("emerald3ds: sleep %s\n", block ? "refused (link up)" : "allowed");
+        }
+    }
+
     // Start the rasterizer on the other core now, before the bottom screen
     // paints, so the two run at the same time. The rasterizer first copies the
     // video state, so the touch handlers below cannot tear it. See
@@ -1062,17 +1080,16 @@ static void apt_hook(APT_HookType hook, void *param)
 {
     (void)param;
 
+    // Named, not lumped together. A log that says only "suspending" cannot
+    // answer what stopped a console nobody touched, which is exactly the
+    // question one console log left open. Both still end the link: sleep takes
+    // the radio and the HOME menu takes the UDS session, so neither survives.
     switch (hook) {
-    case APTHOOK_ONSUSPEND:
-    case APTHOOK_ONSLEEP:
-        Ctr3dsLinkSuspending();
-        break;
-    case APTHOOK_ONRESTORE:
-    case APTHOOK_ONWAKEUP:
-        Ctr3dsLinkResumed();
-        break;
-    default:
-        break;
+    case APTHOOK_ONSUSPEND: Ctr3dsLinkSuspending("home menu"); break;
+    case APTHOOK_ONSLEEP:   Ctr3dsLinkSuspending("sleep");     break;
+    case APTHOOK_ONRESTORE: Ctr3dsLinkResumed("home menu");    break;
+    case APTHOOK_ONWAKEUP:  Ctr3dsLinkResumed("wake");         break;
+    default: break;
     }
 }
 

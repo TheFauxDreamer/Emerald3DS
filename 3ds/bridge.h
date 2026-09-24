@@ -633,12 +633,20 @@ int  Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 // every B Button: Cancel in the link-up chain.
 int Ctr3dsLinkHandshake(int asMaster);
 
+// TRUE while this console is on a wireless network. Sleep takes the radio away
+// and kills a live link outright, so the frame hook refuses it for as long as
+// this answers yes. A plain flag read, no IPC, safe to call every frame.
+int Ctr3dsLinkNoSleep(void);
+
 // The HOME menu, either side of it. A suspended 3DS stays a UDS node and just
 // stops sending, so a peer cannot tell it from a slow one and waits out the
 // whole lag tolerance. Suspending tells the peer once; resuming ends the
 // session here, because a lockstep cannot survive the gap.
-void Ctr3dsLinkSuspending(void);
-void Ctr3dsLinkResumed(void);
+// `why` names the event ("home menu", "sleep", "wake") and goes straight into
+// the log line, because a log that says only "suspending" cannot answer what
+// stopped a console nobody touched.
+void Ctr3dsLinkSuspending(const char *why);
+void Ctr3dsLinkResumed(const char *why);
 
 // How long the last frame's exchange spent asleep waiting on a peer, read and
 // cleared. The display divider subtracts it, because that time is not work and
