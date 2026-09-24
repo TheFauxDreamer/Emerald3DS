@@ -374,6 +374,13 @@ void OpenLink(void)
 
     if (!gWirelessCommType)
     {
+#if PLATFORM_3DS
+        // A new logical link, which the port's transport must be told about.
+        // The game opens and closes a link many times on one wireless session,
+        // and the frame counter, the per-peer rings and the handshake latch all
+        // belong to one link. See Ctr3dsLinkNewSession (3ds/host/link.c).
+        Ctr3dsLinkNewSession("open");
+#endif
         ResetSerial();
         InitLink();
         gLinkCallback = LinkCB_RequestPlayerDataExchange;
@@ -408,6 +415,13 @@ void CloseLink(void)
         LinkRfu_Shutdown();
     sLinkOpen = FALSE;
     DisableSerial();
+#if PLATFORM_3DS
+    // This half matters as much as the one in OpenLink(). A console that has
+    // closed must stop putting its handshake word on the wire, or a peer that
+    // re-opens first agrees with the old word and the two go live on different
+    // frames again. Several callers close the link on one side only.
+    Ctr3dsLinkNewSession("close");
+#endif
 }
 
 static void TestBlockTransfer(u8 nothing, u8 is, u8 used)
@@ -616,6 +630,11 @@ static void ProcessRecvCmds(u8 unused)
                         if (strcmp(block->magic1, sASCIIGameFreakInc) != 0
                             || strcmp(block->magic2, sASCIIGameFreakInc) != 0)
                         {
+#if PLATFORM_3DS
+                            // The block came apart in the transport. On a cable
+                            // this cannot happen, so nothing logs it.
+                            Ctr3dsLinkLogFault("player block magic");
+#endif
                             SetMainCallback2(CB2_LinkError);
                         }
                         else
@@ -1789,7 +1808,12 @@ void LinkPlayerFromBlock(u32 who)
 
     if (strcmp(block->magic1, sASCIIGameFreakInc) != 0
      || strcmp(block->magic2, sASCIIGameFreakInc) != 0)
+    {
+#if PLATFORM_3DS
+        Ctr3dsLinkLogFault("remote player block magic");
+#endif
         SetMainCallback2(CB2_LinkError);
+    }
 }
 
 // When this function returns TRUE the callbacks are skipped

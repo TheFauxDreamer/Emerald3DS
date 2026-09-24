@@ -638,6 +638,12 @@ int Ctr3dsLinkHandshake(int asMaster);
 // this answers yes. A plain flag read, no IPC, safe to call every frame.
 int Ctr3dsLinkNoSleep(void);
 
+// A new LOGICAL link, which is not a new network. The game opens and closes a
+// link many times on one network: a cancelled trade, and every link-up that
+// fails at the Cable Club counter. The transport state belongs to the link, so
+// it is cleared here. `why` names the caller and goes into the log line.
+void Ctr3dsLinkNewSession(const char *why);
+
 // The HOME menu, either side of it. A suspended 3DS stays a UDS node and just
 // stops sending, so a peer cannot tell it from a slow one and waits out the
 // whole lag tolerance. Suspending tells the peer once; resuming ends the
@@ -662,6 +668,11 @@ void Ctr3dsLinkLogIds(int local, int sio, int isMaster);
 // passes. Emerald's own error screen and a real fault otherwise look the same
 // in a log: the game stops talking and nothing says why.
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount);
+
+// The link faults that do NOT pass TrySetLinkErrorBuffer(). Four routes reach
+// Emerald's communication error screen without touching the status word, so a
+// log could only show a link that stopped talking. `why` names the route.
+void Ctr3dsLinkLogFault(const char *why);
 
 // The lag tolerance, driven from src/link.c's pump: it is the only caller that
 // sees every missed frame. Ctr3dsLinkExchange() returns early, and reports
