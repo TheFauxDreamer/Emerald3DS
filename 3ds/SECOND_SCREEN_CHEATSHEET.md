@@ -263,8 +263,24 @@ stale card from the last session reads as valid. Test the identity instead: the
 card carries the low 16 bits of the trainer id and the link player carries all
 32. That is `UiCardAvailable()`.
 
-Two things never cross and must not be faked: **badges**, which the GBA card
-also hides on a link card, and **`monSpecies`**, which is read from
+**Badges cross, but only because the port sends them.** A card has no badge
+field. `DrawStarsAndBadgesOnCard` reads `FlagGet(FLAG_BADGE01_GET + i)` from the
+LOCAL save and then refuses to draw on a link card (`if (!sData->isLink)`),
+because its own badges are all it has. So the port packs the eight flags into
+`filler[0]`, offset 0x44 of the card, behind `#if PLATFORM_3DS` in
+`TrainerCard_GenerateCardForLinkPlayer`. That byte has no reader anywhere in the
+game, the generator's memset clears it, `CopyTrainerCardData` keeps offsets
+0x00-0x5F, and a peer that does not send it sends zero, which reads as no
+badges. `ui/ui_card.c` draws the row on the **back**: the link front art has no
+badge strip, since that row carries the easy-chat profile instead.
+
+The 100-byte block is full, so before reusing another byte, check it. Dead in an
+Emerald-to-Emerald link: `filler` (0x44, 8 bytes) and `unused` (0x4D). Live, and
+not to be touched: `unionRoomClass` (0x4F), `monSpecies` (0x54, the Battle Tower
+duplicate check in `FinishLinkup`) and `monIconTint` (0x4E, whose read in
+`LoadMonIconGfx` is not version-gated).
+
+**`monSpecies` must still not be faked.** It is read from
 `gSelectedOrderFromParty` and is garbage outside the Battle Tower.
 
 Finally, `UiOverlayActive()` is not bookkeeping. A tab that defers drawing to

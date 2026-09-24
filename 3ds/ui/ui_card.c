@@ -46,6 +46,20 @@
 #define STAR_TX     15
 #define STAR_TY     7
 
+// The badge row. badges.png is 128x16, so 16x2 tiles, and badge i is the 2x2
+// block at sheet tiles 2i, 2i+1, 2i+16, 2i+17. That indexing is the game's own,
+// from DrawStarsAndBadgesOnCard, and so is the 24px stride.
+//
+// The game draws this on the FRONT, at tile row 15, and only for your own card.
+// The port draws a partner's badges, and the link front art it uses has no
+// badge strip: Game Freak gave that row to the easy-chat profile instead. So
+// the row goes on the back, under the stats, where there is room.
+#define BADGE_TILES   32
+#define BADGE_COUNT   NUM_BADGES
+#define BADGE_DX      24
+#define BADGE_X0      32
+#define BADGE_Y       122
+
 // The card's text window sits at tile (1, 1), so every coordinate taken from
 // src/trainer_card.c is relative to this. See sTrainerCardWindowTemplates.
 #define TEXT_X0     8
@@ -69,13 +83,19 @@
 #define FRONT_DEX_Y     73
 #define FRONT_TIME_Y    89
 
+// The four-word profile, from PrintProfilePhraseOnCard. It is a FRONT-side
+// thing on a link card, and the game's 120 is its second line, not its first.
+// The words sit hard left at window x 8, further left than any other row.
+#define PHRASE_X        8
+#define FRONT_PHRASE_Y  104
+#define PHRASE_GAP      6
+
 // Back, from PrintNameOnCardBack and PrintStatOnBackOfCard.
 #define BACK_LABEL_X    10
 #define BACK_VALUE_R    216
 #define BACK_NAME_Y     9
 #define BACK_ROW0_Y     33
 #define BACK_ROW_H      16
-#define BACK_PHRASE_Y   120
 
 // The star-tier palettes, from the same files src/trainer_card.c uses. Each is
 // three 16-colour palettes: the card takes the first and the background the
@@ -86,6 +106,11 @@ static const u16 sSilver_Pal[]   = INCGFX_U16("graphics/trainer_card/silver.pal"
 static const u16 sGold_Pal[]     = INCGFX_U16("graphics/trainer_card/gold.pal", ".gbapal");
 static const u16 sFemaleBg_Pal[] = INCGFX_U16("graphics/trainer_card/female_bg.pal", ".gbapal");
 static const u16 sStar_Pal[]     = INCGFX_U16("graphics/trainer_card/star.pal", ".gbapal");
+
+// The badge sheet, for the row the port adds to the back. Same reason as the
+// palettes above: these are file-local to src/trainer_card.c.
+static const u32 sBadges_Gfx[]   = INCGFX_U32("graphics/trainer_card/badges.png", ".4bpp.lz");
+static const u16 sBadges_Pal[]   = INCGFX_U16("graphics/trainer_card/badges.png", ".gbapal");
 
 // Indexed by star count. The game's own table has five entries and indexes it
 // by `stars` directly, which reads past the end at five stars: a link card
@@ -106,12 +131,14 @@ static u8  sTiles[CARD_TILES * 32];
 static u16 sMapBg[CARD_ENTRIES];
 static u16 sMapFront[CARD_ENTRIES];
 static u16 sMapBack[CARD_ENTRIES];
+static u8  sBadgeTiles[BADGE_TILES * 32];
 static int sGfxLoaded;
 
 // The palettes for the card currently being drawn, cached on what decides them.
 static u16 sPalCard[16];
 static u16 sPalBg[16];
 static u16 sPalStar[16];
+static u16 sPalBadge[16];
 static int sPalStars = -1;
 static int sPalGender = -1;
 static int sPalStarLoaded;
@@ -126,13 +153,16 @@ static int LoadGfx(void)
     if (GetDecompressedDataSize(gHoennTrainerCard_Gfx) > sizeof(sTiles)
      || GetDecompressedDataSize(gHoennTrainerCardBg_Tilemap) > sizeof(sMapBg)
      || GetDecompressedDataSize(gHoennTrainerCardFrontLink_Tilemap) > sizeof(sMapFront)
-     || GetDecompressedDataSize(gHoennTrainerCardBack_Tilemap) > sizeof(sMapBack))
+     || GetDecompressedDataSize(gHoennTrainerCardBack_Tilemap) > sizeof(sMapBack)
+     || GetDecompressedDataSize(sBadges_Gfx) > sizeof(sBadgeTiles))
         return 0;
 
     LZDecompressWram(gHoennTrainerCard_Gfx, sTiles);
     LZDecompressWram(gHoennTrainerCardBg_Tilemap, sMapBg);
     LZDecompressWram(gHoennTrainerCardFrontLink_Tilemap, sMapFront);
     LZDecompressWram(gHoennTrainerCardBack_Tilemap, sMapBack);
+    LZDecompressWram(sBadges_Gfx, sBadgeTiles);
+    UiLoadPal(sPalBadge, sBadges_Pal, 16);
 
     sGfxLoaded = 1;
     return 1;
@@ -282,6 +312,54 @@ static void DrawNameClipped(int x, int y, const u8 *name, int limit, u16 fg)
     UiText(x, y, buf, fg, UiThemeShadow());
 }
 
+// The four words the player wrote, two to a line. The gap between the two words
+// of a line is the game's fixed 6px, not the width of a space: it places word 2
+// at GetStringWidth(word 1) + 14 from a base of 8. See PrintProfilePhraseOnCard.
+static void DrawPhrase(int x, int y, const struct TrainerCard *card)
+{
+    u8 buf[32];
+    u16 fg = UI_COL_SHADOW;
+
+    for (int i = 0; i < TRAINER_CARD_PROFILE_LENGTH; i++)
+    {
+        int lx = x + TEXT_X0 + PHRASE_X;
+        int ly = y + TEXT_Y0 + FRONT_PHRASE_Y + (i / 2) * UI_LINE_H;
+
+        // The second word of a line starts past the first, measured, because
+        // easy-chat words vary in width.
+        if (i % 2 != 0)
+        {
+            CopyEasyChatWord(buf, card->easyChatProfile[i - 1]);
+            lx += UiTextWidth(buf) + PHRASE_GAP;
+        }
+
+        CopyEasyChatWord(buf, card->easyChatProfile[i]);
+        UiText(lx, ly, buf, fg, UiThemeShadow());
+    }
+}
+
+// The eight badges, from the byte TrainerCard_GenerateCardForLinkPlayer packs
+// into the card's filler. Nothing is drawn when it is zero, which is what a
+// Ruby or Sapphire partner, and any console on an older build, sends.
+static void DrawBadges(int x, int y, const struct TrainerCard *card)
+{
+    u32 mask = card->filler[0];
+
+    for (int i = 0; i < BADGE_COUNT; i++)
+    {
+        int bx = x + BADGE_X0 + i * BADGE_DX;
+        int t  = i * 2;
+
+        if (!(mask & (1u << i)))
+            continue;
+
+        UiBlit4bppTile(bx,     y + BADGE_Y,     sBadgeTiles + t * 32,        sPalBadge, 1);
+        UiBlit4bppTile(bx + 8, y + BADGE_Y,     sBadgeTiles + (t + 1) * 32,  sPalBadge, 1);
+        UiBlit4bppTile(bx,     y + BADGE_Y + 8, sBadgeTiles + (t + 16) * 32, sPalBadge, 1);
+        UiBlit4bppTile(bx + 8, y + BADGE_Y + 8, sBadgeTiles + (t + 17) * 32, sPalBadge, 1);
+    }
+}
+
 static void DrawFront(int x, int y, int cardId, const struct TrainerCard *card)
 {
     u8 buf[32];
@@ -331,6 +409,10 @@ static void DrawFront(int x, int y, int cardId, const struct TrainerCard *card)
         vx -= UiNumWidth(card->playTimeHours);
         UiNum(vx, y + TEXT_Y0 + FRONT_TIME_Y, card->playTimeHours, fg, UiThemeShadow());
     }
+
+    // The only part of the card that is the player's own words rather than a
+    // statistic, and the side the game draws it on for a link card.
+    DrawPhrase(x, y, card);
 }
 
 // One "label ...... value" row of the back, or "---" when the sender's game did
@@ -354,7 +436,6 @@ static void BackRow(int x, int y, int row, const char *label, s32 value, int kno
 
 static void DrawBack(int x, int y, int cardId, const struct TrainerCard *card)
 {
-    u8 buf[32];
     u16 fg = UI_COL_SHADOW;
     // Ruby and Sapphire stop at 0x38, so everything past playTime is theirs
     // only if they sent it.
@@ -369,23 +450,9 @@ static void DrawBack(int x, int y, int cardId, const struct TrainerCard *card)
     BackRow(x, y, 3, "CONTESTS WITH FRIENDS", card->contestsWithFriends, full);
     BackRow(x, y, 4, "POKEBLOCKS WITH FRIENDS", card->pokeblocksWithFriends, full);
 
-    // The four-word profile the player wrote, which is the only part of the
-    // card that is theirs rather than a statistic.
-    {
-        int px = x + TEXT_X0 + BACK_LABEL_X;
-
-        for (int i = 0; i < TRAINER_CARD_PROFILE_LENGTH; i++)
-        {
-            int ly = y + TEXT_Y0 + BACK_PHRASE_Y + (i / 2) * UI_LINE_H;
-
-            if (i % 2 == 0)
-                px = x + TEXT_X0 + BACK_LABEL_X;
-
-            CopyEasyChatWord(buf, card->easyChatProfile[i]);
-            px += UiText(px, ly, buf, fg, UiThemeShadow());
-            px += UiTextWidth(UiAscii(buf, " ", sizeof(buf)));
-        }
-    }
+    // Under the stats, in the room the profile used to take before it moved to
+    // the front, where the game draws it.
+    DrawBadges(x, y, card);
 }
 
 // ---- entry points -----------------------------------------------------------

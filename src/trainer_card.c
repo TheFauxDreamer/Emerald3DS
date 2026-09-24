@@ -789,6 +789,26 @@ void TrainerCard_GenerateCardForLinkPlayer(struct TrainerCard *trainerCard)
         trainerCard->unionRoomClass = gUnionRoomFacilityClasses[(trainerCard->trainerId % NUM_UNION_ROOM_CLASSES) + NUM_UNION_ROOM_CLASSES];
     else
         trainerCard->unionRoomClass = gUnionRoomFacilityClasses[trainerCard->trainerId % NUM_UNION_ROOM_CLASSES];
+
+#if PLATFORM_3DS
+    // The eight badge flags, in a byte the card carries but no game reads.
+    //
+    // A card has no badge field. DrawStarsAndBadgesOnCard reads the LOCAL save
+    // and then refuses to draw on a link card, because its own badges are all
+    // it has. The port's second screen shows a partner's card, so it needs the
+    // partner's badges, and filler has no reader anywhere. The memset above
+    // cleared it, CopyTrainerCardData keeps offsets 0x00-0x5F, and a game that
+    // does not send this sends zero, which reads as no badges.
+    //
+    // Drawn by 3ds/ui/ui_card.c. The GBA build never sees this.
+    {
+        u32 i;
+
+        for (i = 0; i < NUM_BADGES; i++)
+            if (FlagGet(FLAG_BADGE01_GET + i))
+                trainerCard->filler[0] |= 1 << i;
+    }
+#endif
 }
 
 void CopyTrainerCardData(struct TrainerCard *dst, struct TrainerCard *src, u8 gameVersion)

@@ -16,6 +16,7 @@
 
 #include "global.h"
 #include "link.h"                     // IsLinkConnectionEstablished, gReceivedRemoteLinkPlayers
+#include "constants/characters.h"     // EOS
 
 #include "../bridge.h"
 #include "ui_draw.h"
@@ -62,6 +63,11 @@
 #define CV_BACK_Y    150
 #define CV_BACK_W    60
 #define CV_BACK_H    22
+
+// Below the card, not on it: the card occupies y 16..175 and the content area
+// ends at 191, so this strip covers no art on either side.
+#define CV_FLIP_X    (CV_CARD_X + UI_CARD_W - 2 * UI_CHEVRON_W - 4)
+#define CV_FLIP_Y    (CV_CARD_Y + UI_CARD_H + 3)
 
 static int sCardOpen;
 static int sCardWho;     // the player whose card is at 1:1
@@ -151,20 +157,52 @@ static int CardsReady(void)
     return UiCardAvailable(CardSlotId(0)) && UiCardAvailable(CardSlotId(1));
 }
 
+// The partner's name, cut to fit the thumbnail.
+//
+// ui_card.c has its own clipper, but it is file-local and measures in the
+// normal font. A 60px label needs the small one.
+static void ThumbName(u8 *dst, int size, const u8 *name)
+{
+    int n = 0;
+
+    while (n < size - 1 && name[n] != EOS)
+    {
+        dst[n] = name[n];
+        n++;
+    }
+    dst[n] = EOS;
+
+    while (n > 0 && UiTextSmallWidth(dst) > UI_CARD_THUMB_W)
+        dst[--n] = EOS;
+}
+
+// A card's colour is its star tier, so two players on the same tier draw the
+// same picture. The label is what tells them apart: the partner's name on their
+// thumbnail, and YOU on this console's, because a player knows their own name
+// and wants the other one.
+//
+// Selection is the frame, and it is two pixels rather than one so that it does
+// not have to compete with the label for the same cue.
 static void DrawThumb(int slot, int y)
 {
     int id = CardSlotId(slot);
     u8 label[24];
     int active = (id == sCardWho);
+    u16 col = active ? UI_COL_ACCENT : UI_COL_DIM;
 
     UiCardThumb(CV_THUMB_X, y, id);
-    UiRect(CV_THUMB_X - 1, y - 1, UI_CARD_THUMB_W + 2, UI_CARD_THUMB_H + 2,
-           active ? UI_COL_ACCENT : UI_COL_DIM);
 
-    UiAscii(label, (slot == 0) ? "THEM" : "YOU", sizeof(label));
+    UiRect(CV_THUMB_X - 1, y - 1, UI_CARD_THUMB_W + 2, UI_CARD_THUMB_H + 2, col);
+    if (active)
+        UiRect(CV_THUMB_X - 2, y - 2, UI_CARD_THUMB_W + 4, UI_CARD_THUMB_H + 4, col);
+
+    if (slot == 0)
+        ThumbName(label, (int)sizeof(label), gLinkPlayers[id].name);
+    else
+        UiAscii(label, "YOU", sizeof(label));
+
     UiTextSmall(CV_THUMB_X + (UI_CARD_THUMB_W - UiTextSmallWidth(label)) / 2,
-                y + CV_LABEL_DY, label,
-                active ? UI_COL_ACCENT : UI_COL_DIM, UiThemeShadow());
+                y + CV_LABEL_DY, label, col, UiThemeShadow());
 }
 
 static void DrawCardView(void)
@@ -186,9 +224,11 @@ static void DrawCardView(void)
            CV_BACK_Y + (CV_BACK_H - UI_GLYPH_H) / 2,
            label, UiThemeText(), UiThemeShadow());
 
-    UiAscii(label, "tap the card to turn it", sizeof(label));
-    UiTextSmall(CV_THUMB_X - 4 - UiTextSmallWidth(label), CV_BACK_Y + 4, label,
-                UI_COL_DIM, UiThemeShadow());
+    // The flip affordance, in the strip below the card rather than on it. The
+    // card is a faithful 240x160 of the GBA's own art and both its sides are
+    // full, so a glyph drawn inside it would cover something.
+    UiChevron(CV_FLIP_X, CV_FLIP_Y);
+    UiChevron(CV_FLIP_X + UI_CHEVRON_W + 2, CV_FLIP_Y);
 }
 
 static int TouchCardView(const CtrTouchState *t)
