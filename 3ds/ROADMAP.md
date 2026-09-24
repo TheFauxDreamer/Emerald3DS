@@ -143,6 +143,56 @@ The small ones:
   walking out of range reaches the same state. `sStatusFailRun` already counts
   the run; publishing the link as down past a threshold, with `playerCount = 1`
   to close `Ctr3dsLinkIsConnected()`, is the shape of the fix.
+- **A retried frame can deliver one command twice.** Found 2026-09-24 while
+  fixing the second link-up, not fixed, and it is the same class: the transport
+  must deliver every command exactly once. `Ctr3dsLinkExchange()`
+  (`3ds/host/link.c`) sets `tookCmd` when it LATCHES the caller's command, not
+  when that command finally goes through. So a frame that fails on its first
+  attempt and succeeds on its second reports `tookCmd = 0` on the success, the
+  pump (`src/link.c`) does not pop its send queue, and the next frame latches
+  the same head again and sends it under a new frame number. The peer's ring
+  dedups by frame number, so it accepts both and hands the game the command
+  twice.
+
+  It only bites when the send queue was non-empty at latch time, which is why a
+  link-up survives it more often than not, and a repeated `LINKCMD_CONT_BLOCK`
+  is exactly what fills a player block with rubbish that then fails its magic
+  check. `link fault (player block magic)` in the log now names that outcome.
+
+  The fix is to record WHICH command the latch holds rather than that it holds
+  one: the pump knows whether the command it offered came from the queue, so it
+  can remember that across the retries and pop when the frame is finally
+  accepted. The empty-queue case the current guard protects must survive it,
+  because a command that arrives behind an empty latch was never transmitted.
+- **Four link-up tasks have no timeout.** `TryLinkTimeout` (`src/cable_club.c`)
+  guards only `Task_LinkupConfirm`. `Task_LinkupConfirmWhenReady`,
+  `Task_LinkupAwaitConfirmation`, `Task_LinkupTryConfirmation` and
+  `Task_LinkupAwaitTrainerCardData` can spin for ever with the player-count
+  window still up. Vanilla behaviour, and harmless on a cable, where a partner
+  cannot half-answer.
+- **A successful link-up leaks its player-count window.** `FinishLinkup`
+  (`src/cable_club.c`) clears the window but never removes it; only the three
+  failure exits call `RemoveWindow`. `InitWindows` (`src/window.c`) then drops
+  `tileData` without freeing it, so each successful link-up costs about 704
+  bytes of the 0x1C000 heap until the next `InitHeap`. Vanilla, and not on any
+  known crash path, but `3ds/NULL_CRASHES_PLAN.md` says an `Alloc` that returns
+  NULL is the other way to fault, and the answer to that class is to find the
+  leak.
+- **A trade sends a garbage species on its trainer card.**
+  `gSelectedOrderFromParty` is only filled by the frontier party selector, so a
+  plain trade reads `gPlayerParty[-1]` in `Task_LinkupExchangeDataWithLeader`
+  and `Task_LinkupCheckStatusAfterConfirm` (`src/cable_club.c`). That address is
+  mapped on this port, so it does not fault, but `card->monSpecies[]` then
+  carries two arbitrary 16-bit values to the partner, where `3ds/ui/ui_card.c`
+  can read them. Vanilla. A bound check belongs in the card UI, not in
+  `cable_club.c`.
+- **The second link-up on a network: fixed.** `Ctr3dsLinkNewSession()`
+  (`3ds/host/link.c`) is called from `OpenLink()` and `CloseLink()`, so the
+  frame counter, the per-peer rings and the handshake latch belong to one
+  logical link rather than to one UDS network. Before it, `sHsDone` survived a
+  reopen, the handshake agreed with itself on its first call, and the two
+  consoles went live on different frames: a cancelled trade or a mashed A at the
+  Cable Club counter gave both of them Emerald's communication error.
 - **Save flushes stall a link: fixed.** `CTR_SAVE_QUIET_MS`
   (`3ds/host/save.c`) is a second now, above the gap between a link save's
   sectors, so a trade's writes collapse into one instead of rewriting the whole
