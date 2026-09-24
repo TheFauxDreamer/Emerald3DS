@@ -124,6 +124,13 @@ static EWRAM_DATA struct {
 static EWRAM_DATA u16 sReadyCloseLinkAttempts = 0; // never read
 static EWRAM_DATA void *sLinkErrorBgTilemapBuffer = NULL;
 
+#if PLATFORM_3DS
+// Whether the command the transport is holding for the frame in flight came
+// from the send queue. Read by Ctr3dsLinkPump() when that frame is accepted.
+// See the pop in that function for why the answer cannot be asked for later.
+static EWRAM_DATA bool8 sCtrCmdFromQueue = FALSE;
+#endif
+
 static void InitLocalLinkPlayer(void);
 static void VBlankCB_LinkError(void);
 static void CB2_LinkTest(void);
@@ -380,6 +387,7 @@ void OpenLink(void)
         // and the frame counter, the per-peer rings and the handshake latch all
         // belong to one link. See Ctr3dsLinkNewSession (3ds/host/link.c).
         Ctr3dsLinkNewSession("open");
+        sCtrCmdFromQueue = FALSE;
 #endif
         ResetSerial();
         InitLink();
@@ -421,6 +429,7 @@ void CloseLink(void)
     // re-opens first agrees with the old word and the two go live on different
     // frames again. Several callers close the link on one side only.
     Ctr3dsLinkNewSession("close");
+    sCtrCmdFromQueue = FALSE;
 #endif
 }
 
@@ -2197,6 +2206,8 @@ static void Ctr3dsLinkPump(void)
     u8 index;
     u16 nonzero = 0;
     int tookCmd = 0;
+    int exchanged;
+    bool8 fromQueue;
 
     // First, and once: this refreshes the host-side status cache that
     // Ctr3dsLinkPlayerCount(), Ctr3dsLinkLocalId() and Ctr3dsLinkExchange()
@@ -2266,7 +2277,9 @@ static void Ctr3dsLinkPump(void)
     if (gLink.state != LINK_STATE_CONN_ESTABLISHED)
         return;
 
-    if (gLink.sendQueue.count > 0)
+    fromQueue = (gLink.sendQueue.count > 0);
+
+    if (fromQueue)
     {
         for (j = 0; j < CMD_LENGTH; j++)
             send[j] = gLink.sendQueue.data[j][gLink.sendQueue.pos];
@@ -2277,7 +2290,16 @@ static void Ctr3dsLinkPump(void)
             send[j] = 0;
     }
 
-    if (!Ctr3dsLinkExchange(send, recv, &tookCmd))
+    exchanged = Ctr3dsLinkExchange(send, recv, &tookCmd);
+
+    // Record WHAT the transport is holding, not only that it holds something.
+    // tookCmd is reported by the call that latches, which is often not the
+    // call that gets the frame through, so the answer has to be kept until
+    // then. See the pop below.
+    if (tookCmd)
+        sCtrCmdFromQueue = fromQueue;
+
+    if (!exchanged)
     {
         // A frame the peers did not deliver in time. The send queue is left
         // intact, so nothing is lost and the same command goes again next
@@ -2289,19 +2311,32 @@ static void Ctr3dsLinkPump(void)
     gLink.lag = 0;
     Ctr3dsLinkNoteOk();
 
-    // Pop only what actually went out.
+    // Pop what actually went out, which is not always what this call offered.
     //
     // A frame number has to mean one command, so the transport latches the
     // first command offered for a frame and re-sends that one while the frame
-    // is retried. The head of this queue is not stable across a retry: it is
-    // empty when the queue is empty, and the real command arrives behind it.
-    // Popping regardless would drop a command that was never transmitted.
-    if (tookCmd && gLink.sendQueue.count > 0)
+    // is retried. Two things follow, and the pop has to obey both.
+    //
+    // The offer can be empty. The queue is empty on the first attempt and the
+    // real command arrives behind it, so popping regardless would drop a
+    // command that was never transmitted. sCtrCmdFromQueue answers that.
+    //
+    // And the call that latches is not the call that succeeds, whenever a
+    // frame is accepted on a retry. Popping on tookCmd alone left the head in
+    // place on exactly those frames, and the next frame latched the same head
+    // again and sent it under a NEW frame number. A peer's ring keys on the
+    // frame number, so it accepted both and handed the game one command twice.
+    // A repeated LINKCMD_CONT_BLOCK is what fills a player block with rubbish
+    // that then fails its magic check, which is Emerald's communication error
+    // on both consoles.
+    if (sCtrCmdFromQueue && gLink.sendQueue.count > 0)
     {
         gLink.sendQueue.count--;
         if (++gLink.sendQueue.pos >= QUEUE_CAPACITY)
             gLink.sendQueue.pos = 0;
     }
+
+    sCtrCmdFromQueue = FALSE;
 
     if (gLink.recvQueue.count >= QUEUE_CAPACITY)
     {
