@@ -296,9 +296,12 @@ void ResetSerial(void);
 int Ctr3dsLinkIsConnected(void);
 int Ctr3dsLinkPlayerCount(void);
 int Ctr3dsLinkLocalId(void);
-// `tookCmd` says whether sendCmd was the command actually transmitted. A retry
-// re-sends what it sent before, because a frame number has to mean exactly one
-// command, so the pump must not pop its send queue when this reports 0.
+// `tookCmd` says whether this call LATCHED sendCmd. It does NOT say the frame
+// got through: a retry re-sends what it latched before, because a frame number
+// has to mean exactly one command, so the call that latches is often not the
+// call that succeeds. The pump must remember what the latch holds and pop its
+// send queue when the frame is finally accepted, or the same command goes out
+// again under the next frame number and the peer takes it twice.
 int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd);
 
 // Report a link error to the port's log. Emerald's own error screen and a real

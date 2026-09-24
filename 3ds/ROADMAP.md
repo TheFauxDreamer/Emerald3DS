@@ -143,27 +143,24 @@ The small ones:
   walking out of range reaches the same state. `sStatusFailRun` already counts
   the run; publishing the link as down past a threshold, with `playerCount = 1`
   to close `Ctr3dsLinkIsConnected()`, is the shape of the fix.
-- **A retried frame can deliver one command twice.** Found 2026-09-24 while
-  fixing the second link-up, not fixed, and it is the same class: the transport
-  must deliver every command exactly once. `Ctr3dsLinkExchange()`
+- **A retried frame delivered one command twice: fixed.** Found 2026-09-24
+  while fixing the second link-up, and the same class: the transport must
+  deliver every command exactly once. `Ctr3dsLinkExchange()`
   (`3ds/host/link.c`) sets `tookCmd` when it LATCHES the caller's command, not
-  when that command finally goes through. So a frame that fails on its first
-  attempt and succeeds on its second reports `tookCmd = 0` on the success, the
-  pump (`src/link.c`) does not pop its send queue, and the next frame latches
-  the same head again and sends it under a new frame number. The peer's ring
-  dedups by frame number, so it accepts both and hands the game the command
-  twice.
+  when that command goes through, so a frame that failed once and succeeded on
+  its retry reported `tookCmd = 0` on the success. The pump (`src/link.c`) then
+  left the head in its send queue, latched the same head again next frame and
+  sent it under a NEW frame number. A peer's ring keys on the frame number, so
+  it accepted both and handed the game the command twice, and a repeated
+  `LINKCMD_CONT_BLOCK` is what fills a player block with rubbish that then
+  fails its magic check.
 
-  It only bites when the send queue was non-empty at latch time, which is why a
-  link-up survives it more often than not, and a repeated `LINKCMD_CONT_BLOCK`
-  is exactly what fills a player block with rubbish that then fails its magic
-  check. `link fault (player block magic)` in the log now names that outcome.
-
-  The fix is to record WHICH command the latch holds rather than that it holds
-  one: the pump knows whether the command it offered came from the queue, so it
-  can remember that across the retries and pop when the frame is finally
-  accepted. The empty-queue case the current guard protects must survive it,
-  because a command that arrives behind an empty latch was never transmitted.
+  It only bit when the send queue was non-empty at latch time, which is why a
+  link-up survived it more often than not. The pump now records whether the
+  latched command came from the queue (`sCtrCmdFromQueue`) and pops when the
+  frame is finally accepted. The empty-queue case the old guard protected still
+  holds: a command that arrived behind an empty latch was never transmitted, so
+  it is not popped.
 - **Four link-up tasks have no timeout.** `TryLinkTimeout` (`src/cable_club.c`)
   guards only `Task_LinkupConfirm`. `Task_LinkupConfirmWhenReady`,
   `Task_LinkupAwaitConfirmation`, `Task_LinkupTryConfirmation` and

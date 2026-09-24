@@ -1426,9 +1426,10 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd)
 
     // Latch the command for this frame. A frame number has to mean exactly one
     // command, and the caller's offer can change between a failed attempt and
-    // its retry, so only the first offer for a frame is taken. `tookCmd` tells
-    // the caller which happened, and the pump pops its send queue only when its
-    // command was the one that went out.
+    // its retry, so only the first offer for a frame is taken. `tookCmd` says
+    // that THIS call did the latching. It does not say the frame was accepted,
+    // because a frame is often accepted on a retry, so the caller must not pop
+    // its send queue on it alone. See the pop in Ctr3dsLinkPump (src/link.c).
     if (!sHeldValid) {
         unsigned h = sFrame % LINK_HISTORY;
 
