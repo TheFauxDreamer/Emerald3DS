@@ -46,20 +46,6 @@
 #define STAR_TX     15
 #define STAR_TY     7
 
-// The badge row. badges.png is 128x16, so 16x2 tiles, and badge i is the 2x2
-// block at sheet tiles 2i, 2i+1, 2i+16, 2i+17. That indexing is the game's own,
-// from DrawStarsAndBadgesOnCard, and so is the 24px stride.
-//
-// The game draws this on the FRONT, at tile row 15, and only for your own card.
-// The port draws a partner's badges, and the link front art it uses has no
-// badge strip: Game Freak gave that row to the easy-chat profile instead. So
-// the row goes on the back, under the stats, where there is room.
-#define BADGE_TILES   32
-#define BADGE_COUNT   NUM_BADGES
-#define BADGE_DX      24
-#define BADGE_X0      32
-#define BADGE_Y       122
-
 // The card's text window sits at tile (1, 1), so every coordinate taken from
 // src/trainer_card.c is relative to this. See sTrainerCardWindowTemplates.
 #define TEXT_X0     8
@@ -90,12 +76,32 @@
 #define FRONT_PHRASE_Y  104
 #define PHRASE_GAP      6
 
-// Back, from PrintNameOnCardBack and PrintStatOnBackOfCard.
-#define BACK_LABEL_X    10
+// Back, from PrintNameOnCardBack and PrintStatOnBackOfCard. The label column is
+// 16, not 8: PrintStatOnBackOfCard indexes xOffsets[] by isHoenn, and this card
+// is the Hoenn one.
+#define BACK_LABEL_X    16
 #define BACK_VALUE_R    216
 #define BACK_NAME_Y     9
 #define BACK_ROW0_Y     33
 #define BACK_ROW_H      16
+
+// The badge row, which is a back-side thing here. badges.png is 128x16, so 16x2
+// tiles, and badge i is the 2x2 block at sheet tiles 2i, 2i+1, 2i+16, 2i+17.
+// That indexing and the 24px stride are the game's own, from
+// DrawStarsAndBadgesOnCard.
+//
+// The game draws this on the FRONT, at tile row 15, and only for your own card.
+// The port draws a partner's badges, and the link front art it uses has no
+// badge strip: that row carries the easy-chat profile instead. So the row goes
+// on the back, under the stats, which is the only side with room.
+//
+// Its origin is the stat column rather than the game's front-side 32, so the
+// side keeps one left margin.
+#define BADGE_TILES   32
+#define BADGE_COUNT   NUM_BADGES
+#define BADGE_DX      24
+#define BADGE_X0      (TEXT_X0 + BACK_LABEL_X)
+#define BADGE_Y       122
 
 // The star-tier palettes, from the same files src/trainer_card.c uses. Each is
 // three 16-colour palettes: the card takes the first and the background the
