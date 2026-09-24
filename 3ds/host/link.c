@@ -155,6 +155,18 @@ static void ensure_lock(void)
 }
 
 static int sUdsUp;                                       // worker thread only
+
+// Set by the main thread when the console comes back from a suspend; cleared by
+// the worker in ensure_uds(). A suspend hands the wireless to the system applet,
+// which re-initialises NWM and leaves this process holding a session it no
+// longer owns: every later call then answers RM_UDS / RS_INVALIDSTATE /
+// RD_NOT_AUTHORIZED, the 0xC8A113EA a console log caught, and a "scan" that
+// returns in 15 ms instead of 400 because it never reaches the radio.
+//
+// Nothing recovered from that before: sUdsUp is what ensure_uds() tests and it
+// was cleared only at process shutdown, so wireless stayed dead for the rest of
+// the run and every retry answered "wireless failed".
+static volatile int sUdsStale;
 static int sState = CTR_LINK_IDLE;
 static int sIsHost;
 
@@ -280,6 +292,14 @@ static const char *const kMissWhy[MISS_KINDS] = {
 // three seconds only delays an error that is already certain.
 static int sPeerGone;
 
+// Latched so a link coming apart logs the bad node id once, not every frame.
+static int      sNodeIdBad;
+
+// TRUE while this console is on a network, read by the main thread so it can
+// refuse sleep. Set on the worker, read with no lock: it is one int and a
+// frame's worth of staleness either way does not matter.
+static volatile int sNoSleep;
+
 static int      sMissWhy;                // one of the above, set at the source
 static unsigned sMissBy[MISS_KINDS];     // how many of each in this period
 
@@ -343,6 +363,20 @@ static int ensure_uds(void)
 {
     Result rc;
 
+    // Release a session the system took while this console was suspended,
+    // before asking for a new one. Here rather than on the resume itself
+    // because every wireless operation already passes through this function,
+    // so a rebuild cannot be missed or dropped, however busy the worker was
+    // when the console woke.
+    if (sUdsUp && sUdsStale) {
+        CtrLog("emerald3ds: link releasing the session a suspend took\n");
+        udsExit();
+        sUdsUp = 0;
+        sBound = 0;             // udsExit took the bind with it
+        memset(&sBind, 0, sizeof sBind);
+    }
+    sUdsStale = 0;
+
     if (sUdsUp)
         return 1;
 
@@ -377,6 +411,7 @@ static void reset_frames(void)
     memset(sPeerNewest, 0, sizeof(sPeerNewest));
 
     sPeerGone = 0;
+    sNodeIdBad = 0;
 
     sHsOut = 0;
     sHsDone = 0;
@@ -400,6 +435,31 @@ static void reset_frames(void)
 static int node_to_player(u16 nodeId)
 {
     return (int)nodeId - 1;
+}
+
+// The id this console may publish, given which end of the network it is.
+//
+// A console that created the network is node 1, which is player 0, which is the
+// master; a client is never any of those. That invariant is stated in
+// CheckMasterOrSlave's comment (src/link.c) and was enforced nowhere, so both
+// places below that publish an id could hand a client a 0.
+//
+// It matters because the id is read from UDS every frame and pushed straight
+// into REG_SIOCNT, with no latch: one unreadable frame is enough for
+// GetMultiplayerId() to answer 0 on BOTH consoles, and then every "am I player
+// 1?" test in the trade and battle code takes the same branch on both sides.
+// That is the fault 584dd3a fixed; a console log caught it again by this route.
+// 584dd3a's own check cannot see it, because it compares the id against the
+// register it just wrote it to. isHost is the one independent fact, so use it.
+//
+// 1 rather than a remembered id: any non-zero id keeps this console a slave,
+// which is the safe answer when UDS cannot say more.
+static int sane_local_id(int local, int isHost)
+{
+    if (isHost)
+        return 0;
+
+    return (local < 1 || local >= CTR_LINK_MAX_PLAYERS) ? 1 : local;
 }
 
 // Publish a state with no other result. The next status read then does its own
@@ -433,6 +493,8 @@ static void do_stop(void)
         memset(&sBind, 0, sizeof sBind);
     }
 
+    sNoSleep = 0;
+
     reset_frames();
     publish_state(CTR_LINK_IDLE, 0);
 }
@@ -460,6 +522,7 @@ static void do_host(void)
     }
 
     sBound = 1;
+    sNoSleep = 1;
     reset_frames();
     publish_state(CTR_LINK_HOSTING, 1);
     CtrLog("emerald3ds: link hosting\n");
@@ -476,6 +539,7 @@ static void do_scan(void)
              ? sPrevState : CTR_LINK_IDLE;
     size_t total = 0;
     unsigned int t0 = CtrTimeNowMs();
+    Result rc;
 
     if (!ensure_uds()) {
         publish_state(back, sIsHost);
@@ -485,14 +549,19 @@ static void do_scan(void)
     // The sweep itself, with no lock held. It is the whole reason this file has
     // a worker thread.
     CtrLog("emerald3ds: link udsScanBeacons\n");
-    if (R_FAILED(udsScanBeacons(buf, sizeof(buf), &nets, &total,
-                                LINK_WLANCOMM_ID, LINK_ID8, NULL, false))) {
+    rc = udsScanBeacons(buf, sizeof(buf), &nets, &total,
+                        LINK_WLANCOMM_ID, LINK_ID8, NULL, false);
+    if (R_FAILED(rc)) {
         LightLock_Lock(&sLock);
         sScanCount = 0;
         LightLock_Unlock(&sLock);
         publish_state(back, sIsHost);
-        CtrLog("emerald3ds: link scan failed after %u ms\n",
-               CtrTimeNowMs() - t0);
+        // With the code. This path used to print the elapsed time alone, and
+        // that omission is why a dead UDS session could only be identified
+        // from the host path: a 15 ms "scan" says something is wrong, and
+        // rc=0xC8A113EA says exactly what.
+        CtrLog("emerald3ds: link scan failed after %u ms rc=0x%08lX\n",
+               CtrTimeNowMs() - t0, (unsigned long)rc);
         return;
     }
 
@@ -566,6 +635,7 @@ static void do_join(int index)
     }
 
     sBound = 1;
+    sNoSleep = 1;
     reset_frames();
     publish_state(CTR_LINK_CONNECTED, 0);
     CtrLog("emerald3ds: link joined\n");
@@ -760,7 +830,7 @@ static void refresh_status(void)
         LightLock_Lock(&sLock);
         sStatus.state       = (uint8_t)state;
         sStatus.playerCount = 1;
-        sStatus.localId     = 0;
+        sStatus.localId     = (uint8_t)sane_local_id(0, isHost);
         sStatus.isHost      = (uint8_t)isHost;
         sStatusStamp        = now;
         LightLock_Unlock(&sLock);
@@ -801,8 +871,30 @@ static void refresh_status(void)
             players = CTR_LINK_MAX_PLAYERS;
         if (players < 1)
             players = 1;
-        if (local < 0 || local >= CTR_LINK_MAX_PLAYERS)
+
+        // An id UDS cannot name is "we are not on a working network", NOT "we
+        // are node 0" -- and node 0 is the master.
+        //
+        // This used to clamp to 0, which handed a client whose connection was
+        // coming apart the HOST's id: gLink.localId, gLink.isMaster and
+        // Ctr3dsSetSioMultiId() all followed, GetMultiplayerId() then answered
+        // 0 on BOTH consoles, and every "am I player 1?" test in the trade and
+        // battle code took the same branch on both sides. A console log caught
+        // exactly that, a second `link ids` line flipping local=1 to local=0
+        // mid-session. It is the fault 584dd3a fixed, by another route.
+        //
+        // Saying one player is what closes it: Ctr3dsLinkIsConnected() wants
+        // two, so the pump reports a miss and returns before it can write any
+        // of the above.
+        if (local < 0 || local >= CTR_LINK_MAX_PLAYERS) {
+            if (!sNodeIdBad) {
+                sNodeIdBad = 1;
+                CtrLog("emerald3ds: link node id %u invalid, link is down\n",
+                       (unsigned)st.cur_NetworkNodeID);
+            }
+            players = 1;
             local = 0;
+        }
 
         // Hosting alone is not yet a link; the game must not be told it has a
         // partner until one is actually present.
@@ -815,7 +907,7 @@ static void refresh_status(void)
         sState              = state;
         sStatus.state       = (uint8_t)state;
         sStatus.playerCount = (uint8_t)players;
-        sStatus.localId     = (uint8_t)local;
+        sStatus.localId     = (uint8_t)sane_local_id(local, isHost);
         sStatus.isHost      = (uint8_t)isHost;
         sStatusStamp        = now;
         LightLock_Unlock(&sLock);
@@ -1490,7 +1582,7 @@ int Ctr3dsLinkExchange(const void *sendCmd, void *recvCmds, int *tookCmd)
 // hs is zero because drain() harvests the handshake word off every accepted
 // packet before it looks at the phase, and the size stays sizeof(LinkPacket)
 // because the receiver rejects anything else as a short packet.
-void Ctr3dsLinkSuspending(void)
+void Ctr3dsLinkSuspending(const char *why)
 {
     LinkPacket out;
     CtrLinkStatus st;
@@ -1507,28 +1599,51 @@ void Ctr3dsLinkSuspending(void)
     udsSendTo(UDS_BROADCAST_NETWORKNODEID, LINK_CHANNEL, UDS_SENDFLAG_Default,
               &out, sizeof(out));
 
-    CtrLog("emerald3ds: link goodbye sent (suspending)\n");
+    CtrLog("emerald3ds: link goodbye sent (%s)\n", why);
 }
 
-// Coming back from the HOME menu. A lockstep cannot survive a suspend: this
-// console has been still for however long the menu was open, and the peer has
-// either given up already or is about to. Treat the session as over rather than
-// resuming a clock that is arbitrarily far behind.
-void Ctr3dsLinkResumed(void)
+// Coming back. Two separate things are broken and both have to be said.
+//
+// The LINK is over: a lockstep cannot survive a suspend, this console has been
+// still for however long the menu or the sleep lasted, and the peer has either
+// given up already or is about to.
+//
+// The SESSION is over too, and that is the one that used to be missed. The
+// system re-initialises NWM while we are away, so the UDS handle this process
+// holds is dead whether or not a network was up. Note the gate is sUdsUp, NOT
+// sBound: a console that only pressed SCAN and then suspended has no bind to
+// tear down and is just as unable to scan again.
+void Ctr3dsLinkResumed(const char *why)
 {
     CtrLinkStatus st;
 
-    if (!sBound)
-        return;
-
     Ctr3dsLinkGetStatus(&st);
-    if (st.state != CTR_LINK_CONNECTED && st.state != CTR_LINK_HOSTING)
-        return;
 
-    if (!sPeerGone) {
+    if (sBound && (st.state == CTR_LINK_CONNECTED || st.state == CTR_LINK_HOSTING)
+     && !sPeerGone) {
         sPeerGone = 1;
-        CtrLog("emerald3ds: link ended by a suspend on this console\n");
+        CtrLog("emerald3ds: link ended by a %s on this console\n", why);
     }
+
+    // Not a posted request: post() drops one while the worker is busy, and on
+    // resume it may still be inside the udsScanBeacons it was suspended in. A
+    // sticky flag cannot be dropped, and ensure_uds() is the one place every
+    // wireless operation already passes through.
+    sUdsStale = 1;
+}
+
+// Should the console refuse to sleep?
+//
+// Sleep takes the wireless away, which kills a live link outright, and a log
+// caught exactly that on a console nobody had touched. Refusing it for the
+// duration is cheaper than recovering from it. HOME is deliberately left alone:
+// it is the only way out of a link that has wedged.
+//
+// A plain read of a flag the worker sets, so the main thread can call this
+// every frame without an IPC round trip.
+int Ctr3dsLinkNoSleep(void)
+{
+    return sNoSleep;
 }
 
 // ------------------------------------------------------------ diagnostics ---
@@ -1556,14 +1671,24 @@ unsigned long long Ctr3dsLinkTakeBlockedTicks(void)
 
 void Ctr3dsLinkLogIds(int local, int sio, int isMaster)
 {
+    // host too, read here rather than passed in, so the seam stays the same
+    // shape. local and sio are two views of one value and isMaster is derived
+    // from local, so the three of them agreeing proves nothing. host is the
+    // independent fact: "local=0 host=0" is a client calling itself the master,
+    // which is the contradiction sane_local_id() now prevents. Print it so a
+    // log shows it in one line rather than by correlating with a `link peers`
+    // line a minute earlier.
+    CtrLinkStatus st;
     int packed = (local & 3) | ((sio & 3) << 2) | ((isMaster ? 1 : 0) << 4);
 
     if (packed == sLoggedIds)
         return;
 
+    Ctr3dsLinkGetStatus(&st);
+
     sLoggedIds = packed;
-    CtrLog("emerald3ds: link ids: local=%d sio=%d master=%d\n",
-           local, sio, isMaster ? 1 : 0);
+    CtrLog("emerald3ds: link ids: local=%d sio=%d master=%d host=%d\n",
+           local, sio, isMaster ? 1 : 0, st.isHost ? 1 : 0);
 }
 
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount)
