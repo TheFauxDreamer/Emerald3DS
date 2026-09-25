@@ -337,6 +337,19 @@ static unsigned long long sBlockedTicks;
 // It must read 0. It is the counter that would have named this bug.
 static unsigned sRxPackets, sRxShort, sRxStale, sRxLost;
 
+// The deepest the game's send queue got in this period.
+//
+// The queue is the difference between two clocks: the game makes a command for
+// each of its own frames, and the transport carries one for each frame that
+// lands. A console log had 600 of the first against 510 of the second, so 90
+// commands piled up with no frame able to work them off, and the queue reached
+// QUEUE_CAPACITY about ten seconds into a link. Nothing in the period line said
+// so: `miss` counted the frames but not what they left behind.
+//
+// It must sit near zero and stay there. A figure that climbs across periods is
+// that fault returning.
+static unsigned sSendQWorst;
+
 // ---- the worker ------------------------------------------------------------
 
 enum { REQ_NONE = 0, REQ_HOST, REQ_SCAN, REQ_JOIN, REQ_STOP };
@@ -415,6 +428,7 @@ static void reset_frames(void)
     sWaitSum = sWaitWorst = 0;
     sWaitN = sDeadlineHits = 0;
     sRxPackets = sRxShort = sRxStale = sRxLost = 0;
+    sSendQWorst = 0;
     memset(sMissBy, 0, sizeof sMissBy);
 }
 
@@ -1186,9 +1200,9 @@ static void stats_report(void)
     Ctr3dsLinkGetStatus(&st);
 
     CtrLog("emerald3ds: link %u frames id=%u/%u frame=%lu ok=%u miss=%u "
-           "(late %u send %u busy %u down %u gone %u)\n",
+           "sendq=%u (late %u send %u busy %u down %u gone %u)\n",
            sStatFrames, (unsigned)st.localId, (unsigned)st.playerCount,
-           (unsigned long)sFrame, sStatOk, sStatFrames - sStatOk,
+           (unsigned long)sFrame, sStatOk, sStatFrames - sStatOk, sSendQWorst,
            sMissBy[MISS_LATE], sMissBy[MISS_SEND], sMissBy[MISS_BUSY],
            sMissBy[MISS_DOWN], sMissBy[MISS_GONE]);
 
@@ -1222,6 +1236,7 @@ static void stats_report(void)
     sWaitSum = sWaitWorst = 0;
     sWaitN = sDeadlineHits = 0;
     sRxPackets = sRxShort = sRxStale = sRxLost = 0;
+    sSendQWorst = 0;
     memset(sMissBy, 0, sizeof sMissBy);
 }
 
@@ -1304,6 +1319,14 @@ void Ctr3dsLinkNoteOk(void)
 
     sStatOk++;
     stats_tick();
+}
+
+// How deep the game's send queue is, once for each pumped frame. Only the
+// deepest in a period is kept; see sSendQWorst for why the number matters.
+void Ctr3dsLinkNoteQueue(int depth)
+{
+    if (depth > 0 && (unsigned)depth > sSendQWorst)
+        sSendQWorst = (unsigned)depth;
 }
 
 // A run of at least LINK_LAG_MIN_MISSES, so one long frame can never trip it,

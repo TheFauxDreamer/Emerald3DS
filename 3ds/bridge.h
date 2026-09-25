@@ -662,6 +662,12 @@ void Ctr3dsLinkResumed(const char *why);
 // from a slow frame. Call it before Ctr3dsLinkNewSession("close").
 void Ctr3dsLinkClosing(void);
 
+// How deep the game's send queue is, once for each pumped frame. The period line
+// reports the deepest in the period as `sendq`. It is the gap between the game's
+// frames and the transport's: a figure that climbs is the queue filling with
+// commands no frame can carry.
+void Ctr3dsLinkNoteQueue(int depth);
+
 // How long the last frame's exchange spent asleep waiting on a peer, read and
 // cleared. The display divider subtracts it, because that time is not work and
 // counting it halves the display on a scene that never earned it.

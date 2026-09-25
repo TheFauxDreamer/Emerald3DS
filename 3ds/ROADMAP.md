@@ -15,7 +15,7 @@ Checked against `d482f2a` on 2026-09-18.
 | D: Gameplay tweaks | **Done.** |
 | Save durability | **Done.** |
 | The busy-wait audit | **Done.** |
-| C: Local wireless | **Pairs and links on hardware; a trade is waiting on a console test.** The transport now delivers each command once, the handshake waits for the host's confirm, and `GetMultiplayerId()` answers correctly. A trade that failed with an Old 3DS hosting is fixed too: a stall filled the send queue before any tolerance could end it, and a link the game closed told the peer nothing. On the `local-wireless` branch. |
+| C: Local wireless | **Pairs and links on hardware; a trade is waiting on a console test.** The transport delivers each command once, the handshake waits for the host's confirm, `GetMultiplayerId()` answers correctly, and a departing console says goodbye. The fault that ended every link about ten seconds in is fixed: the game made a command for each of its own frames while the transport carried one for each frame that landed, and the send queue took the difference until it overflowed. On the `local-wireless` branch. |
 | E: Achievements | **Built in.** Two items are left. |
 
 The done parts stay in this file because their facts are recorded nowhere else.
@@ -33,16 +33,20 @@ The large pieces:
   rules from the follower work. Item 1, the follower options, is done.
 - **Part C, the Cable Club over local wireless.** The `local-wireless` branch
   now carries main. C.3 is decided: LINK is page 5 of EXTRA. Pairing and the
-  transport both run on hardware. Five faults that stopped a trade are fixed and
-  waiting on a console test: the transport lost and repeated commands, the link
-  went live at pairing time instead of at the host's confirm,
-  `GetMultiplayerId()` answered 0 on both consoles, a stall filled the send queue
-  long before any tolerance could end it, and a link the game closed told the
-  peer nothing. The next run must show `lost 0` on every period line, `local` and
-  `sio` agreeing in the `link ids` line, `link handshake done` arriving when the
-  host presses A rather than when the consoles pair, no `status=...4168`, and
-  `link peer N left` on the console that stays when the other one closes. Run it
-  with the Old 3DS hosting, which is the configuration that failed.
+  transport both run on hardware. Three faults are confirmed fixed on hardware:
+  the transport lost and repeated commands, the link went live at pairing time
+  instead of at the host's confirm, and a console that closed a link told its peer
+  nothing. One is fixed and waiting on a console test, and it is the one that
+  ended every link within about ten seconds: the game made a command for each of
+  its own frames while the transport carried one for each frame that landed, and
+  the send queue took the difference until it overflowed.
+
+  The next run must show `sendq` near zero on every period line, which is the
+  whole test, with `lost 0` and `short 0` beside it, `local` and `sio` agreeing in
+  the `link ids` line, and no `link error` through a trade entered and exited.
+  Then stay linked two or three minutes, which is the test the first runs never
+  reached, because ten seconds was enough to kill a link. Run it with the Old 3DS
+  hosting, which is the configuration that failed.
 - **Trainer cards before the link-up.** The LINK page can only show a card once
   the Cable Club link-up has delivered one, because that is what fills
   `gTrainerCards` (`Task_LinkupAwaitTrainerCardData`, `src/cable_club.c`). The
@@ -146,92 +150,115 @@ The small ones:
   walking out of range reaches the same state. `sStatusFailRun` already counts
   the run; publishing the link as down past a threshold, with `playerCount = 1`
   to close `Ctr3dsLinkIsConnected()`, is the shape of the fix.
-- **A stalled link died of a full send queue, not of its own tolerance: fixed.**
-  Found 2026-09-25 from a console log where a trade failed with the Old 3DS
-  hosting and the same pair traded fine with the New 3DS hosting. The Old console
-  logged
-  `link error status=00004168 send=50 recv=1 missrun=50 frame=863 players=2`.
-  `0x4168` is `LINK_STAT_ERROR_QUEUE_FULL` with no lag bit at all, and `send=50`
-  is `QUEUE_CAPACITY` exactly, so the trade did not die of lag.
+- **The send queue was a one-way ratchet, and that is what ended every long
+  link: fixed.** Found 2026-09-25, and it replaces a wrong reading of the same
+  symptom recorded the day before. The first diagnosis said a 50-frame stall
+  filled the send queue. `send=50` was right about the queue and wrong about the
+  stall.
 
-  `LinkMain1` calls `EnqueueSendCmd()` on every frame that has a command, and a
-  trade is a block transfer, so there is a `LINKCMD_CONT_BLOCK` every frame. The
-  pump pops only when a frame lands, which is correct and is what keeps a retried
-  command from going twice. So a stall fills the send queue at one entry per
-  frame, and at 50 `EnqueueSendCmd` latches `QUEUE_FULL_SEND`, which
-  `CheckLinkErrors` treats as fatal and which nothing clears inside a link.
+  The build with the goodbye and the richer error line put the answer in one
+  place. The client failed with
+  `status=00040149 send=41 recv=1 missrun=1 frame=537 ... last=peer late p0 newest=535`:
+  a send queue at 41 with a miss run of **one**. There was no stall at all.
 
-  **`QUEUE_CAPACITY` was therefore the port's real give-up threshold, and every
-  tolerance the port had chosen sat above it:** `LINK_LAG_TOLERANCE_MS` is 3000
-  ms, which is 180 frames at 60 fps, and `LINK_STALL_REPORT_MISSES` was 60. The
-  wall-clock tolerance sized to outlast a save flush could never be reached, and
-  neither could the stall line written to name exactly this deadlock. That is
-  why the log carries the error and not the `link stalled` line.
+  Its period line measures the cause directly. `stats_tick()` runs once for each
+  pumped frame, so `link 600 frames ... frame=509 ok=510 miss=90` is 600 game
+  frames against 510 transport frames. Two clocks:
 
-  `Ctr3dsLinkMiss()` (`src/link.c`) now reports lag while the queue still has
-  room. It tests `gLink.sendQueue.count` rather than a count of frames, because
-  the queue grows only for a command that is not empty: a trade fills it every
-  frame and an idle link in the Cable Club room does not fill it at all. The
-  clock stays for the idle case. `LINK_STALL_REPORT_MISSES` is 20, under the
-  queue rather than under the clock, and `Ctr3dsLinkLogError()` now carries the
-  miss reason and each peer's newest frame, because that line always arrives and
-  the stall line only arrives if the stall lasted.
+  - `LinkMain2` (`src/link.c`) zeroes `gSendCmd` and then calls `gLinkCallback`
+    on **every game frame**. That callback writes the next command,
+    `LINKCMD_CONT_BLOCK` among them. It is not in `CallCallbacks`, so none of
+    vanilla's frame skipping reaches it.
+  - `LinkMain1` puts it in `gLink.sendQueue`, and the pump pops that queue only
+    for a **transport** frame that lands.
+
+  So during a block transfer every missed frame leaves one command behind for
+  good. No later frame can work it off: the game offers one command a frame and
+  the transport carries one a frame, so there is no spare room to catch up in.
+  The queue reached `QUEUE_CAPACITY` about ten seconds into a link, whatever the
+  miss pattern, and both consoles then showed Emerald's communication error. The
+  frame-863 failure was this, not a stall.
+
+  The misses are not themselves a fault. `peer lag p0=2` says the host has not
+  yet made the frame the client wants. A lockstep transport advances at the
+  slower console's rate while each console's game advances at its own.
+
+  `LinkMain2` now skips `gLinkCallback` when `LINK_STAT_RECEIVED_NOTHING` is set,
+  under `#if PLATFORM_3DS`: one command for each delivered frame, which is what a
+  cable gives for free because a cable cannot run slower than the game. The block
+  transfer waits instead. `ProcessRecvCmds` still runs, and must, because it
+  skips any player whose command is 0 and it clears `gLinkPartnersHeldKeys`.
+  `TrySetLinkErrorBuffer` still runs because every link error passes through it.
+  The vanilla two lines are repeated under `#else` rather than left hanging off
+  the guard, so nothing added later can be captured by it in one configuration
+  only.
+
+  The period line now carries `sendq`, the deepest the queue got in the period.
+  It must sit near zero. That number is the whole test, and its absence is why
+  this went unseen through two console runs.
 
   Not confirmed on hardware.
-- **Nothing announced a link the game closed: fixed.** The same log, and the
-  most likely trigger for the stall above. `CloseLink()` sets
-  `gLinkVSyncDisabled`, and `LinkVSync()` is the only caller of the transport, so
-  a console that closes stops sending while it stays a UDS node. A live peer then
-  sees a full roster and no packets, which is what a late frame looks like, and
-  it spends its whole tolerance on a partner that is never coming back. The game
-  opens and closes a link many times on one network and several callers close it
-  on one side only, so this is the common path, not the rare one.
+- **Why the obvious fix is not available, so nobody tries it again.** Raising
+  `LINK_WAIT_US` from 8 ms would pace the faster console by making it wait, and
+  the `link caught up after 1 missed frames (9 ms)` lines say 8 to 11 ms more
+  would have caught nearly every miss. **It must not be done.** It works by
+  slowing the local game, and `CtrAudioFrame` (`3ds/host/audio.c`) makes exactly
+  one buffer of 224 samples for each game frame against a fixed 13401 Hz drain,
+  with four buffers of cushion. The comment there records that a mismatch of 39
+  samples a second, 0.29%, empties the ring and clicks about every six seconds. A
+  51 Hz game rate is a 15% shortfall. The constant stays at 8 ms.
+- **The queue-depth give-up: added 2026-09-24, removed 2026-09-25.**
+  `Ctr3dsLinkMiss` briefly reported lag once the send queue came within ten of
+  `QUEUE_CAPACITY`. It was aimed at the ceiling when the fault was the ratchet, so
+  it fired on a healthy link and ended at 40 what the old build carried to 50. Its
+  one merit, a decodable error instead of a bare `QUEUE_FULL`, is delivered by the
+  richer error line instead, which fires on every route into
+  `TrySetLinkErrorBuffer`. And `LINK_STAT_ERROR_QUEUE_FULL` is the honest name for
+  a queue that overflowed.
+- **Nothing announced a link the game closed: fixed.** Found the same way, and
+  confirmed on hardware on 2026-09-25. `CloseLink()` sets `gLinkVSyncDisabled`,
+  and `LinkVSync()` is the only caller of the transport, so a console that closes
+  stops sending while it stays a UDS node. A live peer then sees a full roster and
+  no packets, which is what a late frame looks like, and it spends its whole
+  tolerance on a partner that is never coming back. The game opens and closes a
+  link many times on one network and several callers close it on one side only, so
+  this is the common path.
 
-  `Ctr3dsLinkSuspending()` already had the answer and used it on one path only,
-  the HOME menu. Its body is now `send_bye()`, and `Ctr3dsLinkClosing()` calls it
-  from `CloseLink()` before `Ctr3dsLinkNewSession("close")`, because the reset
-  clears the state the goodbye reads. Only a link that went live sends one.
+  `Ctr3dsLinkSuspending()` already had the answer and used it on the HOME menu
+  alone. Its body is now `send_bye()`, and `Ctr3dsLinkClosing()` calls it from
+  `CloseLink()` before `Ctr3dsLinkNewSession("close")`, because the reset clears
+  the state the goodbye reads. Only a link that went live sends one.
 
-  **The hazard this creates, and why `drain()` now gates `PHASE_BYE` on
-  `sHsDone`.** A goodbye carries no session id, and nothing drains the wireless
-  while merely paired, so the goodbye of the link that just ended can still be
-  waiting in the receive buffer when the next one starts. Honoured there it sets
-  `sPeerGone` on a healthy link, and `Ctr3dsLinkLagged()` answers yes on the
-  first miss after that. A mutual close and re-open is the common case, since
-  `Task_ReestablishLink` takes it on every cancelled trade. The gate is the rule
-  the handshake word already follows: a live packet may repair an agreement,
-  never start one.
+  It works: the host logged `link peer 1 left (suspended or quit)` and then
+  `link error ... last=peer left p1 newest=537` two frames later, instead of
+  stalling.
 
-  Not confirmed on hardware. Two cancelled trades in a row is the test.
-- **What is still open behind those two.** The stall at frame 863 had two
-  candidate triggers and the log cannot separate them. The close with no goodbye
-  is one and is now fixed. The other is a frame-origin mismatch:
-  `Ctr3dsLinkNewSession()` resets `sFrame` to 0 while the peer keeps counting,
-  and its own comment claims that is safe because "the pair agrees again as soon
-  as the second console resets" -- true only if the second console resets inside
-  50 frames, which is what the queue ceiling above allows. The log shows the
-  mismatch three times, as `link ring lapped, p0 sent 1408 while we still owe 0`
-  and a `link peer lag p0=-1025` that is not a possible lag value. A session
-  epoch in `LinkPacket` is the cure, for that and for a peer lost to a crash, a
-  power-off or range rather than a clean close. The `link stalled 20 frames, we
-  want X, p1 newest=Y` line from the next console run decides whether it is
-  needed. Eliminated as a trigger: the status cache, because neither log carries
-  a `link status failed` line, so `udsGetConnectionStatus()` was succeeding and
-  `total_nodes` really was 2.
-- **Why an Old 3DS host is the exposed one.** Not a fault of its own, and worth
-  keeping because it explains why this pair traded fine the other way round.
-  `APT_SetAppCpuTimeLimit` returns `0xD8E05BF4` there, so the console is
-  single-core for good: `prof ppu` means about 12000 us against 3600 on a New
-  3DS, and the log shows `48 of the last 600 frames late (260 at 30 Hz)` with the
-  full 8 ms wait spent routinely. Two effects follow from the divider. It makes
-  the sends bursty in pairs, because the render iteration carries the pair's
-  whole VBlank wait and the skipped one carries none, so two consoles halved in
-  opposite phases land packets outside each other's 8 ms window by construction.
-  And a stall holds the divider engaged, because `sPairSpan` includes the link's
-  sleep while the escape wants it under 17.5 ms, which is the `display halved,
-  30 Hz` line arriving between the missed frame and the error. The divider never
-  skips a game frame, so the pump still runs at 60 Hz and the queue ceiling is
-  about 0.83 s either way.
+  **The hazard, and why `drain()` gates `PHASE_BYE` on `sHsDone`.** A goodbye
+  carries no session id, and nothing drains the wireless while merely paired, so
+  the goodbye of the link that just ended can still be waiting when the next one
+  starts. Honoured there it sets `sPeerGone` on a healthy link, and
+  `Ctr3dsLinkLagged()` then answers yes on the first miss. A mutual close and
+  re-open is the common case, since `Task_ReestablishLink` takes it on every
+  cancelled trade. The gate is the rule the handshake word already follows: a live
+  packet may repair an agreement, never start one.
+- **An Old 3DS runs its game at about 51 Hz while linked.** Measured, not
+  estimated: 510 transport frames against the client's 600 over the same wall
+  clock. It is the rate difference the ratchet fed on, and with the guard above it
+  only makes a trade slower. It belongs with the rasteriser item further down,
+  which is the cost: inline on core 0 at `prof ppu mean 11208-12570 us`, with 189,
+  then 66, then 9 of 600 frames late.
+
+  Holding the display divider engaged whenever a link is up would trade display
+  smoothness for game-rate stability, since the divider's whole purpose is to keep
+  the game at 60 while halving the display. Not attempted: the divider is already
+  recorded here as a limit cycle by construction, so it wants its own pass.
+- **Still open: a session epoch in `LinkPacket`.** The cure for a peer lost to a
+  crash, a power-off or range rather than a clean close, and for the frame-origin
+  mismatch where `Ctr3dsLinkNewSession()` resets `sFrame` to 0 while the peer
+  keeps counting. The 2026-09-24 logs showed that three times, as
+  `link ring lapped, p0 sent 1408 while we still owe 0` and a
+  `link peer lag p0=-1025` that is not a possible value. Neither 2026-09-25 log
+  carries a `ring lapped` line, so it is parked rather than urgent.
 - **A retried frame delivered one command twice: fixed.** Found 2026-09-24
   while fixing the second link-up, and the same class: the transport must
   deliver every command exactly once. `Ctr3dsLinkExchange()`

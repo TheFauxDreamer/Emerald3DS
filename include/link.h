@@ -330,6 +330,11 @@ void Ctr3dsLinkNewSession(const char *why);
 // tells the peer instead, and it fails at once rather than at its tolerance.
 void Ctr3dsLinkClosing(void);
 
+// How deep gLink.sendQueue is, once for each pumped frame. Reported as `sendq`
+// on the period line. The queue is the gap between the game's frame rate and the
+// transport's, and a figure that climbs across periods is that gap filling it.
+void Ctr3dsLinkNoteQueue(int depth);
+
 // One frame of the handshake, called while gLink.state is LINK_STATE_HANDSHAKE
 // with gLink.handshakeAsMaster. It answers 1 with the same barrier DoHandshake()
 // uses on a cable. Without it the link went live at pairing time rather than
