@@ -322,6 +322,14 @@ void Ctr3dsLinkLogFault(const char *why);
 // different frames. `why` names the caller for the log.
 void Ctr3dsLinkNewSession(const char *why);
 
+// This link is ending. Call it from CloseLink(), before the reset above.
+//
+// CloseLink() sets gLinkVSyncDisabled, and LinkVSync() is the only caller of the
+// transport, so this console stops sending. It stays a UDS node, so a peer that
+// is still live sees a full roster and reads the silence as a late frame. This
+// tells the peer instead, and it fails at once rather than at its tolerance.
+void Ctr3dsLinkClosing(void);
+
 // One frame of the handshake, called while gLink.state is LINK_STATE_HANDSHAKE
 // with gLink.handshakeAsMaster. It answers 1 with the same barrier DoHandshake()
 // uses on a cable. Without it the link went live at pairing time rather than

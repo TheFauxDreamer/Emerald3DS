@@ -993,7 +993,23 @@ static int drain(void)
             // A peer leaving, before any of the bookkeeping below: a goodbye
             // carries no frame, no command and no handshake word, so none of it
             // applies and letting it through would move sPeerNewest.
+            //
+            // Only while a link is live, which is the rule the handshake word
+            // below already follows. A goodbye carries no session id, and
+            // nothing drains the wireless while merely paired, so the goodbye
+            // of the link that just ended can still be waiting here when the
+            // next one starts. Honoured there it would set sPeerGone on a
+            // healthy link, and Ctr3dsLinkLagged() answers yes on the first
+            // miss after that. A mutual close and re-open is the common case:
+            // Task_ReestablishLink takes it on every cancelled trade. During a
+            // handshake a goodbye decides nothing that the handshake barrier
+            // and Task_WaitForLinkPlayerConnection's own give-up do not.
             if (pkt.phase == PHASE_BYE) {
+                if (!sHsDone) {
+                    n++;
+                    got = 0;
+                    continue;
+                }
                 if (!sPeerGone) {
                     sPeerGone = 1;
                     CtrLog("emerald3ds: link peer %d left (suspended or quit)\n", p);
@@ -1141,9 +1157,19 @@ static long peer_behind(int p)
 #define LINK_LAG_TOLERANCE_MS 3000
 #define LINK_LAG_MIN_MISSES   2
 
-// One report partway through a stall, well before the tolerance gives up, so a
-// log shows what the link was waiting for while there was still a link.
-#define LINK_STALL_REPORT_MISSES 60
+// One report partway through a stall, so a log shows what the link was waiting
+// for while there was still a link.
+//
+// It must be under the send queue's capacity, not under the tolerance above. The
+// queue is what ends a stall in practice (see Ctr3dsLinkMiss, src/link.c), and
+// at 60 this line could never reach a log: the game raised its communication
+// error ten frames earlier and took the link with it. The very stall this line
+// exists to name is the one it always missed.
+//
+// 20 frames is about 333 ms at 60 fps. That is longer than the worst save flush
+// measured on a console, 139 ms, so an ordinary flush does not report. One line
+// for each run, so a miss storm still cannot fill a log.
+#define LINK_STALL_REPORT_MISSES 20
 
 // One line for each run of missed frames, not one for each miss. A miss storm
 // must not fill the log, and the run length is what tells a late peer from a
@@ -1634,8 +1660,8 @@ void Ctr3dsLinkNewSession(const char *why)
     memset(sHsSeen, 0, sizeof(sHsSeen));
 }
 
-// The HOME menu is about to freeze this console. Tell the peer once, so it can
-// fail fast and correctly instead of calling us late for three seconds.
+// This console is leaving. Tell the peer once, so it can fail fast and correctly
+// instead of calling us late for three seconds.
 //
 // Best effort by design: one broadcast, no retry, no wait for an answer. There
 // is no second chance, and a goodbye that does not arrive leaves the peer
@@ -1644,7 +1670,7 @@ void Ctr3dsLinkNewSession(const char *why)
 // hs is zero because drain() harvests the handshake word off every accepted
 // packet before it looks at the phase, and the size stays sizeof(LinkPacket)
 // because the receiver rejects anything else as a short packet.
-void Ctr3dsLinkSuspending(const char *why)
+static void send_bye(const char *why)
 {
     LinkPacket out;
     CtrLinkStatus st;
@@ -1662,6 +1688,35 @@ void Ctr3dsLinkSuspending(const char *why)
               &out, sizeof(out));
 
     CtrLog("emerald3ds: link goodbye sent (%s)\n", why);
+}
+
+// The HOME menu is about to freeze this console.
+void Ctr3dsLinkSuspending(const char *why)
+{
+    send_bye(why);
+}
+
+// The game is closing the link itself, from CloseLink().
+//
+// A suspend is not the only way to go quiet, and this is the common one. The
+// game opens and closes a link many times on one network, and several callers
+// close it on one side only. CloseLink() sets gLinkVSyncDisabled, which stops
+// LinkVSync() and with it the only caller of the transport, so this console
+// stops sending while it stays a UDS node. A live peer then sees a full roster
+// and no packets, which is exactly what a late frame looks like, and it spends
+// its whole tolerance before it gives up. Worse, it spends that tolerance
+// filling its send queue, and the queue is full long before the tolerance ends.
+//
+// Only a link that went live is worth a goodbye. This is the test
+// Ctr3dsLinkNewSession() already uses to decide whether a close is worth a log
+// line, for the same reason: a Cable Club visit that never linked has no peer
+// that is waiting on us.
+void Ctr3dsLinkClosing(void)
+{
+    if (sFrame == 0 && !sHsDone)
+        return;
+
+    send_bye("link closed");
 }
 
 // Coming back. Two separate things are broken and both have to be said.
@@ -1755,10 +1810,30 @@ void Ctr3dsLinkLogIds(int local, int sio, int isMaster)
 
 void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount)
 {
+    // With what the stall line carries, because this line always arrives and
+    // that one only arrives if the stall was long enough. status and send tell
+    // WHICH ceiling ended the link; these tell what it was waiting for. A log
+    // that named only the error left the cause to be guessed from the code.
+    CtrLinkStatus st;
+    char buf[96];
+    int n = 0;
+    int why = (sMissWhy >= 0 && sMissWhy < MISS_KINDS) ? sMissWhy : MISS_UNKNOWN;
+
+    buf[0] = '\0';
+
+    Ctr3dsLinkGetStatus(&st);
+    for (int p = 0; p < st.playerCount && n < (int)sizeof buf - 24; p++) {
+        if (p == st.localId)
+            continue;
+        n += snprintf(buf + n, sizeof buf - (size_t)n, " p%d newest=%ld", p,
+                      sPeerSeen[p] ? (long)sPeerNewest[p] : -1L);
+    }
+
     CtrLog("emerald3ds: link error status=%08X send=%d recv=%d missrun=%u "
-           "frame=%lu players=%u\n",
+           "frame=%lu players=%u last=%s%s\n",
            status, sendCount, recvCount, sMissRun, (unsigned long)sFrame,
-           (unsigned)sStatus.playerCount);
+           (unsigned)st.playerCount, kMissWhy[why],
+           (n > 0) ? buf : " no peers on the network");
 }
 
 // A link fault that does NOT pass TrySetLinkErrorBuffer().

@@ -657,6 +657,11 @@ void Ctr3dsLinkNewSession(const char *why);
 void Ctr3dsLinkSuspending(const char *why);
 void Ctr3dsLinkResumed(const char *why);
 
+// The same goodbye, for the link the game itself closes. CloseLink() stops the
+// pump and leaves this console on the network, which a live peer cannot tell
+// from a slow frame. Call it before Ctr3dsLinkNewSession("close").
+void Ctr3dsLinkClosing(void);
+
 // How long the last frame's exchange spent asleep waiting on a peer, read and
 // cleared. The display divider subtracts it, because that time is not work and
 // counting it halves the display on a scene that never earned it.
