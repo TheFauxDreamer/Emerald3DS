@@ -424,6 +424,14 @@ void CloseLink(void)
     sLinkOpen = FALSE;
     DisableSerial();
 #if PLATFORM_3DS
+    // Tell the peer first. This console is about to stop pumping: CloseLink sets
+    // gLinkVSyncDisabled, LinkVSync is the only caller of the transport, and the
+    // console stays a UDS node. So a peer that is still live reads us as merely
+    // late, for as long as its own tolerance lasts. A goodbye makes it fail at
+    // once and correctly. It must go out before the reset below, which clears
+    // the state the goodbye reads.
+    Ctr3dsLinkClosing();
+
     // This half matters as much as the one in OpenLink(). A console that has
     // closed must stop putting its handshake word on the wire, or a peer that
     // re-opens first agrees with the old word and the two go live on different
@@ -2188,13 +2196,30 @@ static void DequeueRecvCmds(u16 (*recvCmds)[CMD_LENGTH])
 // timeouts. It also has to outlast a save flush, which blocks a console for
 // more than 100 ms and happens repeatedly during a trade.
 //
+// The clock is not the only ceiling, and it is not the lower one. The send queue
+// holds QUEUE_CAPACITY commands. LinkMain1 adds one for each frame that has one,
+// and the pump pops only when a frame lands, so a stall fills the queue.
+// EnqueueSendCmd then latches QUEUE_FULL_SEND. CheckLinkErrors treats that as
+// fatal, and nothing clears it inside a link. The result is Emerald's
+// communication error with no cause given, about 130 frames before the clock
+// gives up. An Old 3DS hosting a trade reached it: status=00004168 send=50, the
+// queue-full bit with the queue at its capacity, and no lag bit at all.
+//
+// So report lag while the queue still has room. Test the queue and not a count
+// of frames, because the queue grows only for a command that is not empty: a
+// trade fills it on every frame, and an idle link in the Cable Club room does
+// not fill it at all.
+//
 // This function only decides. It writes gLink.lag, which is what LinkMain1
 // reads.
+#define CTR_LINK_QUEUE_HEADROOM 10
+
 static void Ctr3dsLinkMiss(void)
 {
     Ctr3dsLinkNoteMiss();
 
-    if (Ctr3dsLinkLagged())
+    if (Ctr3dsLinkLagged()
+     || gLink.sendQueue.count >= QUEUE_CAPACITY - CTR_LINK_QUEUE_HEADROOM)
         gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
 }
 
