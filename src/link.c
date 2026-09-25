@@ -534,8 +534,52 @@ u16 LinkMain2(const u16 *heldKeys)
     if (gLinkStatus & LINK_STAT_CONN_ESTABLISHED)
     {
         ProcessRecvCmds(SIO_MULTI_CNT->id);
+#if PLATFORM_3DS
+        // One command for each DELIVERED frame, not for each game frame.
+        //
+        // gLinkCallback is what writes the next command, LINKCMD_CONT_BLOCK
+        // among them, and LinkMain1 then puts it in gLink.sendQueue. The pump
+        // pops that queue only when a frame reaches the peers. On a cable the
+        // two are the same event, because a cable cannot run slower than the
+        // game, so one game frame really is one transfer.
+        //
+        // Over wireless they come apart. The transport is a lockstep, so it
+        // advances at the slower console's rate, while this console's game keeps
+        // advancing at its own. The difference went into the send queue, one
+        // entry for each missed frame, and no frame can ever work it off: the
+        // game offers one command a frame and the transport carries one a frame,
+        // so there is no spare room to catch up in. A console log measured 600
+        // game frames against 510 transport frames, and the queue reached
+        // QUEUE_CAPACITY about ten seconds into a link. Both consoles then show
+        // Emerald's communication error.
+        //
+        // So do not make a command for a frame that carried nothing. The block
+        // transfer waits instead, which is what it would do on a cable.
+        //
+        // The alternative was to slow this console until it matched its peer, by
+        // waiting longer in the transport. That is not available: CtrAudioFrame
+        // (3ds/host/audio.c) makes exactly one buffer of 224 samples for each
+        // game frame against a fixed 13401 Hz drain, and a shortfall of 0.29% is
+        // already audible.
+        //
+        // ProcessRecvCmds above still runs, and must: it skips any player whose
+        // command is 0, which is all of them on this path, and it clears
+        // gLinkPartnersHeldKeys. TrySetLinkErrorBuffer below still runs too,
+        // because every link error passes through it.
+        //
+        // The vanilla two lines are repeated under #else rather than left to
+        // hang off this guard. An `if` whose body sits past the #endif compiles
+        // both ways today and silently captures the next statement anyone adds
+        // after it, in one configuration only.
+        if (!(gLinkStatus & LINK_STAT_RECEIVED_NOTHING))
+        {
+            if (gLinkCallback != NULL)
+                gLinkCallback();
+        }
+#else
         if (gLinkCallback != NULL)
             gLinkCallback();
+#endif
         TrySetLinkErrorBuffer();
     }
     return gLinkStatus;
@@ -2196,30 +2240,19 @@ static void DequeueRecvCmds(u16 (*recvCmds)[CMD_LENGTH])
 // timeouts. It also has to outlast a save flush, which blocks a console for
 // more than 100 ms and happens repeatedly during a trade.
 //
-// The clock is not the only ceiling, and it is not the lower one. The send queue
-// holds QUEUE_CAPACITY commands. LinkMain1 adds one for each frame that has one,
-// and the pump pops only when a frame lands, so a stall fills the queue.
-// EnqueueSendCmd then latches QUEUE_FULL_SEND. CheckLinkErrors treats that as
-// fatal, and nothing clears it inside a link. The result is Emerald's
-// communication error with no cause given, about 130 frames before the clock
-// gives up. An Old 3DS hosting a trade reached it: status=00004168 send=50, the
-// queue-full bit with the queue at its capacity, and no lag bit at all.
-//
-// So report lag while the queue still has room. Test the queue and not a count
-// of frames, because the queue grows only for a command that is not empty: a
-// trade fills it on every frame, and an idle link in the Cable Club room does
-// not fill it at all.
-//
 // This function only decides. It writes gLink.lag, which is what LinkMain1
 // reads.
-#define CTR_LINK_QUEUE_HEADROOM 10
-
+//
+// It does NOT test the send queue. A build that ended the link once the queue
+// came within ten of QUEUE_CAPACITY reported lag on a healthy link, because the
+// queue was already near its limit for a reason that had nothing to do with a
+// stall: see the note on LINK_STAT_RECEIVED_NOTHING in LinkMain2. The queue is
+// no longer allowed to fill, so the clock is the only ceiling again.
 static void Ctr3dsLinkMiss(void)
 {
     Ctr3dsLinkNoteMiss();
 
-    if (Ctr3dsLinkLagged()
-     || gLink.sendQueue.count >= QUEUE_CAPACITY - CTR_LINK_QUEUE_HEADROOM)
+    if (Ctr3dsLinkLagged())
         gLink.lag = gLink.isMaster ? LAG_MASTER : LAG_SLAVE;
 }
 
@@ -2301,6 +2334,9 @@ static void Ctr3dsLinkPump(void)
 
     if (gLink.state != LINK_STATE_CONN_ESTABLISHED)
         return;
+
+    // Before the pop below, so the figure is the backlog this frame inherited.
+    Ctr3dsLinkNoteQueue(gLink.sendQueue.count);
 
     fromQueue = (gLink.sendQueue.count > 0);
 
