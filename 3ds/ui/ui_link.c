@@ -23,6 +23,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "ui_card.h"
+#include "ui_view.h"
 #include "ui_link.h"
 
 #define BTN_H        30
@@ -69,7 +70,12 @@
 #define CV_FLIP_X    (CV_CARD_X + UI_CARD_W - 2 * UI_CHEVRON_W - 4)
 #define CV_FLIP_Y    (CV_CARD_Y + UI_CARD_H + 3)
 
-static int sCardOpen;
+// The card view is UI_VIEW_LINK_CARDS on the view stack, over the LINK page,
+// so a tab switch closes it (ui_view.h). Which card and which side stay here.
+static int CardViewOpen(void)
+{
+    return UiViewIsOpen(UI_VIEW_LINK_CARDS);
+}
 static int sCardWho;     // the player whose card is at 1:1
 static int sCardBack;    // the profile side
 
@@ -235,8 +241,7 @@ static int TouchCardView(const CtrTouchState *t)
 {
     if (UiHit(t, CV_BACK_X, CV_BACK_Y, CV_BACK_W, CV_BACK_H))
     {
-        sCardOpen = 0;
-        UiMarkDirty();
+        UiViewPop();
         return 1;
     }
 
@@ -307,7 +312,7 @@ static void DrawConnected(const CtrLinkStatus *st)
 // UiExtraDraw asks before it draws either.
 int UiLinkPageFullBleed(void)
 {
-    return sCardOpen;
+    return CardViewOpen();
 }
 
 void UiLinkPageDraw(void)
@@ -317,10 +322,10 @@ void UiLinkPageDraw(void)
 
     // It closes itself if the link goes away under it, so a dropped peer
     // cannot leave a card on screen with no link behind it.
-    if (sCardOpen && !CardsReady())
-        sCardOpen = 0;
+    if (CardViewOpen() && !CardsReady() && UiViewTop() == UI_VIEW_LINK_CARDS)
+        UiViewPop();
 
-    if (sCardOpen)
+    if (CardViewOpen())
     {
         DrawCardView();
         return;
@@ -373,7 +378,7 @@ void UiLinkPageTouch(const CtrTouchState *t)
 
     // The card view owns the screen while it is up, including the area the
     // pager would be in.
-    if (sCardOpen)
+    if (CardViewOpen())
     {
         TouchCardView(t);
         return;
@@ -395,7 +400,7 @@ void UiLinkPageTouch(const CtrTouchState *t)
         // what LinkSessionLive() tests. Below that refusal, this is unreachable.
         if (UiHit(t, CARDS_X, STOP_Y, CARDS_W, BTN_H) && CardsReady())
         {
-            sCardOpen = 1;
+            UiViewPush(UI_VIEW_LINK_CARDS, 0);
             sCardWho = CardSlotId(0);   // the other player first
             sCardBack = 0;
             UiMarkDirty();
@@ -467,7 +472,7 @@ u32 UiLinkPageStateKey(void)
     // is not scanning, so the two can never both be meaningful, and the panel
     // would otherwise not repaint on a card change.
     if (state == 7)
-        n = (sCardOpen << 3) | ((sCardWho & 3) << 1) | (sCardBack ? 1 : 0);
+        n = (CardViewOpen() << 3) | ((sCardWho & 3) << 1) | (sCardBack ? 1 : 0);
 
     return (state << 19)
          | ((u32)((st.playerCount - 1) & 3) << 22)

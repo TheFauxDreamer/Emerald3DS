@@ -192,6 +192,9 @@ bool8 UiBagPickerOpen(void);
 
 void UiMapDraw(void);
 void UiMapTouch(const CtrTouchState *t);
+// Clears the FLY and ESCAPE confirms. The shell calls it when the MAP tab is
+// left, so a YES never waits on a screen the player went away from.
+void UiMapLeave(void);
 
 // A key for the player's position on the region map, for the shell's repaint
 // hash. Nothing else in the hash tracks the position, so without this the map

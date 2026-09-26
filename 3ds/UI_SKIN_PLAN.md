@@ -145,7 +145,7 @@ design record. Each is exactly 320x240, or an integer 2x / 4x multiple.
 |---|---|---|
 | `shell.png` | the bar and the content split | settled first, see below |
 | `overlays.png` | achievement toast, shiny notice and quick-throw strip, together | their geometry is coupled (see "The overlays" below) |
-| `party.png` | the 2x3 grid | **both** cell heights: 64px with no cheat tags, 56px under the 24px tag strip ([tab_party.c:44](ui/tab_party.c#L44)) |
+| `party.png` | the 2x3 grid | **both** cell heights: 64px with no cheat tags, 56px under the 24px tag strip ([tab_party.c:45](ui/tab_party.c#L45)) |
 | `party_detail.png` | the per-mon detail view | one left-column rect that all three tenants must fit: stats, a tapped move's info, the IV/EV spread |
 | `bag.png` | pockets, list, details, USE | |
 | `bag_picker.png` | the target picker | a 24px header over a 2x3 grid of 160x56 |
@@ -196,7 +196,7 @@ to the current 192px content area:
 | Overlay | Rect | Defined at |
 |---|---|---|
 | achievement toast | 320x40 at (0, 0), so y 0..40 | [ui_achtoast.h:27](ui/ui_achtoast.h#L27) (`UI_AT_*`) |
-| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:144](ui/bottom_screen.c#L144) (`NOTICE_*`) |
+| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:163](ui/bottom_screen.c#L163) (`NOTICE_*`) |
 | quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:25](ui/ui_quickball.h#L25) (`UI_QB_*`) |
 
 The three **tile the content area exactly**. The toast ends at y 40, where the
@@ -362,7 +362,7 @@ has **16 call sites in ten files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
 encounters view ([view_encounters.c:663](ui/view_encounters.c#L663)), and all
 three overlays ([ui_achtoast.c:122](ui/ui_achtoast.c#L122),
-[bottom_screen.c:469](ui/bottom_screen.c#L469),
+[bottom_screen.c:488](ui/bottom_screen.c#L488),
 [ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
 `UiNineSlice` of `UI_SHEET_PANEL` and every one of them is reskinned untouched.
 Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
@@ -380,12 +380,12 @@ secondary labels, button outlines and arrow fills, so moving the block into
 `ui_skin.h` with the skin's values retargets all of them in the same edit.
 
 Then drop `top[0] = UiFrameId()` from `UiStateHash()`
-([bottom_screen.c:549](ui/bottom_screen.c#L549)). Once the frame no longer
+([bottom_screen.c:568](ui/bottom_screen.c#L568)). Once the frame no longer
 drives the bottom screen it is a stale input to the repaint hash. `UiFrameId()`
 itself stays: it is still correct, and the top screen still uses the setting.
 
 Replace the in-game `UiClear(UI_COL_BG)` in `Redraw()`
-([bottom_screen.c:774](ui/bottom_screen.c#L774)) with a `UiTileFill` of the
+([bottom_screen.c:798](ui/bottom_screen.c#L798)) with a `UiTileFill` of the
 backdrop. The pre-game `UiClear(0)` a few lines above it stays black: that is
 the screen under the title, not a skin surface. Since this plan was first
 written, that screen also shows TOUCH TO START and the build id
@@ -403,11 +403,11 @@ edits at all.** That is the checkpoint worth building to before anything else.
 
 ### The snapshot is on the skin's side
 
-`Redraw()` ([bottom_screen.c:718](ui/bottom_screen.c#L718)) no longer ends with
+`Redraw()` ([bottom_screen.c:742](ui/bottom_screen.c#L742)) no longer ends with
 the tab bar. It paints the still screen (ground, tab, strip, toast, notice, bar), takes
 `UiSnapshot()` if `AnimatedLayerActive()`, and only then runs
 `DrawAnimatedLayer()` for the pieces that move. An animation step
-(`RedrawAnimated`, [:852](ui/bottom_screen.c#L852)) puts a few rects back from
+(`RedrawAnimated`, [:876](ui/bottom_screen.c#L876)) puts a few rects back from
 the snapshot and redraws only those.
 
 Since `af5780b` the snapshot is taken only while the animated layer has
@@ -486,15 +486,15 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:76](ui/ui_link.c#L76)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:948](ui/tab_party.c#L948)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:982](ui/tab_party.c#L982)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
+| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:82](ui/ui_link.c#L82)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:954](ui/tab_party.c#L954)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
+| inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:988](ui/tab_party.c#L988)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:535](ui/bottom_screen.c#L535)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
 | check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:204](ui/tab_extra.c#L204)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
-The BACK buttons are 38x22 ([tab_party.c:97](ui/tab_party.c#L97)), 42x22
-([tab_dex.c:91](ui/tab_dex.c#L91), and the encounters view, which matched DEX
-on purpose), 56x20 ([tab_bag.c:98](ui/tab_bag.c#L98), BAG's CANCEL) and 60x22
-(LINK's card view, [ui_link.c:62](ui/ui_link.c#L62)). Add one widget to
+The BACK buttons are 38x22 ([tab_party.c:98](ui/tab_party.c#L98)), 42x22
+([tab_dex.c:92](ui/tab_dex.c#L92), and the encounters view, which matched DEX
+on purpose), 56x20 ([tab_bag.c:99](ui/tab_bag.c#L99), BAG's CANCEL) and 60x22
+(LINK's card view, [ui_link.c:63](ui/ui_link.c#L63)). Add one widget to
 `ui_gfx`:
 
 ```c
@@ -536,7 +536,7 @@ icons are:
 1. `UiButton` records each button it draws (rect, label or glyph, state) in a
    small static table, cleared at the top of `Redraw()`.
 2. `ui_draw.c` gains `UiSetPointer(const CtrTouchState *)`, called once per
-   frame from `CtrBottomUpdate` ([bottom_screen.c:875](ui/bottom_screen.c#L875)).
+   frame from `CtrBottomUpdate` ([bottom_screen.c:899](ui/bottom_screen.c#L899)).
 3. `DrawAnimatedLayer` gains a last step, after whichever tenant it ran: while
    the pointer is `touching`, find the recorded button under it, restore its
    rect from the snapshot and draw it in the pressed band.
@@ -570,7 +570,7 @@ run is still in flight.
 ## Step 6: the shell, then the tabs
 
 **Shell, with all three overlays.** `DrawTabBar`
-([bottom_screen.c:664](ui/bottom_screen.c#L664)) currently draws flat
+([bottom_screen.c:688](ui/bottom_screen.c#L688)) currently draws flat
 rectangles. It becomes the bar's ground, a per-cell art state, an icon from
 `icons.png` and the label beneath it, at whatever `UI_TABBAR_H` `shell.png`
 established. The toast, the notice and the strip are re-fitted in the same pass,
@@ -591,14 +591,14 @@ Keep the existing convention of constants derived from each other
 (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`) rather than tabulated twice, and
 check that the touch handler uses the same expression the draw code does.
 PARTY's animated layer restores rects computed from those same constants
-(`UiPartyRedrawAnimated`, [tab_party.c:406](ui/tab_party.c#L406)), so it moves
+(`UiPartyRedrawAnimated`, [tab_party.c:412](ui/tab_party.c#L412)), so it moves
 with the cell or icons get drawn where the cell no longer is.
 
 **The trap specific to re-laying-out these surfaces is that there is no
 clipping.** Every panel width in the tree is hand-measured against the longest
 known game string; BAG's list panel is 24 tiles because that leaves exactly
 108px, the width of the widest item description line in the game
-([tab_bag.c:41](ui/tab_bag.c#L41)). Narrowing any panel that shows game text
+([tab_bag.c:42](ui/tab_bag.c#L42)). Narrowing any panel that shows game text
 means re-measuring that string, or drawing it through `UiTextClipped` /
 `UiTextWrapped` inside a `UiClipPush` (`SECOND_SCREEN_PLAN.md` step 1, shipped).
 LINK shows a
@@ -609,15 +609,10 @@ measures and truncates it, and any re-fit of that page must keep the limit.
 
 ## Optional, and cheap only because this touches every surface anyway
 
-Modal state lives in file statics that survive a tab switch, so leaving a view
-by tapping another tab and coming back re-enters it: `sDetailOpen` (PARTY),
-`sEntryOpen` (DEX), `sView` (BAG's picker), `sOpen`
-([view_encounters.c:166](ui/view_encounters.c#L166), MAP's encounters view),
-MAP's fly confirm, `sConfirm` ([tab_map.c:132](ui/tab_map.c#L132)), and LINK's
-card view, `sCardOpen` ([ui_link.c:72](ui/ui_link.c#L72)). Known bug,
-step 0 of `SECOND_SCREEN_PLAN.md`. Folding the reset into the tab switch is a
-few lines while those files are already open. Out of scope unless explicitly
-taken up.
+The detail screens are views on the stack in `ui/ui_view.c`, and a tab switch
+closes them (`SECOND_SCREEN_PLAN.md` step 0, shipped). A re-fit must keep each
+screen's open and close going through `UiViewPush` and `UiViewPop`, not a new
+flag.
 
 ---
 
@@ -650,7 +645,7 @@ drawing API, which gains `UiPanel`, `UiButton` and the `ui_gfx` calls and loses
 the "text on a frame must use `UiThemeText()`" rule once frames no longer apply
 here; and section 14, the layout and overlay constants at whatever values
 `shell.png` settled. In code, the comment above the notice's geometry
-([bottom_screen.c:140](ui/bottom_screen.c#L140)), which says to keep the
+([bottom_screen.c:159](ui/bottom_screen.c#L159)), which says to keep the
 numbers in whole tiles. The same rule is implied by the toast's and the strip's
 `*_TX`/`*_TY` constants, and `UiPanel` retires it for all three.
 
@@ -674,8 +669,8 @@ bash 3ds/build_objs.sh && make -C 3ds
   visibly depresses and springs back on slide-off; after each pass in step 6,
   that surface matches its wireframe.
 - **Clipping**, which is where a new blitter fails silently rather than loudly:
-  the BAG target picker's cells ([tab_bag.c:425](ui/tab_bag.c#L425)) and the
-  PARTY cells ([tab_party.c:572](ui/tab_party.c#L572)) both draw panels at
+  the BAG target picker's cells ([tab_bag.c:429](ui/tab_bag.c#L429)) and the
+  PARTY cells ([tab_party.c:578](ui/tab_party.c#L578)) both draw panels at
   computed offsets near the screen edge. Watch those two rather than the static
   layouts.
 - **Repaint cost, on the console.** Build with `CTR_DEBUG_MENU` and read
@@ -698,7 +693,7 @@ bash 3ds/build_objs.sh && make -C 3ds
   no border torn, on every tab, before and after `UI_CONTENT_H` moves.
 - **Touch parity per surface.** Every control still reachable, and nothing
   tappable that is not drawn: the IV/EV button carries a species check for
-  exactly that reason ([tab_party.c:1160](ui/tab_party.c#L1160)).
+  exactly that reason ([tab_party.c:1166](ui/tab_party.c#L1166)).
 - **On hardware, not only in an emulator** (`AGENTS.md`). The two bugs this
   codebase has hit hardest, the null save-block read and the decompress overrun,
   were both invisible in Azahar.

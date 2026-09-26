@@ -29,6 +29,7 @@
 #include "ui_achtoast.h"
 #include "ui_title.h"
 #include "ui_team.h"
+#include "ui_view.h"
 
 // Two flags. sNeedsRepaint: the framebuffer is stale. sDirty: the host has not
 // uploaded the framebuffer yet. Do not merge them.
@@ -115,6 +116,24 @@ static u32 VisibleTabs(u8 *out)
     return n;
 }
 
+// Every way the active tab changes goes through here: the tab bar, the toast's
+// VIEW, and EnsureTabVisible. So does a tap on the tab that is already up, which
+// returns it to its top.
+//
+// It closes every view (ui_view.h) and anything the old tab left waiting for an
+// answer. Without it, a detail view left by a tab switch was still open when
+// the player came back.
+static void LeaveTab(u8 next)
+{
+    UiViewReset();
+
+    if (sTab == UI_TAB_MAP)
+        UiMapLeave();
+
+    sTab = next;
+    sNeedsRepaint = 1;
+}
+
 // Flags never clear, so the active tab cannot usually disappear. This guard
 // stops an index into a hidden tab.
 static void EnsureTabVisible(void)
@@ -126,7 +145,7 @@ static void EnsureTabVisible(void)
         if (vis[i] == sTab)
             return;
 
-    sTab = vis[0];
+    LeaveTab(vis[0]);
 }
 
 // --------------------------------------------------------- shiny notice ----
@@ -585,6 +604,11 @@ static u32 UiStateHash(void)
             top[4] = UiTrophyStateKey();
     }
 
+    // Which views are open over the tab. Push and pop mark the screen dirty
+    // already; this keeps the hash from disagreeing with what shows. Its own
+    // multiplier, so it cannot cancel the tab's key.
+    top[4] ^= UiViewKey() * 0x9E3779B1u;
+
     // The shiny notice. It opens with a catchable shiny and closes on DISMISS
     // or at the end of the battle. It reads only globals, so it is safe before
     // a save exists.
@@ -940,10 +964,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
              && UiAchToastActive())
     {
         if (UiAchToastTouch(touch))
-        {
-            sTab = UI_TAB_TROPHY;
-            sNeedsRepaint = 1;
-        }
+            LeaveTab(UI_TAB_TROPHY);
     }
     // The quick-throw strip, on the same terms. It takes every touch in its
     // rect, so a drag that starts on it does not reach the tab.
@@ -962,11 +983,11 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         u32 n = VisibleTabs(vis);
         u32 i = (u32)touch->x * n / CTR_BOTTOM_WIDTH;
 
-        if (i < n && vis[i] != sTab)
-        {
-            sTab = vis[i];
-            sNeedsRepaint = 1;
-        }
+        // The same tab again returns it to its top, as it does in the game's
+        // own menus when B backs out. Only when something is open, so a stray
+        // tap on the active tab costs no repaint.
+        if (i < n && (vis[i] != sTab || UiViewTop() != UI_VIEW_NONE))
+            LeaveTab(vis[i]);
     }
     else if (touch != NULL && touch->y < UI_CONTENT_H)
     {
