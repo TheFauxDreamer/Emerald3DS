@@ -165,12 +165,20 @@ you have one: the same range it searches, with a dot for every hidden item
 still there. **BERRIES** lists every tree you planted, where it is, how far it
 has grown, when it grows next and how often you watered it. **DAY CARE** shows
 who is there, the level each one had when you left it and has now, and the old
-man's words for how they get along.
+man's words for how they get along. **FRIENDSHIP** is the Pokétch's Friendship
+Checker: hearts for each Pokémon on the same scale as the friendship raters in
+Verdanturf and Pacifidlog, the exact value, when it is enough for an evolution
+such as Golbat's or Azurill's, and the power of Return or Frustration if it
+knows one. **DAILY** has the Shoal Cave tide and when it turns, whether you
+drew the lottery today, whether Mirage Island shows today and how long until
+the next day, and after you reach the Battle Frontier, your BP and each
+facility's symbols and best record.
 
 Then one tile for each page of port settings: SETTINGS, GAMEPLAY, EXTRAS and
 FOLLOWER, plus LINK for the Cable Club. Tap a tile to open its page and BACK to
 return; switching tab closes it, so HOME always opens on the grid. A setting
-that is only on or off is a checkbox: tap the box or its name.
+that is only on or off is a checkbox: tap the box or its name. A debug build
+opens its DEBUG page from a button on SETTINGS.
 
 *SETTINGS* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or FILL

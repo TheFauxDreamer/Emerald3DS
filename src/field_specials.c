@@ -965,6 +965,31 @@ u8 GetLeadMonFriendshipScore(void)
     return FRIENDSHIP_NONE;
 }
 
+#if PLATFORM_3DS
+// For the FRIENDSHIP page of the second screen: the rater's tier for any
+// Pokemon. The tiers are a copy of the function above, which reads only the
+// lead Pokemon.
+u8 Ctr3dsFriendshipScore(struct Pokemon *pokemon)
+{
+    u32 friendship = GetMonData(pokemon, MON_DATA_FRIENDSHIP);
+
+    if (friendship == MAX_FRIENDSHIP)
+        return FRIENDSHIP_MAX;
+    if (friendship >= 200)
+        return FRIENDSHIP_200_TO_254;
+    if (friendship >= 150)
+        return FRIENDSHIP_150_TO_199;
+    if (friendship >= 100)
+        return FRIENDSHIP_100_TO_149;
+    if (friendship >= 50)
+        return FRIENDSHIP_50_TO_99;
+    if (friendship >= 1)
+        return FRIENDSHIP_1_TO_49;
+
+    return FRIENDSHIP_NONE;
+}
+#endif
+
 static void CB2_FieldShowRegionMap(void)
 {
     FieldInitRegionMap(CB2_ReturnToFieldContinueScriptPlayMapMusic);

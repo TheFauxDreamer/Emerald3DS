@@ -164,18 +164,20 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 950 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first, and the roamer (LAND, SURF) and the TV outbreak (LAND) at the top in a tagged frame when they are there: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
 | [ui/ui_marks.c](ui/ui_marks.c) / [.h](ui/ui_marks.h) | 135 / 46 | Which map sections have news, as the PokeNav Plus marks them: a trainer who wants a rematch (`trainerRematches` with `gRematchTable`), the roamer (active, and seen, as the Pokedex area screen asks), and the TV's mass outbreak. Only reads |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 1097 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a launcher of 80x64 tiles, and the pages they open as `UI_VIEW_HOME_PAGE`. The game data pages first (TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, drawn by the `view_*.c` of `view_home.h`, dim until a save loads), then SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`). Each page's top line holds its title and BACK |
+| [ui/tab_extra.c](ui/tab_extra.c) | 1127 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a launcher of 80x64 tiles, and the pages they open as `UI_VIEW_HOME_PAGE`. The game data pages first (TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP, DAILY, drawn by the `view_*.c` of `view_home.h`, dim until a save loads), then SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`), which has no tile: a button on SETTINGS pushes it as a second page view. Each page's top line holds its title and BACK |
 | [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 38 | The LINK page (a HOME tile): HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
 | [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 531 / 49 | A trainer card from `gTrainerCards`, or any `struct TrainerCard` (`UiCardDrawCard`), drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
-| [ui/view_home.h](ui/view_home.h) | 48 | The game data pages of HOME, as the DS Poketch apps. All of them only read |
+| [ui/view_home.h](ui/view_home.h) | 63 | The game data pages of HOME, as the DS Poketch apps. All of them only read |
 | [ui/view_trainer.c](ui/view_trainer.c) | 162 | TRAINER: the player's own card from `TrainerCard_GenerateCardForLinkPlayer`, tap to flip, and RECORDS from `GetGameStat` |
-| [ui/view_clock.c](ui/view_clock.c) | 187 | CLOCK: the game's local time (`RtcGetInfo` and `RtcCalcTimeDifference` into a local struct), play time, steps, Repel steps, and each egg's steps to hatch |
+| [ui/view_clock.c](ui/view_clock.c) | 187 | CLOCK: the game's local time (`UiGameTime`: `RtcGetInfo` and `RtcCalcTimeDifference` into a local struct, shared with DAILY), play time, steps, Repel steps, and each egg's steps to hatch |
 | [ui/view_dowsing.c](ui/view_dowsing.c) | 143 | DOWSING: the Itemfinder's 15x11 range as a radar, with `Ctr3dsHiddenItemAt` (`src/item_use.c`) for each place. Needs the Itemfinder in the bag |
 | [ui/view_berries.c](ui/view_berries.c) | 265 | BERRIES: every planted tree with its place, stage, time to the next stage, yield once the game set it, and waterings. The place table comes from one walk of map group 0's object events |
 | [ui/view_daycare.c](ui/view_daycare.c) | 104 | DAY CARE: `GetDaycareState`, each Pokemon's level then and now (`Ctr3dsDaycareLevelNow`), and the old man's words (`Ctr3dsDaycareCompatibilityText`, `src/daycare.c`) |
+| [ui/view_friendship.c](ui/view_friendship.c) | 227 | FRIENDSHIP: hearts for the rater's tiers (`Ctr3dsFriendshipScore`, `src/field_specials.c`), the value, a friendship evolution (`Ctr3dsFriendshipEvolution`, `src/pokemon.c`) and Return or Frustration power |
+| [ui/view_daily.c](ui/view_daily.c) | 240 | DAILY: the Shoal Cave tide (a copy of `UpdateShoalTideFlag`'s hour table), the lottery flag, `IsMirageIslandPresent`, the time to the next day, and the Battle Frontier's BP, symbols and best records |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 445 / 73 | Reads about the opposing mon: type effectiveness for the party badges and each move (`UiMatchupMove`, as `Cmd_typecalc` finds it, for either opponent in a double), a move's real type (`UiMatchupMoveType`: Hidden Power, Weather Ball), `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 407 / 78 | The quick-throw strip, small until tapped: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
-| [ui/ui_view.c](ui/ui_view.c) / [.h](ui/ui_view.h) | 79 / 66 | The view stack: which detail screens are open over the active tab, 4 deep, no heap. The tabs draw and dispatch their own views and ask the stack whether each is open. The shell empties it on every tab change |
+| [ui/ui_view.c](ui/ui_view.c) / [.h](ui/ui_view.h) | 81 / 67 | The view stack: which detail screens are open over the active tab, 4 deep, no heap. The tabs draw and dispatch their own views and ask the stack whether each is open. The shell empties it on every tab change |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 203 / 50 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
 | [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 187 / 52 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
@@ -441,7 +443,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:1028](ui/tab_extra.c#L1028), which tests the
+(see `UiExtraTouch` at [tab_extra.c:1048](ui/tab_extra.c#L1048), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -1385,7 +1387,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L850)) in a bit range nothing else
+   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L870)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and

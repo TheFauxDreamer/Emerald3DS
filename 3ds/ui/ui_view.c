@@ -61,7 +61,9 @@ u8 UiViewTop(void)
 
 u16 UiViewArg(u8 id)
 {
-    for (u32 i = 0; i < sDepth; i++)
+    // The newest entry first: HOME's DEBUG page is a second page view over
+    // SETTINGS.
+    for (u32 i = sDepth; i-- > 0;)
         if (sStack[i].id == id)
             return sStack[i].arg;
 

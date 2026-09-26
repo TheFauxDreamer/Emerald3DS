@@ -32,4 +32,11 @@ void ResetFanClub(void);
 bool8 ShouldShowBoxWasFullMessage(void);
 void SetPCBoxToSendMon(u8 boxId);
 
+#if PLATFORM_3DS
+// A FRIENDSHIP_* tier (constants/pokemon.h) for any Pokemon, with the
+// thresholds of GetLeadMonFriendshipScore. Reads only.
+struct Pokemon;
+u8 Ctr3dsFriendshipScore(struct Pokemon *pokemon);
+#endif
+
 #endif // GUARD_FIELD_SPECIALS_H
