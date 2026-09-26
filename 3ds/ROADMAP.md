@@ -1012,7 +1012,7 @@ link code from the archive with no error (cheatsheet section 12).
 draw, touch and the state key on `PAGE_LINK`. `PGR_X(i)` is written in terms of
 `PAGE_COUNT`, so the pager needed no layout change.
 
-**The state key is not optional.** `UiStateHash` (`3ds/ui/bottom_screen.c:566`)
+**The state key is not optional.** `UiStateHash` (`3ds/ui/bottom_screen.c:577`)
 drives every repaint, and a peer joining or dropping changes the panel with no
 touch. `UiLinkPageStateKey()` supplies bits 19-23 and 28-31 of
 `UiExtraStateKey()`, and `UiExtraStateKey` calls it only on the LINK page, so no

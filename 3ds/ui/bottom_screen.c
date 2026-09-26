@@ -137,6 +137,17 @@ static void LeaveTab(u8 next)
     sNeedsRepaint = 1;
 }
 
+void UiSetTab(u8 tab)
+{
+    u8 vis[UI_TAB_COUNT];
+    u32 n = VisibleTabs(vis);
+
+    // Only to a tab that shows, as a tap on the bar does.
+    for (u32 i = 0; i < n; i++)
+        if (vis[i] == tab)
+            LeaveTab(tab);
+}
+
 // Flags never clear, so the active tab cannot usually disappear. This guard
 // stops an index into a hidden tab.
 static void EnsureTabVisible(void)

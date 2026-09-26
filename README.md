@@ -76,6 +76,15 @@ choice on the top screen. The panel stays for the whole battle: while the turn
 plays out the moves stay on screen, and the next choice lights them up again.
 The grid comes back when the battle ends.
 
+Above the moves, each opponent has a line with its name, level and HP bar. Tap
+it for its types, status, **stat stages** ("ATK -1  SPE +2") and the conditions
+the game keeps but never shows: confused, seeded, trapped, cursed, behind a
+substitute. The card of your own Pokémon that is out shows its stages too.
+**BAG** jumps to the BAG tab, and **RUN** runs, with the game's own "No!
+There's no running from a trainer battle!" when you cannot. When a Pokémon
+faints, the panel asks which one goes next: tap it, then SEND OUT. Press A
+instead and the game's own party menu opens as it always did.
+
 **BAG.** Pockets, quantities, and a details pane with the item's sprite and
 description. USE opens a picker of your team, so a Potion asks who it is for
 instead of guessing. Items work in the field **and in battle**, where using one
