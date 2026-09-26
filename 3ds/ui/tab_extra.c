@@ -1,19 +1,26 @@
-// EXTRA tab: port features that are not part of the original game.
+// HOME tab: port features that are not part of the original game. The file
+// and the enum (UI_TAB_EXTRA) keep the tab's old name, EXTRA; only the label
+// changed.
 //
-// Page 1 is host side only: fast-forward, top-screen scale and button binds. It
-// does not change how the game plays.
+// The tab's top is a launcher: a 4x3 grid of 80x64 tiles, one for each page.
+// A tile opens its page as UI_VIEW_HOME_PAGE on the view stack (ui_view.h),
+// with the page as the arg, so a tab switch closes it. Empty cells stay empty,
+// so every tile keeps its place when a new one is added.
 //
-// Page 2 contains cheats: EXP All, a level cap, a species randomizer and a bag
-// sort order. They are on their own page, so the player does not see them
-// first. The file 3ds/tweaks.c holds the behavior. This file only draws the
-// toggles.
+// The pages:
+// - SETTINGS is host side only: fast-forward, top-screen scale and button
+//   binds. It does not change how the game plays.
+// - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
+//   bag sort order. The file 3ds/tweaks.c holds the behavior. This file only
+//   draws the toggles.
+// - EXTRAS is quality of life. FOLLOWER is the follower and its options. LINK
+//   pairs for the Cable Club (ui_link.c). DEBUG is the debug menu, if the build
+//   has it.
 //
-// Page 3 is quality of life. Page 4 is the follower and its options. Page 5 is
-// the debug menu, if the build has it.
-//
-// The pager uses the right end of the top line (y 8..25) on each page. Pages 1
-// and 2 use the same horizontal span, 22..298, so they look like one panel.
-// Each page has its own row grid.
+// A page's top line (y 8..25) holds its title on the left and BACK on the
+// right, where the numbered pager was. SETTINGS and GAMEPLAY use the same
+// horizontal span, 22..298, so they look like one panel. Each page has its own
+// row grid.
 
 #include "global.h"
 
@@ -22,6 +29,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "ui_link.h"
+#include "ui_view.h"
 
 // Ctr3dsCurrentLevelCap(), for the live "cap NN" value on page 2.
 #include "../tweaks.h"
@@ -137,32 +145,53 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // each page. It is 17px tall at y 8 and ends at y 24. Every page starts its
 // rows below it.
 //
-// It uses TOP_LINE_Y, not a page's first row. Thus the pager does not move on a
-// page turn.
-#define PGR_W         26
+// The height of a control on the top line.
 #define PGR_H         17
 #define PGR_Y         TOP_LINE_Y
-// Four pages of settings, the LINK page, and the debug page if the build has
-// it. All other constants below come from this value.
-//
-// Page 3 exists because page 2 has no vertical space left. LINK is a page here
-// because the tab bar is full at six tabs. See ui_link.h.
+
+// The pages, in launcher order. EXTRAS exists because GAMEPLAY has no
+// vertical space left. LINK is a page because the tab bar is full at six tabs.
+// See ui_link.h.
+enum
+{
+    PAGE_SETTINGS,
+    PAGE_GAMEPLAY,
+    PAGE_EXTRAS,
+    PAGE_FOLLOWER,
+    PAGE_LINK,
 #if CTR_DEBUG_MENU
-#define PAGE_COUNT    6
-#else
-#define PAGE_COUNT    5
+    PAGE_DEBUG,
 #endif
+    PAGE_COUNT,
+};
 
-// Pairing for the Cable Club, in ui_link.c. It is the last page before the
-// debug page.
-#define PAGE_LINK     4
+static const char *const sPageTitle[] = {
+    "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "LINK", "DEBUG",
+};
 
-// Right-aligned to the interior edge. The pager grows to the left when there
-// are more pages, so the last button stays in the same place. The first button
-// is at x 166 with five pages and at x 136 with six. The PAGE caption ends 4px
-// to its left, so it stays clear of the interior edge at x 8 in both cases.
-#define PGR_X(i)      (CTR_BOTTOM_WIDTH - 8 - PGR_W \
-                       - (PAGE_COUNT - 1 - (i)) * (PGR_W + 4))
+// A tile's second line, in the small font: what is behind it.
+static const char *const sPageHint[] = {
+    "speed, scale", "cheats", "comfort", "follower", "cable club", "test build",
+};
+
+// The page's title sits where the debug page always put its name. BACK is
+// right-aligned to the interior edge, 46px wide like the MAP buttons.
+#define TITLE_X       16
+#define TITLE_BACK_W  46
+#define TITLE_BACK_X  (CTR_BOTTOM_WIDTH - 8 - TITLE_BACK_W)
+
+// The launcher: 4x3 tiles of 80x64, which fill the 320x192 content area
+// exactly on whole 8px tiles, as UiWindowFrame needs. The title is centred on
+// the tile's middle; the hint sits under it.
+#define TILE_COLS     4
+#define TILE_TW       10
+#define TILE_TH       8
+#define TILE_W        (TILE_TW * 8)
+#define TILE_H        (TILE_TH * 8)
+#define TILE_X(i)     (((i) % TILE_COLS) * TILE_W)
+#define TILE_Y(i)     (((i) / TILE_COLS) * TILE_H)
+#define TILE_TITLE_DY 18
+#define TILE_HINT_DY  36
 
 // The LEVEL CAP buttons use the columns of the SCREEN SIZE row (SCL_X and
 // SCL_W, not SCL_Y). Thus the two pages align horizontally. BAG SORT has its
@@ -173,9 +202,17 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define SORT_W        75
 #define SORT_X(i)     (70 + (i) * (SORT_W + 8))
 
-// The page that shows. This is UI state and does not persist. EXTRA always
-// opens on page 1, so the player does not see the cheats first.
-static u8 sPage;
+// The page that shows, from the view stack. HOME opens on the launcher, so
+// the player does not see the cheats first.
+static bool8 PageOpen(void)
+{
+    return UiViewIsOpen(UI_VIEW_HOME_PAGE);
+}
+
+static u8 CurrentPage(void)
+{
+    return (u8)UiViewArg(UI_VIEW_HOME_PAGE);
+}
 
 // The selected button gets a double inset outline and accent text. Color alone
 // is not clear on the light window frames.
@@ -612,11 +649,8 @@ static void DrawPageDebug(void)
     u8 label[40];
     u32 i;
 
-    // The page shows its name to the left of the pager. Players must not see
-    // this page, so a build that has it must be clear at a glance.
-    UiText(DBG_LABEL_X, TOP_LINE_Y, UiAscii(label, "DEBUG", sizeof(label)),
-           UiThemeText(), UiThemeShadow());
-    // The caption ends at x 125, before the PAGE label of the pager.
+    // The title line says DEBUG. Players must not see this page, so a build
+    // that has it must be clear at a glance: say it twice.
     UiText(DBG_LABEL_X + 56, TOP_LINE_Y,
            UiAscii(label, "test build", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
@@ -655,33 +689,53 @@ static void TouchPageDebug(const CtrTouchState *t)
 
 #endif // CTR_DEBUG_MENU
 
-static void DrawPager(void)
+// The top line of an open page: its title, and BACK to the launcher.
+static void DrawPageTitle(u8 page)
 {
-    u8 label[8];
-    u32 i;
+    u8 label[16];
 
-    UiTextRight(PGR_X(0) - 4, PGR_Y + (PGR_H - UI_GLYPH_H) / 2,
-                UiAscii(label, "PAGE", sizeof(label)),
-                UI_COL_DIM, UiThemeShadow());
+    UiText(TITLE_X, TOP_LINE_Y, UiAscii(label, sPageTitle[page], sizeof(label)),
+           UiThemeText(), UiThemeShadow());
+    DrawButtonH(TITLE_BACK_X, PGR_Y, TITLE_BACK_W, PGR_H,
+                UiAscii(label, "BACK", sizeof(label)), FALSE);
+}
 
-    for (i = 0; i < PAGE_COUNT; i++)
+static void DrawLauncher(void)
+{
+    u8 label[16];
+
+    for (u32 i = 0; i < PAGE_COUNT; i++)
     {
-        char text[2];
+        int x = TILE_X(i), y = TILE_Y(i);
 
-        text[0] = (char)('1' + i);
-        text[1] = '\0';
+        UiWindowFrame(x / 8, y / 8, TILE_TW, TILE_TH);
 
-        DrawButtonH(PGR_X((int)i), PGR_Y, PGR_W, PGR_H,
-                    UiAscii(label, text, sizeof(label)), sPage == i);
+        UiAscii(label, sPageTitle[i], sizeof(label));
+        UiText(x + (TILE_W - UiTextWidth(label)) / 2, y + TILE_TITLE_DY,
+               label, UiThemeText(), UiThemeShadow());
+
+        UiAscii(label, sPageHint[i], sizeof(label));
+        UiTextSmall(x + (TILE_W - UiTextSmallWidth(label)) / 2, y + TILE_HINT_DY,
+                    label, UI_COL_DIM, UiThemeShadow());
     }
 }
 
 void UiExtraDraw(void)
 {
+    u8 page;
+
+    if (!PageOpen())
+    {
+        DrawLauncher();
+        return;
+    }
+
+    page = CurrentPage();
+
     // A page can ask for the whole content area. LINK does while its trainer
     // card view is up: a card is a whole GBA screen and does not fit inside the
-    // frame with the pager beside it. The page then draws its own way back.
-    if (sPage == PAGE_LINK && UiLinkPageFullBleed())
+    // frame with the title line above it. The view then draws its own way back.
+    if (page == PAGE_LINK && UiLinkPageFullBleed())
     {
         UiLinkPageDraw();
         return;
@@ -689,22 +743,22 @@ void UiExtraDraw(void)
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
-    if (sPage == 0)
+    if (page == PAGE_SETTINGS)
         DrawPage1();
-    else if (sPage == 1)
+    else if (page == PAGE_GAMEPLAY)
         DrawPage2();
-    else if (sPage == 2)
+    else if (page == PAGE_EXTRAS)
         DrawPage3();
-    else if (sPage == 3)
+    else if (page == PAGE_FOLLOWER)
         DrawPage4();
-    else if (sPage == PAGE_LINK)
+    else if (page == PAGE_LINK)
         UiLinkPageDraw();
 #if CTR_DEBUG_MENU
-    else
+    else if (page == PAGE_DEBUG)
         DrawPageDebug();
 #endif
 
-    DrawPager();
+    DrawPageTitle(page);
 }
 
 // Page 2's "cap NN" value changes when the player gets a badge, which occurs
@@ -725,8 +779,8 @@ u32 UiTweakStateKey(void)
 
 u32 UiExtraStateKey(void)
 {
-    // The sPage value uses bits 0-2 and the tweaks use bits 4-17. Bit 3 is for
-    // MUSIC FAST. Only its button changes it, but fold it in anyway: a setting
+    // The page uses bits 0-2 (0 for the launcher, the page + 1 otherwise) and
+    // the tweaks use bits 4-17. Bit 3 is for MUSIC FAST. Only its button changes it, but fold it in anyway: a setting
     // on the screen must not go stale. The audio switches use bits 24-27, and
     // the LINK page uses bits 19-23 and 28-31.
     u32 audio = 0;
@@ -734,7 +788,9 @@ u32 UiExtraStateKey(void)
     for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         audio |= (u32)(Ctr3dsGetAudioDbg((int)i) != 0) << i;
 
-    return (u32)sPage
+    u32 page = PageOpen() ? (u32)CurrentPage() + 1 : 0;
+
+    return page
          | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 3)
          | (UiTweakStateKey() << 4)
          // This switch can change without a touch: 3ds/tweaks.c clears it when
@@ -744,7 +800,7 @@ u32 UiExtraStateKey(void)
          | (audio << 24)
          // Only on its own page. The wireless state changes with no touch, and
          // reading it costs nothing, but no other page has a reason to poll it.
-         | (sPage == PAGE_LINK ? UiLinkPageStateKey() : 0);
+         | (PageOpen() && CurrentPage() == PAGE_LINK ? UiLinkPageStateKey() : 0);
 }
 
 static void TouchPage1(const CtrTouchState *t)
@@ -899,46 +955,59 @@ static void TouchPage4(const CtrTouchState *t)
 
 void UiExtraTouch(const CtrTouchState *t)
 {
+    u8 page;
+
     if (!t->justReleased)
         return;
 
-    // Not while a page has the whole screen: the pager is not drawn then, and a
-    // control under where it would be must not be shadowed by it.
-    if (sPage == PAGE_LINK && UiLinkPageFullBleed())
+    if (!PageOpen())
+    {
+        for (u32 i = 0; i < PAGE_COUNT; i++)
+        {
+            if (!UiHit(t, TILE_X(i), TILE_Y(i), TILE_W, TILE_H))
+                continue;
+
+#if CTR_DEBUG_MENU
+            // Opening a page disarms RESYNC, so it is never armed when the
+            // debug page comes back.
+            sAchResyncArmed = FALSE;
+#endif
+            UiViewPush(UI_VIEW_HOME_PAGE, (u16)i);
+            return;
+        }
+        return;
+    }
+
+    page = CurrentPage();
+
+    // Not while a page has the whole screen: the title line is not drawn then,
+    // and a control under where BACK would be must not be shadowed by it.
+    if (page == PAGE_LINK && UiLinkPageFullBleed())
     {
         UiLinkPageTouch(t);
         return;
     }
 
-    // The pager is live on every page. Test it before the page's own controls,
-    // so nothing can be under it.
-    for (u32 i = 0; i < PAGE_COUNT; i++)
+    // BACK is live on every page. Test it before the page's own controls, so
+    // nothing can be under it.
+    if (UiHit(t, TITLE_BACK_X, PGR_Y, TITLE_BACK_W, PGR_H))
     {
-        if (UiHit(t, PGR_X((int)i), PGR_Y, PGR_W, PGR_H))
-        {
-            sPage = (u8)i;
-#if CTR_DEBUG_MENU
-            // A page turn disarms RESYNC too, so it is not armed when the debug
-            // page comes back.
-            sAchResyncArmed = FALSE;
-#endif
-            UiMarkDirty();
-            return;
-        }
+        UiViewPop();
+        return;
     }
 
-    if (sPage == 0)
+    if (page == PAGE_SETTINGS)
         TouchPage1(t);
-    else if (sPage == 1)
+    else if (page == PAGE_GAMEPLAY)
         TouchPage2(t);
-    else if (sPage == 2)
+    else if (page == PAGE_EXTRAS)
         TouchPage3(t);
-    else if (sPage == 3)
+    else if (page == PAGE_FOLLOWER)
         TouchPage4(t);
-    else if (sPage == PAGE_LINK)
+    else if (page == PAGE_LINK)
         UiLinkPageTouch(t);
 #if CTR_DEBUG_MENU
-    else
+    else if (page == PAGE_DEBUG)
         TouchPageDebug(t);
 #endif
 }

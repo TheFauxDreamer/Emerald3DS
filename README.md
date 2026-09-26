@@ -37,7 +37,7 @@ what the game believes.
   ┌──────────────────────────────┐         bottom: game-side code, reading the
   │ [icon] SPARKY  /\  Lv12      │         game's own structures directly
   │ [PSN ] ####------  24/38     │
-  │  PARTY  BAG  MAP  DEX  EXTRA │
+  │  PARTY  BAG  MAP  DEX  HOME  │
   └──────────────────────────────┘
 ```
 
@@ -122,16 +122,19 @@ playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
 syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
-**EXTRA.** Four pages of port settings. A setting that is only on or off is a
-checkbox: tap the box or its name.
+**HOME.** A grid of tiles, one for each page of port settings: SETTINGS,
+GAMEPLAY, EXTRAS and FOLLOWER, plus LINK for the Cable Club. Tap a tile to open
+its page and BACK to return; switching tab closes it, so HOME always opens on
+the grid. A setting that is only on or off is a checkbox: tap the box or its
+name.
 
-*Page 1* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
+*SETTINGS* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or FILL
 (fills the panel, stretching 11%); and the four buttons a GBA has no use for (X,
 Y, ZL, ZR) bindable to hold-for-speed or to the touch UI's modifier key. Screen
 size and bindings persist. Fast-forward deliberately resets each launch.
 
-*Page 2* is behind a page turn because every option on it is a cheat, and all
+*GAMEPLAY* is a tile of its own because every option on it is a cheat, and all
 four are off by default:
 
 - **EXP ALL.** Every living party member gains experience, as though it were
@@ -153,7 +156,7 @@ four are off by default:
   It reorders the real bag, so the in-game bag and the BAG tab agree, and the
   order sticks in your save.
 
-*Page 3* is quality of life. **PHONE CALLS** can be turned off, which silences
+*EXTRAS* is quality of life. **PHONE CALLS** can be turned off, which silences
 only the trainers who ring unprompted mid-route. Every scripted call still comes
 through, and so does the PokéNav's own Match Call screen. **QUICK BALL** turns off
 the quick-throw strip described below, for anyone who would rather keep those
@@ -165,7 +168,7 @@ toward each other, by how well they get along. It is separate from FOLLOWER, it
 is kept once for the console, and a change shows the next time you enter
 Route 117.
 
-*Page 4* is the follower. **FOLLOWER** makes the first Pokémon in your party
+*FOLLOWER* is the follower. **FOLLOWER** makes the first Pokémon in your party
 walk behind you, as in HeartGold and SoulSilver. It comes out of its own type of
 Poké Ball. It goes back into the ball for Surf, the bike, doors and cutscenes,
 and comes out again after. Talk to it and it shows an emote and says how it
@@ -188,7 +191,7 @@ own FOLLOWER switch.
 - **BALL: OWN / POKE BALL.** OWN is the ball that caught the Pokémon. POKE BALL
   uses a plain Poké Ball for every Pokémon.
 
-**A fifth page exists in debug builds only.** It holds the switches that test
+**A DEBUG tile exists in debug builds only.** Its page holds the switches that test
 the port rather than play the game: force the next wild encounter shiny, show
 every tab regardless of what the save has unlocked, silence one half of the
 mixer at a time, and fire a test achievement toast or re-derive the save's
@@ -210,7 +213,7 @@ It appears only while the game is waiting for your decision, so it is gone
 again the moment you make one, and only against something you could really
 throw a ball at. Until you have thrown one it offers the first ball in your bag
 that is not the Master Ball, which it will never suggest on its own. It can be
-switched off on page 3 of EXTRA.
+switched off on HOME's EXTRAS page.
 
 **Shiny alerts, over every tab.** When a wild Pokémon is shiny, a gold panel
 takes the middle of the bottom screen and names it at double size, whichever tab

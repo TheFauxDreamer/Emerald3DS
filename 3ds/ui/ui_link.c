@@ -1,5 +1,5 @@
-// LINK: pairing for the Cable Club over 3DS local wireless. Page 5 of the
-// EXTRA tab. See ui_link.h for why it is a page and not a tab.
+// LINK: pairing for the Cable Club over 3DS local wireless. A page of the
+// HOME tab. See ui_link.h for why it is a page and not a tab.
 //
 // A cable decides the master by which end you plug into. Over wireless someone
 // has to create the network and the other has to find it, so that choice is
@@ -51,8 +51,8 @@
 // Both trainer cards, from the data the link-up already exchanged. A card is a
 // whole GBA screen, 240x160, and faithful tile art needs an integer scale, so
 // the one being read is drawn at 1:1 and the other is a 1:4 thumbnail beside
-// it. That does not fit inside the EXTRA window and its pager, so while this
-// view is up the page takes the whole content area and gives the pager back on
+// it. That does not fit inside the HOME page and its title line, so while this
+// view is up it takes the whole content area and gives the title line back on
 // BACK. See UiLinkPageFullBleed.
 #define CV_CARD_X    4
 #define CV_CARD_Y    16
@@ -308,7 +308,7 @@ static void DrawConnected(const CtrLinkStatus *st)
 }
 
 // While the card view is up the page needs the whole content area: a card is
-// 240x160 and the window frame plus the pager do not leave room for it.
+// 240x160 and the window frame plus the title line do not leave room for it.
 // UiExtraDraw asks before it draws either.
 int UiLinkPageFullBleed(void)
 {
@@ -377,7 +377,7 @@ void UiLinkPageTouch(const CtrTouchState *t)
         return;
 
     // The card view owns the screen while it is up, including the area the
-    // pager would be in.
+    // title line would be in.
     if (CardViewOpen())
     {
         TouchCardView(t);

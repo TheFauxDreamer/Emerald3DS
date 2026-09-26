@@ -1,10 +1,9 @@
 // LINK: pairing for the Cable Club over 3DS local wireless.
 //
-// This is page 5 of the EXTRA tab, not a tab of its own. The tab bar holds six
-// tabs at 53px each, which is the practical floor for a finger
-// (3ds/SECOND_SCREEN_CHEATSHEET.md, section 5). A seventh tab does not fit.
-// When the HOME launcher of 3ds/SECOND_SCREEN_PLAN.md lands, this panel becomes
-// a tile of it. Only the three entry points below must move.
+// This is the LINK tile of the HOME tab (tab_extra.c), not a tab of its own.
+// The tab bar holds six tabs at 53px each, which is the practical floor for a
+// finger (3ds/SECOND_SCREEN_CHEATSHEET.md, section 5). A seventh tab does not
+// fit.
 //
 // The file is ui_link.c, not link.c. 3ds/build_objs.sh globs 3ds/ui/*.c into
 // the same object directory as src/*.c, so link.c here would overwrite
@@ -17,13 +16,13 @@
 #include "global.h"
 #include "../bridge.h"
 
-// Draws in the content area of the EXTRA window. The caller draws the frame and
-// the pager, as it does for every other page -- unless UiLinkPageFullBleed()
+// Draws in the content area of the HOME page. The caller draws the frame and
+// the title line, as it does for every other page -- unless UiLinkPageFullBleed()
 // says otherwise.
 void UiLinkPageDraw(void);
 
 // TRUE while the trainer card view is up. A card is 240x160, a whole GBA
-// screen, and the window frame plus the pager do not leave room for one, so the
+// screen, and the window frame plus the title line do not leave room for one, so the
 // page takes the whole content area and draws its own way back.
 int UiLinkPageFullBleed(void);
 void UiLinkPageTouch(const CtrTouchState *t);

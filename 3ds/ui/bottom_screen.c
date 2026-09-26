@@ -68,7 +68,7 @@ static const struct UiTabDef sTabs[UI_TAB_COUNT] =
     // Always available. The list has no start-menu entry to follow.
     [UI_TAB_TROPHY] = { "TROPHY", 0                  },
     // Not a game feature, so it is always available.
-    [UI_TAB_EXTRA] = { "EXTRA", 0                    },
+    [UI_TAB_EXTRA] = { "HOME",  0                    },
 };
 
 // TRUE when there is save data to read.

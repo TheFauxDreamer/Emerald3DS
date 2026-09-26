@@ -162,8 +162,8 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_map.c](ui/tab_map.c) | 1014 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
 | [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 840 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 944 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 LINK (drawn by `ui_link.c`), page 6 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
-| [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 39 | The LINK page: HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
+| [ui/tab_extra.c](ui/tab_extra.c) | 1013 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a launcher of 80x64 tiles, and the pages they open as `UI_VIEW_HOME_PAGE`. SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`). Each page's top line holds its title and BACK |
+| [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 38 | The LINK page (a HOME tile): HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
 | [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 524 / 42 | A trainer card from `gTrainerCards`, drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 445 / 73 | Reads about the opposing mon: type effectiveness for the party badges and each move (`UiMatchupMove`, as `Cmd_typecalc` finds it, for either opponent in a double), a move's real type (`UiMatchupMoveType`: Hidden Power, Weather Ball), `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 341 / 62 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
@@ -341,26 +341,21 @@ The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
 sixth, so the bar is full. **Do not add a seventh.** There are two ways to add a
 view instead:
 
-- **A sub-view of a page**, cheapest of all: no page slot, no pager reflow, no
-  new state-key bits if the page's own bits can say which view is up. The
-  trainer card view does this inside LINK (`ui/ui_card.c`, `ui/ui_link.c`). A
-  sub-view that needs the whole screen returns TRUE from a full-bleed predicate
-  and `UiExtraDraw` then skips the frame and the pager for it; the sub-view owns
-  every touch while it is up, including where the pager would be, and must draw
-  its own way back.
-- **A page of EXTRA**, which is the cheap one and needs no refactor. Raise
-  `PAGE_COUNT` in `ui/tab_extra.c` (both arms of the `CTR_DEBUG_MENU` guard),
-  add a `#define` for the page index, and dispatch it in `UiExtraDraw`,
-  `UiExtraTouch` and `UiExtraStateKey`. The debug page is the final `else`
-  of each of those chains, not a numbered page, so put the new page before it,
-  next to `PAGE_LINK`. `PGR_X(i)` is written in terms of `PAGE_COUNT`, so the
-  pager reflows on its own. LINK took this route
-  (`ui/ui_link.c`, `ROADMAP.md` C.3).
-- **A tile of the HOME launcher** that `SECOND_SCREEN_PLAN.md` proposes, once
-  that lands.
+- **A view over a page**, cheapest of all: no tile, and the page keeps its
+  place. The trainer card view does this over LINK (`ui/ui_card.c`,
+  `ui/ui_link.c`): it is `UI_VIEW_LINK_CARDS` on the view stack. A view that
+  needs the whole screen returns TRUE from a full-bleed predicate and
+  `UiExtraDraw` then skips the frame and the title line for it; the view owns
+  every touch while it is up and must draw its own way back.
+- **A tile of HOME.** Add an entry to the page enum in `ui/tab_extra.c`, before
+  `PAGE_DEBUG` so the debug tile stays last, plus its title and hint in
+  `sPageTitle` / `sPageHint`, and dispatch it in `UiExtraDraw`, `UiExtraTouch`
+  and `UiExtraStateKey`. The launcher lays the tiles out from the enum, 4x3,
+  so there are six free cells. LINK is a tile this way (`ui/ui_link.c`,
+  `ROADMAP.md` C.3).
 
-A page keeps the top line, y 8 to 24, for the pager, so its own rows start at
-y 30. The interior ends at y 183.
+A page keeps the top line, y 8 to 24, for its title and BACK, so its own rows
+start at y 30. The interior ends at y 183.
 
 The steps below are for a tab, and are kept for the record.
 
@@ -435,7 +430,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:900](ui/tab_extra.c#L900), which tests the
+(see `UiExtraTouch` at [tab_extra.c:956](ui/tab_extra.c#L956), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -1340,7 +1335,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:726](ui/tab_extra.c#L726)) in a bit range nothing else
+   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L780)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
