@@ -99,7 +99,7 @@ Origin column names where the feature comes from. Everything in Tier 1 is a pure
 | 11 | **Quick-use item ring.** Four to six registered items usable from any tab (Bicycle, Repel, Escape Rope). | Gen 4-7 **Y-button registration** | Bag already has `CanUseItemNow()` + `ItemTargeting()` (`3ds/ui/tab_bag.c:148`, `:181`). This is a second entry point to an existing, well-gated commit path. |
 | 12 | **PC deposit / withdraw.** *Out of scope for now.* | Gen 8 boxes-anywhere | Recorded for later. Only after #2 ships read-only, and it needs the four-gate overworld check plus a party-count guard. |
 | 13 | **Save anywhere + rolling backups.** *Out of scope for now.* | Emulator convention, not a DS feature | Recorded for later. `TrySavingData` (`include/save.h:100`) is synchronous and `CtrSaveCommit()` is already hooked at `src/save.c:787`, so the cost is small if it is ever wanted; the caveat is that the failure path calls `DoSaveFailedScreen`, which seizes `gMain.callback2`. |
-| 14 | **Dig / Escape Rope from the map tab.** | Gen 4+ convenience | `CanUseDigOrEscapeRopeOnCurMap()` (`include/item_use.h:33`). Same shape as the fly button already in `3ds/ui/tab_map.c`. |
+| 14 | ✅ **SHIPPED** as ESCAPE on MAP's caption row (`EscState`, `DoEscape` in `3ds/ui/tab_map.c`), on the player's own location, with a YES/NO confirm. DIG first, then the rope. **Dig / Escape Rope from the map tab.** | Gen 4+ convenience | `CanUseDigOrEscapeRopeOnCurMap()` (`include/item_use.h:33`). Same shape as the fly button already in `3ds/ui/tab_map.c`. |
 
 ### Tier 3: larger or lower value
 
@@ -130,7 +130,7 @@ LINK also set a second precedent: a sub-view inside a page. Its trainer card vie
 
 `ROADMAP.md` Part C.3 records the same decision.
 
-One 80x48 BACK target replaces the hand-placed rects at 38x22 (`tab_party.c:97`), 42x22 (`tab_dex.c:91`, and the encounters view, which matched it) , 56x20 (BAG's CANCEL, `tab_bag.c:98`) and 60x22 (LINK's card view, `ui_link.c:62`). Every pushed view gets a title, which matters once there are a dozen of them. It also makes the current bug structurally impossible: today a modal flag survives a tab switch, so leaving PARTY's detail view and coming back re-enters it. The flags are `sDetailOpen` (`tab_party.c:127`), `sEntryOpen` (`tab_dex.c:98`), BAG's picker `sView` (`tab_bag.c:113`), `sOpen` (`view_encounters.c:107`), MAP's fly confirm `sConfirm` (`tab_map.c:127`) and LINK's card view `sCardOpen` (`ui_link.c:72`). The bug is still live at `a036990`.
+One 80x48 BACK target replaces the hand-placed rects at 38x22 (`tab_party.c:97`), 42x22 (`tab_dex.c:91`, and the encounters view, which matched it) , 56x20 (BAG's CANCEL, `tab_bag.c:98`) and 60x22 (LINK's card view, `ui_link.c:62`). Every pushed view gets a title, which matters once there are a dozen of them. It also makes the current bug structurally impossible: today a modal flag survives a tab switch, so leaving PARTY's detail view and coming back re-enters it. The flags are `sDetailOpen` (`tab_party.c:127`), `sEntryOpen` (`tab_dex.c:98`), BAG's picker `sView` (`tab_bag.c:113`), `sOpen` (`view_encounters.c:107`), MAP's fly confirm `sConfirm` (`tab_map.c:132`) and LINK's card view `sCardOpen` (`ui_link.c:72`). The bug is still live at `a036990`.
 
 ### New files
 
@@ -176,7 +176,7 @@ Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots
 |---|---|---|
 | 0 | `ui_view.c/.h`, registry, title bar. Pure refactor: register the six tabs as roots, convert the modals (PARTY detail, DEX entry, BAG picker, MAP's encounters view, and LINK's card view) to pushed views, delete their BACK rects, replace `Redraw()`'s switch. | Open PARTY detail, tap BAG, tap PARTY: you get the grid, not the detail. Same for DEX entry, the BAG picker, the encounters view and the card view. |
 | 1 | `UiClipPush/Pop`, `UiTextClipped`, `UiTextWrapped`. ~100 lines. Before any new view, because retrofitting clipping into twelve views is the retrofit to avoid. | Nothing on the existing six tabs changes by a pixel. |
-| 2 | `ui_widgets.c` with exactly four widgets. Prove each on two existing callers on day one: `UiButton` on `tab_extra.c` and `tab_map.c:428`; `UiChoiceRow` on a button row and a check row; `UiList` on `tab_dex.c` and `tab_bag.c`, retiring bag's inferior scroll model. | Existing tabs behave identically; bag's list now keeps the selection when scrolling. |
+| 2 | `ui_widgets.c` with exactly four widgets. Prove each on two existing callers on day one: `UiButton` on `tab_extra.c` and `tab_map.c:554`; `UiChoiceRow` on a button row and a check row; `UiList` on `tab_dex.c` and `tab_bag.c`, retiring bag's inferior scroll model. | Existing tabs behave identically; bag's list now keeps the selection when scrolling. |
 | 3 | HOME. `tab_extra.c` becomes `tab_home.c` (4x3 tiles) plus `view_settings.c` / `view_tweaks.c` / `view_audio.c`. First non-modal use of the stack; `UiGrid` gets its first caller. | All EXTRA controls still reachable and still persist. |
 | 4 | **Trainer card and records** (#3). Cheapest of the three chosen features: the card is `UiCardDraw` from a locally filled card, and the records are almost entirely `UiField` rows. It can also ship before step 0, as a sub-view the way LINK's cards did. Ships with `key == NULL`, confirming the "most views need no key" claim. Adds `UiStatBar` if the badge row wants it. | Every figure matches the in-game trainer card; money and game stats read through `GetMoney`/`GetGameStat`, never raw. |
 | 5 | **Berry and daycare trackers** (#4, #5). Two small views, both on the cheap key tier (a handful of scalar reads). First real repaint keys under the new scheme. | Berry stages and timers match the in-game trees; the day-care view agrees with the attendant's dialogue about egg readiness. |
@@ -187,7 +187,7 @@ Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots
 
 **Gap worth naming.** None of the three chosen first features stresses `UiGrid` or a long scrolling list hard. HOME's 4x3 launcher (step 3) is therefore the only `UiGrid` proving ground before several views pile on it, and the read-only PC box viewer (#2) is the real structural stress test: 14-row list, 30-cell grid, pushed detail, windowed plaintext key, and long player-authored box names through `UiTextClipped`. Recommend scheduling it immediately after step 6 rather than leaving it until the widget layer has calcified around easier callers.
 
-**Later, in rough value order:** PC boxes read-only (#2), learnset and evolution preview (#7), type matchup chart (#8), clock and counters (#9), Dig/Escape Rope on the map tab (#14), then Tier 3.
+**Later, in rough value order:** PC boxes read-only (#2), learnset and evolution preview (#7), type matchup chart (#8), clock and counters (#9), then Tier 3.
 
 ### Deliberately not built yet
 
@@ -199,7 +199,7 @@ Two-level tab bar (costs 48px of 192; every tab, the encounters view, the card v
 
 Recommendation is structure first, skin second. The skin is a deliberately small diff ("two functions change, ~98 call sites do not") and doing the structure first makes it smaller, not larger.
 
-1. `DrawButtonH` moves out of `tab_extra.c` into `UiButton`. The skin plan's step 5 defines `UiButton` and folds in both local helpers, `DrawButtonH` (`tab_extra.c:182`) and `DrawBtn` (`tab_map.c:428`), plus about a dozen inline outlines; whichever plan lands first owns it, and if `ui_widgets.c` exists by then it lives there, so it covers every future view's buttons for the same edit.
+1. `DrawButtonH` moves out of `tab_extra.c` into `UiButton`. The skin plan's step 5 defines `UiButton` and folds in both local helpers, `DrawButtonH` (`tab_extra.c:182`) and `DrawBtn` (`tab_map.c:554`), plus about a dozen inline outlines; whichever plan lands first owns it, and if `ui_widgets.c` exists by then it lives there, so it covers every future view's buttons for the same edit.
 2. `tabbar.png` is specced at 64x96 (cell idle, cell active, bar ground). A title bar also needs a back chevron and a title ground. **Decide before the art is drawn** or it gets authored twice. Suggest 64x160. `icons.png` holds one icon for each root tab (six today), so where LINK goes (Part 2) changes that sheet too.
 3. **Highest-risk item:** the skin plan says `ui_gfx.c`'s entry points clamp against `0..UI_W/UI_H` "the way `UiFillRect` already does". After step 1 `UiFillRect` clamps against the *clip*. `UiBlitPart`, `UiTileFill` and `UiNineSlice` must do the same, or a nine-slice panel inside a clipped list row paints over its neighbours and looks like a layout bug rather than a blitter bug.
 4. Both plans edit `UiStateHash`: the skin drops `top[0] = UiFrameId()`, this drops the party loop and rewrites `top[4]`. Different lines, mergeable, but do them in one sitting.

@@ -73,12 +73,17 @@ entries stay anonymous.
 **MAP.** Hoenn's region map, the game's own art at 1:1, with your marker where
 you actually are: on the right stretch of a long route, and on the cave mouth or
 the town door when you are inside one. Tap anywhere to read that place's name,
-and tap the sea to go back to following yourself. Two buttons appear on the
+and tap the sea to go back to following yourself. Three buttons appear on the
 caption when they apply:
 
 - **FLY** flies you there, using the same checks the party menu does. It is
   offered only from a town you have already reached on foot, with a badge and a
   Pokémon that knows Fly, and only when you are outdoors and not mid-anything.
+- **ESCAPE** takes you back out of a cave or a building to where you went in,
+  as Dig and the Escape Rope do. It shows on your own location, wherever the
+  game would let you use them. A Pokémon that knows Dig goes first, because it
+  is free; otherwise it uses one Escape Rope from your bag. It asks before it
+  acts, and names which one.
 - **WILD PKMN** lists what lives there: every wild species for that place with
   its types, marked with a ball if you have caught it. Anything you have not
   seen yet is a silhouette, so the list reads as what is left to find rather
@@ -236,7 +241,7 @@ emulator.
 | Real-time clock | ✅ Backed by the console clock, so berries and time of day work |
 | Bottom: party, bag, Pokédex, map, extras | ✅ |
 | Bottom: shiny alerts, IV/EV viewer | ✅ |
-| Bottom: encounter lists and Fly from the map | ✅ |
+| Bottom: encounter lists, Fly and Dig / Escape Rope from the map | ✅ |
 | Tweaks: EXP All, level cap, randomiser, bag sort | ✅ |
 | Battle items from the touch screen | ✅ |
 | Bottom: quick throw of your last used ball | ✅ |
