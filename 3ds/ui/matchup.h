@@ -28,8 +28,25 @@ u16 UiMatchupOffence(struct Pokemon *mon);
 // switch to it.
 u16 UiMatchupRisk(struct Pokemon *mon);
 
-// A key for the current opponent, for the shell's repaint hash. The badges must
-// update when the opponent switches.
+// The type that `move` has when `mon` uses it. Hidden Power takes its type from
+// the IVs, and in battle Weather Ball takes the weather's. Other moves: the
+// type in gBattleMoves.
+u8 UiMatchupMoveType(struct Pokemon *mon, u16 move);
+
+// `move`'s multiplier against the opposing battler at `position`
+// (B_POSITION_OPPONENT_LEFT or _RIGHT), as the battle engine finds it: with
+// Foresight, Levitate, and the moves whose damage is fixed, which can only be
+// 0 or 10. UI_MATCHUP_NA for a move with no effectiveness (status moves, Bide,
+// Struggle). Call it only when UiMatchupFoePresent(position).
+u16 UiMatchupMove(struct Pokemon *mon, u16 move, u8 position);
+
+// TRUE when the opposing battler at `position` is on the field and not
+// fainted. The right position exists only in a double battle.
+bool8 UiMatchupFoePresent(u8 position);
+
+// A key for everything the matchups read that is not the player's mon: both
+// opponents, their Foresight state, and the weather. The badges must update
+// when any of them changes.
 u32 UiMatchupOpponentKey(void);
 
 // TRUE when the player can throw a ball at the opponent: a live wild encounter

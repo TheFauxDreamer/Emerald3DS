@@ -485,8 +485,8 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:76](ui/ui_link.c#L76)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:885](ui/tab_party.c#L885)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
+| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:76](ui/ui_link.c#L76)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:948](ui/tab_party.c#L948)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
+| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:982](ui/tab_party.c#L982)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
 | check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:204](ui/tab_extra.c#L204)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
@@ -590,7 +590,7 @@ Keep the existing convention of constants derived from each other
 (`MOVE_ROW_Y(i)`, `SPD_X(i)`, `CellTop(i)`) rather than tabulated twice, and
 check that the touch handler uses the same expression the draw code does.
 PARTY's animated layer restores rects computed from those same constants
-(`UiPartyRedrawAnimated`, [tab_party.c:396](ui/tab_party.c#L396)), so it moves
+(`UiPartyRedrawAnimated`, [tab_party.c:406](ui/tab_party.c#L406)), so it moves
 with the cell or icons get drawn where the cell no longer is.
 
 **The trap specific to re-laying-out these surfaces is that there is no
@@ -674,7 +674,7 @@ bash 3ds/build_objs.sh && make -C 3ds
   that surface matches its wireframe.
 - **Clipping**, which is where a new blitter fails silently rather than loudly:
   the BAG target picker's cells ([tab_bag.c:425](ui/tab_bag.c#L425)) and the
-  PARTY cells ([tab_party.c:562](ui/tab_party.c#L562)) both draw panels at
+  PARTY cells ([tab_party.c:572](ui/tab_party.c#L572)) both draw panels at
   computed offsets near the screen edge. Watch those two rather than the static
   layouts.
 - **Repaint cost, on the console.** Build with `CTR_DEBUG_MENU` and read
@@ -697,7 +697,7 @@ bash 3ds/build_objs.sh && make -C 3ds
   no border torn, on every tab, before and after `UI_CONTENT_H` moves.
 - **Touch parity per surface.** Every control still reachable, and nothing
   tappable that is not drawn: the IV/EV button carries a species check for
-  exactly that reason ([tab_party.c:1063](ui/tab_party.c#L1063)).
+  exactly that reason ([tab_party.c:1160](ui/tab_party.c#L1160)).
 - **On hardware, not only in an emulator** (`AGENTS.md`). The two bugs this
   codebase has hit hardest, the null save-block read and the decompress overrun,
   were both invisible in Azahar.

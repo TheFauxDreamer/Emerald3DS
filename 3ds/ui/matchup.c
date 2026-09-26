@@ -11,7 +11,9 @@
 #include "battle_anim.h"
 #include "battle_main.h"
 #include "pokemon.h"
+#include "constants/abilities.h"
 #include "constants/battle.h"
+#include "constants/battle_move_effects.h"
 #include "constants/moves.h"
 #include "constants/species.h"
 
@@ -63,28 +65,151 @@ static u16 TypeMultiplier(u8 atkType, u8 defType1, u8 defType2, bool8 foresighte
     return mul;
 }
 
+// ------------------------------------------------------------ one move ----
+//
+// A move's multiplier as the battle engine finds it (Cmd_typecalc,
+// src/battle_script_commands.c), not as the table alone gives it. Thus a mark
+// agrees with the message that the battle prints.
+
+// FALSE while a Cloud Nine or Air Lock mon is on the field: WEATHER_HAS_EFFECT
+// (include/battle_util.h). That macro calls AbilityBattleEffects, which writes
+// gLastUsedAbility, so this file does its own read-only walk.
+static bool8 WeatherHasEffect(void)
+{
+    for (u32 i = 0; i < gBattlersCount; i++)
+    {
+        u8 ability = gBattleMons[i].ability;
+
+        if ((ability == ABILITY_CLOUD_NINE || ability == ABILITY_AIR_LOCK)
+         && gBattleMons[i].hp != 0)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+u8 UiMatchupMoveType(struct Pokemon *mon, u16 move)
+{
+    // Cmd_hiddenpowercalc, from the IVs. The battle reads them from
+    // gBattleMons, which copies them from the mon, so they are the same.
+    if (move == MOVE_HIDDEN_POWER)
+    {
+        u8 typeBits = ((GetMonData(mon, MON_DATA_HP_IV) & 1) << 0)
+                    | ((GetMonData(mon, MON_DATA_ATK_IV) & 1) << 1)
+                    | ((GetMonData(mon, MON_DATA_DEF_IV) & 1) << 2)
+                    | ((GetMonData(mon, MON_DATA_SPEED_IV) & 1) << 3)
+                    | ((GetMonData(mon, MON_DATA_SPATK_IV) & 1) << 4)
+                    | ((GetMonData(mon, MON_DATA_SPDEF_IV) & 1) << 5);
+        u8 type = ((NUMBER_OF_MON_TYPES - 3) * typeBits) / 63 + 1;
+
+        if (type >= TYPE_MYSTERY)
+            type++;
+        return type;
+    }
+
+    // Cmd_setweatherballtype. Only in battle: gBattleWeather keeps the last
+    // battle's value after it ends.
+    if (gBattleMoves[move].effect == EFFECT_WEATHER_BALL
+     && gMain.inBattle && WeatherHasEffect())
+    {
+        if (gBattleWeather & B_WEATHER_RAIN)
+            return TYPE_WATER;
+        if (gBattleWeather & B_WEATHER_SANDSTORM)
+            return TYPE_ROCK;
+        if (gBattleWeather & B_WEATHER_SUN)
+            return TYPE_FIRE;
+        if (gBattleWeather & B_WEATHER_HAIL)
+            return TYPE_ICE;
+    }
+
+    return gBattleMoves[move].type;
+}
+
+// The moves whose damage does not depend on the chart. Their scripts run
+// typecalc, then clear the super effective and not very effective flags
+// (bicbyte), so only "no effect" is left. Counter and Mirror Coat use
+// typecalc2, with the same result.
+static bool8 IsFixedDamage(u16 move)
+{
+    switch (gBattleMoves[move].effect)
+    {
+    case EFFECT_LEVEL_DAMAGE:
+    case EFFECT_DRAGON_RAGE:
+    case EFFECT_SONICBOOM:
+    case EFFECT_PSYWAVE:
+    case EFFECT_SUPER_FANG:
+    case EFFECT_ENDEAVOR:
+    case EFFECT_COUNTER:
+    case EFFECT_MIRROR_COAT:
+    case EFFECT_OHKO:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+bool8 UiMatchupFoePresent(u8 position)
+{
+    u8 foe;
+
+    if (!UiMatchupActive())
+        return FALSE;
+
+    if (position == B_POSITION_OPPONENT_RIGHT
+     && !(gBattleTypeFlags & BATTLE_TYPE_DOUBLE))
+        return FALSE;
+
+    foe = GetBattlerAtPosition(position);
+
+    if (foe >= gBattlersCount || (gAbsentBattlerFlags & (1u << foe)))
+        return FALSE;
+
+    return gBattleMons[foe].species != SPECIES_NONE && gBattleMons[foe].hp != 0;
+}
+
+u16 UiMatchupMove(struct Pokemon *mon, u16 move, u8 position)
+{
+    u8 foe = GetBattlerAtPosition(position);
+    u8 type;
+    u16 mul;
+
+    if (move == MOVE_NONE)
+        return UI_MATCHUP_NA;
+
+    // A status move has no effectiveness. Bide's release never reads the
+    // chart, and Struggle skips typecalc.
+    if (gBattleMoves[move].power == 0
+     || gBattleMoves[move].effect == EFFECT_BIDE
+     || move == MOVE_STRUGGLE)
+        return UI_MATCHUP_NA;
+
+    type = UiMatchupMoveType(mon, move);
+
+    // Cmd_typecalc tests Levitate before the chart.
+    if (gBattleMons[foe].ability == ABILITY_LEVITATE && type == TYPE_GROUND)
+        return 0;
+
+    mul = TypeMultiplier(type, gBattleMons[foe].types[0],
+                         gBattleMons[foe].types[1],
+                         (gBattleMons[foe].status2 & STATUS2_FORESIGHT) != 0);
+
+    if (IsFixedDamage(move) && mul != 0)
+        return TYPE_MUL_NORMAL;
+
+    return mul;
+}
+
 static u16 ComputeOffence(struct Pokemon *mon)
 {
-    u8 foe = OpposingBattler();
-    bool8 foresighted = (gBattleMons[foe].status2 & STATUS2_FORESIGHT) != 0;
     u16 best = UI_MATCHUP_NA;
 
     for (u32 i = 0; i < MAX_MON_MOVES; i++)
     {
-        u16 move = (u16)GetMonData(mon, MON_DATA_MOVE1 + i);
-        u16 mul;
+        u16 mul = UiMatchupMove(mon, (u16)GetMonData(mon, MON_DATA_MOVE1 + i),
+                                B_POSITION_OPPONENT_LEFT);
 
-        if (move == MOVE_NONE)
+        if (mul == UI_MATCHUP_NA)
             continue;
-
-        // A status move has no effectiveness, so ignore it.
-        if (gBattleMoves[move].power == 0)
-            continue;
-
-        mul = TypeMultiplier(gBattleMoves[move].type,
-                             gBattleMons[foe].types[0],
-                             gBattleMons[foe].types[1],
-                             foresighted);
 
         if (best == UI_MATCHUP_NA || mul > best)
             best = mul;
@@ -207,18 +332,39 @@ u16 UiMatchupRisk(struct Pokemon *mon)
     return risk;
 }
 
+// Every input of UiMatchupMove that is not the mon: each opponent's species,
+// types, Foresight and Levitate (the ability follows the species, so the
+// species covers it), whether it is on the field, and the weather for Weather
+// Ball.
+static u32 FoeKey(u8 position)
+{
+    u8 foe = GetBattlerAtPosition(position);
+
+    if (!UiMatchupFoePresent(position))
+        return 0;
+
+    // Species ids use bits 0..8, so bit 11 is free.
+    return (u32)gBattleMons[foe].species
+         | ((u32)((gBattleMons[foe].status2 & STATUS2_FORESIGHT) != 0) << 11)
+         | ((u32)gBattleMons[foe].types[0] << 16)
+         | ((u32)gBattleMons[foe].types[1] << 24);
+}
+
 u32 UiMatchupOpponentKey(void)
 {
-    u8 foe;
+    u32 key;
 
     if (!gMain.inBattle)
         return 0;
 
-    foe = OpposingBattler();
+    // The left opponent as before, so the grid keeps its answers. The right
+    // one and the weather through their own multipliers, so they cannot cancel
+    // it.
+    key = FoeKey(B_POSITION_OPPONENT_LEFT);
+    key ^= FoeKey(B_POSITION_OPPONENT_RIGHT) * 2654435761u;
+    key ^= (u32)(WeatherHasEffect() ? gBattleWeather : 0) * 0x85EBCA6Bu;
 
-    return (u32)gBattleMons[foe].species
-         | ((u32)gBattleMons[foe].types[0] << 16)
-         | ((u32)gBattleMons[foe].types[1] << 24);
+    return key;
 }
 
 // ------------------------------------------------------- catchable check ---
