@@ -146,11 +146,22 @@ playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
 syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
-**HOME.** A grid of tiles, one for each page of port settings: SETTINGS,
-GAMEPLAY, EXTRAS and FOLLOWER, plus LINK for the Cable Club. Tap a tile to open
-its page and BACK to return; switching tab closes it, so HOME always opens on
-the grid. A setting that is only on or off is a checkbox: tap the box or its
-name.
+**HOME.** A grid of tiles, like the DS games' Pokétch. The first five read your
+game: **TRAINER** is your own trainer card, the game's own art, tap to flip,
+with RECORDS for the counters the game keeps and never shows (steps, battles,
+catches, eggs hatched, trades, shopping trips). **CLOCK** has the game's time,
+your play time and steps, the Repel steps left, and about how many steps each
+egg in your party needs to hatch. **DOWSING** is the Itemfinder as a radar, once
+you have one: the same range it searches, with a dot for every hidden item
+still there. **BERRIES** lists every tree you planted, where it is, how far it
+has grown, when it grows next and how often you watered it. **DAY CARE** shows
+who is there, the level each one had when you left it and has now, and the old
+man's words for how they get along.
+
+Then one tile for each page of port settings: SETTINGS, GAMEPLAY, EXTRAS and
+FOLLOWER, plus LINK for the Cable Club. Tap a tile to open its page and BACK to
+return; switching tab closes it, so HOME always opens on the grid. A setting
+that is only on or off is a checkbox: tap the box or its name.
 
 *SETTINGS* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or FILL

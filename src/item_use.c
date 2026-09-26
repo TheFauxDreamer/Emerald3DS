@@ -440,6 +440,26 @@ static bool8 IsHiddenItemPresentInConnection(const struct MapConnection *connect
 #undef localX
 #undef localY
 
+#if PLATFORM_3DS
+// For the DOWSING page of the second screen. It reads the same places as the
+// Itemfinder, and does not use a task. Inside the map,
+// IsHiddenItemPresentAtCoords finds the item. Outside it,
+// IsHiddenItemPresentInConnection searches the map next to it, as
+// CheckForHiddenItemsInMapConnection does.
+bool8 Ctr3dsHiddenItemAt(s16 x, s16 y)
+{
+    s16 width = gMapHeader.mapLayout->width + MAP_OFFSET;
+    s16 height = gMapHeader.mapLayout->height + MAP_OFFSET;
+    const struct MapConnection *conn;
+
+    if (x >= MAP_OFFSET && x < width && y >= MAP_OFFSET && y < height)
+        return IsHiddenItemPresentAtCoords(gMapHeader.events, x - MAP_OFFSET, y - MAP_OFFSET);
+
+    conn = GetMapConnectionAtPos(x, y);
+    return conn != NULL && IsHiddenItemPresentInConnection(conn, x, y);
+}
+#endif
+
 static void CheckForHiddenItemsInMapConnection(u8 taskId)
 {
     s16 playerX, playerY;

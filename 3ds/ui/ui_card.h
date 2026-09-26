@@ -36,6 +36,13 @@ int UiCardAvailable(int cardId);
 // One card at 1:1. `back` picks the profile side.
 void UiCardDraw(int x, int y, int cardId, int back);
 
+// The same for any card, for example the player's own from
+// TrainerCard_GenerateCardForLinkPlayer. `name` is the trainer's name in game
+// text. UiCardDraw calls this with a link card.
+struct TrainerCard;
+void UiCardDrawCard(int x, int y, const struct TrainerCard *card, const u8 *name,
+                    int back);
+
 // The same card at 1:4, front only.
 void UiCardThumb(int x, int y, int cardId);
 

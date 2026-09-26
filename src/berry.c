@@ -1204,6 +1204,14 @@ static u8 GetNumStagesWateredByBerryTreeId(u8 id)
     return BerryTreeGetNumStagesWatered(GetBerryTreeInfo(id));
 }
 
+#if PLATFORM_3DS
+// For the BERRIES page of the second screen. Reads only.
+u8 Ctr3dsBerryTreeStagesWatered(u8 id)
+{
+    return GetNumStagesWateredByBerryTreeId(id);
+}
+#endif
+
 // Berries can be watered at 4 stages of growth. The distribution is largely
 // even but slightly prefers middle berry yields, since it uniformly draws from
 // a subset of the total yield range.
