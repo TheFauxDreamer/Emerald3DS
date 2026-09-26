@@ -1,8 +1,18 @@
 # A designed bottom screen, built from images
 
-**Status: proposed, not implemented.** Re-verified against the tree at `67090b3`
-on 2026-09-16. That check re-read every line reference, and it rewrote these
-parts for the work that landed after `7db93d4`:
+**Status: proposed, not implemented.** Re-verified against the tree at `a036990`
+on 2026-09-26. That check re-read every line reference, and it rewrote these
+parts for the work that landed after `67090b3`:
+- step 4's cost section, for the paint that now goes straight into the GPU's
+  buffer and an upload of only the dirty rows (`040609a`), the snapshot that
+  only PARTY and the shiny notice take (`af5780b`), and the cheaper window
+  frame (`4051578`);
+- a new rule for `ui_gfx.c`: every blitter widens the dirty band (step 3);
+- the LINK page and its trainer card view, the EXTRA check rows, and the counts
+  in steps 4 and 5.
+
+The re-check at `67090b3` on 2026-09-16 rewrote these parts for the work that
+landed after `7db93d4`:
 - the sixth tab, TROPHY, and the third overlay, the achievement toast;
 - the counts in step 4;
 - the repaint cost and press feedback, which the second-screen animation stages
@@ -20,7 +30,7 @@ The bottom screen works but was never designed. It is drawn entirely from
 `UiFillRect` / `UiRect` primitives, and its whole visual identity is borrowed:
 every panel is one of Emerald's 20 option-menu window frames, and every ink
 colour is read back out of `gStandardMenuPalette` at runtime
-([ui_draw.c:274](ui/ui_draw.c#L274)). That was the right call while the port was
+([ui_draw.c:491](ui/ui_draw.c#L491)). That was the right call while the port was
 proving it could read game state at all, and it is why the code is littered with
 defensive decisions (outlines on every arrow, a chevron in theme colours, a Poke
 Ball that carries its own dark edge, a shiny notice that paints its own dark
@@ -34,7 +44,8 @@ helpers and by inline `UiRect` calls across ten files (step 5), and the BACK
 buttons come in three sizes.
 
 The decision taken here is to **stop borrowing and own the look**: one custom
-skin, built from real image assets, across all six tabs, the encounters view
+skin, built from real image assets, across all six tabs, the encounters view,
+the LINK page and its card view
 and all three overlays, with the layout itself driven by wireframes drawn at 320x240
 rather than by the accumulated hand-measured constants. The player's Frame
 option keeps governing the top screen exactly as it always did; it stops
@@ -66,6 +77,7 @@ const u16 sBtnPal[]    = INCGFX_U16("3ds/graphics/skin/button.png", ".gbapal");
 | `gbagfx png -> gbapal` | Writes the PNG's PLTE as BGR555, **as many entries as the PLTE has**, not always 256. | `HandlePngToGbaPaletteCommand` |
 | `preproc -g build/assets` | Resolves `root + source + args_as_path + extension` and emits the bytes inline. `build_objs.sh` passes `-g` for every game-side source, `3ds/ui/` included. | `CFile::TryConvertIncgfx`, `c_file.cpp:538`; [build_objs.sh:82](build_objs.sh#L82) |
 | CI | Already runs `generate_wasm_assets.py` before `build_objs.sh`. | `.github/workflows/build-3ds.yml:85`, `:80` |
+| Proof in `3ds/ui/` | `ui_card.c` already uses `INCGFX` for the trainer card's star-tier palettes, so a `3ds/ui/` source going through the asset preprocessor is shipped code, not a theory. | `3ds/ui/ui_card.c` |
 
 `-plain` is an established in-tree pattern, not a novelty: `src/pokemon.c:1363`
 uses it for Spinda's spots.
@@ -76,7 +88,7 @@ uses it for Spinda's spots.
 |---|---|---|
 | **Indexed PNG, colour type 3** | `ReadPng` rejects RGB and RGBA outright | [convert_png.c:90](../tools/gbagfx/convert_png.c#L90) |
 | **Bit depth 8** | a depth-4 file is re-packed as one flat bitstream that ignores per-row padding, so any odd width shears silently | `ConvertBitDepth`, [convert_png.c:48](../tools/gbagfx/convert_png.c#L48) |
-| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:114](ui/ui_draw.c#L114) |
+| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:186](ui/ui_draw.c#L186) |
 | **256 colours maximum per sheet** | one byte per pixel | `WritePlainImage` |
 
 Aseprite, GIMP and Photoshop all export this (Aseprite: Indexed mode, then Save
@@ -141,7 +153,9 @@ design record. Each is exactly 320x240, or an integer 2x / 4x multiple.
 | `encounters.png` | MAP's pushed view ([view_encounters.c](ui/view_encounters.c)) | header, 4x2 grid, pagers, BACK |
 | `dex.png` | list and entry screen | |
 | `trophy.png` | the TROPHY tab ([tab_trophy.c](ui/tab_trophy.c)) | the MAIN and POST-GAME page buttons with their counts, list rows in the six category colors, a hidden row, NEW tags, the pagers |
-| `extra_p1.png`, `extra_p2.png`, `extra_p3.png`, `extra_p4.png` | EXTRA's four shipping pages | page 5, the debug menu, exists only under `CTR_DEBUG_MENU` and reuses page 3's grid |
+| `extra_p1.png`, `extra_p2.png`, `extra_p3.png`, `extra_p4.png` | EXTRA's four settings pages | the check rows (a box, a label and a dim hint, the whole row a target) as well as the button rows. Page 6, the debug menu, exists only under `CTR_DEBUG_MENU` and reuses page 3's grid |
+| `link.png` | EXTRA page 5, LINK ([ui_link.c](ui/ui_link.c)) | HOST, SCAN, the peer list, the status line, DISCONNECT and TRAINER CARDS |
+| `link_cards.png` | LINK's card view | the full content area: the 240x160 card at 1:1, the 1:4 thumbnails and their labels, the flip arrows and BACK. The card itself is the GBA's own art at an integer scale and is **not** reskinned; draw only the chrome around it |
 
 These are reference only and are never compiled: `generate_wasm_assets.py`
 converts a PNG only when some `INCGFX_*` line names it, so an unreferenced file
@@ -171,7 +185,7 @@ other wireframe is drawn against whatever split it establishes.
 
 Text slots are subject to the font, not the other way round. There is one font
 and two sizes: `UI_GLYPH_H` 15 with `UI_LINE_H` 16, and `UiTextBig` at 2x
-nearest-neighbour for `UI_GLYPH_BIG_H` 30 ([ui_text.h:16](ui/ui_text.h#L16)).
+nearest-neighbour for `UI_GLYPH_BIG_H` 30 ([ui_text.h:33](ui/ui_text.h#L33)).
 Wireframe text blocks have to be drawn to those heights.
 
 ### The overlays
@@ -182,7 +196,7 @@ to the current 192px content area:
 | Overlay | Rect | Defined at |
 |---|---|---|
 | achievement toast | 320x40 at (0, 0), so y 0..40 | [ui_achtoast.h:27](ui/ui_achtoast.h#L27) (`UI_AT_*`) |
-| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:141](ui/bottom_screen.c#L141) (`NOTICE_*`) |
+| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:144](ui/bottom_screen.c#L144) (`NOTICE_*`) |
 | quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:25](ui/ui_quickball.h#L25) (`UI_QB_*`) |
 
 The three **tile the content area exactly**. The toast ends at y 40, where the
@@ -263,8 +277,8 @@ construction rather than by discipline.
 ### `3ds/ui/ui_gfx.h` / `ui_gfx.c`
 
 Game-side, like the rest of `3ds/ui/`. Draws into the same `sFb` that
-[ui_draw.c:23](ui/ui_draw.c#L23) owns, so it is a peer of `UiBlit4bppTile`, not
-a replacement. The `ui_*` prefix is mandatory: `build_objs.sh` writes every
+[ui_draw.c:33](ui/ui_draw.c#L33) points at, so it is a peer of `UiBlit4bppTile`,
+not a replacement. The `ui_*` prefix is mandatory: `build_objs.sh` writes every
 object into one flat directory, so a `3ds/ui/` basename colliding with a `src/`
 one silently deletes that game feature (cheatsheet section 12).
 
@@ -283,14 +297,21 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
 - The sheet table is `const struct { const u8 *px; const u16 *pal; u16 w, h,
   palCount; } sSheets[UI_SHEET_COUNT]`, with a parallel
   `static u16 sPal565[COUNT][256]` in `.bss` that `UiGfxInit` fills once via
-  the existing `UiLoadPal` ([ui_draw.c:37](ui/ui_draw.c#L37)). Convert
+  the existing `UiLoadPal` ([ui_draw.c:94](ui/ui_draw.c#L94)). Convert
   `palCount` entries, taken from `ARRAY_COUNT` of the `INCGFX` array, **not
   256**: `.gbapal` is only as long as the PNG's PLTE, and reading 256 would run
   past a shorter array. No const-cast, no per-draw conversion, no
   cache-invalidation logic. 3KB of `.bss`.
+- **Every entry point calls `UiTouchRows(y, h)` for the rows it writes, and
+  addresses a row as `y * UI_STRIDE`, not `y * UI_W`.** Since `040609a` the UI
+  paints straight into the host's linear stage, whose rows are 512 pixels
+  apart, and the host uploads only the rows in the dirty band. A blitter that
+  skips `UiTouchRows` draws pixels that reach the panel only when something
+  else repaints those rows. Every existing primitive in `ui_draw.c` does this;
+  copy one.
 - Every entry point clamps against `0..UI_W` / `0..UI_H` exactly the way
-  `UiFillRect` ([ui_draw.c:62](ui/ui_draw.c#L62)) already does, so an off-screen
-  or oversized request is a no-op rather than an overrun. If `UiClipPush/Pop`
+  `UiFillRect` ([ui_draw.c:125](ui/ui_draw.c#L125)) already does, so an
+  off-screen or oversized request is a no-op rather than an overrun. If `UiClipPush/Pop`
   (`SECOND_SCREEN_PLAN.md` step 1) lands first, they clamp against **the clip**
   instead, or a panel inside a clipped row paints over its neighbours.
 - `band` selects one state out of a stacked strip, so the three button states
@@ -298,6 +319,12 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
 - Nine-slice **tiles** its edges rather than stretching them. For a 1px edge the
   two are identical; for a thicker edge, tiling keeps a texture readable where
   stretching would smear it.
+- **A flat centre is a fill, not a blit.** `4051578` made `UiWindowFrame`'s
+  centre a rect fill when its centre tile is one colour, which removed 836 tile
+  blits from a full-screen frame. The skin retires that path with the frames, so
+  `UiNineSlice` must do the same: check the centre band once at `UiGfxInit`,
+  and fill it when it is flat. Otherwise the skin is slower than today on the
+  most common surface.
 - **`UiTileFill` of the backdrop is a row copy, not a palette lookup.**
   `UiGfxInit` expands `bg.png` to RGB565 once (64x64, 8KB of `.bss`), and the
   fill copies rows out of that. It covers 61,440 pixels on every full repaint,
@@ -329,52 +356,63 @@ skin when the wireframes are drawn.
 Two function bodies and one colour block change, and about 350 call sites do
 not.
 
-**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:236](ui/ui_draw.c#L236))
+**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:408](ui/ui_draw.c#L408))
 has **16 call sites in ten files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
 encounters view ([view_encounters.c:414](ui/view_encounters.c#L414)), and all
 three overlays ([ui_achtoast.c:122](ui/ui_achtoast.c#L122),
-[bottom_screen.c:466](ui/bottom_screen.c#L466),
+[bottom_screen.c:469](ui/bottom_screen.c#L469),
 [ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
 `UiNineSlice` of `UI_SHEET_PANEL` and every one of them is reskinned untouched.
 Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
 function a one-line wrapper, so the 8px grid stops being a constraint on
 anything written from here on.
 
-**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:274](ui/ui_draw.c#L274))
-are called **about 215 times**. Return the skin's ink colours instead of reading
+**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:491](ui/ui_draw.c#L491))
+are called **about 240 times**. Return the skin's ink colours instead of reading
 `gStandardMenuPalette` and every label on the screen becomes consistent in one
 edit.
 
 **The `UI_COL_*` block** is the third lever, and the easy one to overlook.
-`UI_COL_DIM` (85 uses) and `UI_COL_ACCENT` (35) are drawn directly on panels as
+`UI_COL_DIM` (95 uses) and `UI_COL_ACCENT` (38) are drawn directly on panels as
 secondary labels, button outlines and arrow fills, so moving the block into
 `ui_skin.h` with the skin's values retargets all of them in the same edit.
 
 Then drop `top[0] = UiFrameId()` from `UiStateHash()`
-([bottom_screen.c:546](ui/bottom_screen.c#L546)). Once the frame no longer
+([bottom_screen.c:549](ui/bottom_screen.c#L549)). Once the frame no longer
 drives the bottom screen it is a stale input to the repaint hash. `UiFrameId()`
 itself stays: it is still correct, and the top screen still uses the setting.
 
 Replace the in-game `UiClear(UI_COL_BG)` in `Redraw()`
-([bottom_screen.c:727](ui/bottom_screen.c#L727)) with a `UiTileFill` of the
+([bottom_screen.c:770](ui/bottom_screen.c#L770)) with a `UiTileFill` of the
 backdrop. The pre-game `UiClear(0)` a few lines above it stays black: that is
 the screen under the title, not a skin surface. Since this plan was first
 written, that screen also shows TOUCH TO START and the build id
 ([ui_title.c](ui/ui_title.c)). Both stay as they are. The prompt copies the
 lettering of the game's PRESS START banner, so it matches the top screen, not
-the skin.
+the skin. Its blink repaints only its own rect over black
+(`UiTitleDrawPrompt`), so the title screen must stay on a black ground.
+
+The LINK card view is the other surface that keeps its own art: the trainer
+card is the GBA's tiles and palettes at 1:1 (`ui_card.c`). The skin reskins the
+chrome around it (BACK, the flip arrows, the thumbnail ground), not the card.
 
 **At the end of this step every surface already looks new, with no per-tab
 edits at all.** That is the checkpoint worth building to before anything else.
 
 ### The snapshot is on the skin's side
 
-`Redraw()` ([bottom_screen.c:696](ui/bottom_screen.c#L696)) no longer ends with
+`Redraw()` ([bottom_screen.c:718](ui/bottom_screen.c#L718)) no longer ends with
 the tab bar. It paints the still screen (ground, tab, strip, toast, notice, bar), takes
-`UiSnapshot()`, and only then runs `DrawAnimatedLayer()` for the pieces that
-move. An animation step (`RedrawAnimated`, [:789](ui/bottom_screen.c#L789))
-puts a few rects back from the snapshot and redraws only those.
+`UiSnapshot()` if `AnimatedLayerActive()`, and only then runs
+`DrawAnimatedLayer()` for the pieces that move. An animation step
+(`RedrawAnimated`, [:848](ui/bottom_screen.c#L848)) puts a few rects back from
+the snapshot and redraws only those.
+
+Since `af5780b` the snapshot is taken only while the animated layer has
+something to draw: the PARTY tab, or the shiny notice. On BAG, MAP, DEX,
+TROPHY and EXTRA it is not taken, because nothing reads it. Step 5's press
+state changes that (see there).
 
 That fits the skin with no extra work: the backdrop and the panels are ground,
 so they belong in the snapshot, and `UiRestoreRect` puts a textured ground back
@@ -384,41 +422,60 @@ new thing here that moves, and it is drawn after.
 
 ### What a repaint may cost now
 
-The frame model changed under this plan twice. The rasteriser runs on core 2 of
-a New 3DS while `CtrBottomUpdate` paints; an Old 3DS has no second core to give
-it and keeps the inline path.
-Then the second-screen animation stages (`59a0ba6`) moved the whole bottom
-upload before the join, so core 0's share of the overlap is now **paint plus
-upload**. A repaint is free while that sum finishes before `ppu` does, and a
-little past it still fits in the frame.
+The frame model changed under this plan three times. The rasteriser runs on
+core 2 of a New 3DS while `CtrBottomUpdate` paints; an Old 3DS has no second
+core to give it, so there the paint runs on core 0 in series with a rasterise
+of about 12 ms. Then the second-screen animation stages (`59a0ba6`) moved the
+bottom upload before the join, so on a New 3DS core 0's share of the overlap is
+**paint plus upload**. Then `040609a`, `af5780b` and `4051578` made both halves
+cheaper:
 
-Measured at `59a0ba6` on a New 3DS XL (cheatsheet section 7, "What a repaint
-costs on the second-core path"):
+- The UI paints straight into the linear buffer the GPU transfer reads, at a
+  row stride of 512 (`UI_STRIDE`). The copy into a staging buffer is gone. It
+  was 2.0 ms a repaint on an Old 3DS and 1.4 ms on a New one.
+- The upload carries only the dirty row band, in 8-row strips, in one flush and
+  one transfer on the second-core path. An animation step uploads a few strips.
+- `UiSnapshot()` (a 307,200-byte copy) runs only while the animated layer has a
+  reader: PARTY, or the shiny notice.
+- `UiWindowFrame`'s centre is a fill, and the tile blit and glyph loops are
+  cheaper.
 
-| Stage | New 3DS XL |
+An Old 3DS went from about 200 missed VBlanks in 600 frames to 1 to 9 with
+those changes (`ROADMAP.md`, "Bottom screen on core 0"). That is the budget the
+skin inherits, and on an Old 3DS the paint is on the critical path, not hidden
+behind the rasteriser.
+
+The figures below were measured at `59a0ba6` on a New 3DS XL, **before** those
+changes. They are an upper bound now, not a baseline. Measure again before
+step 4 and use those numbers:
+
+| Stage | New 3DS XL at `59a0ba6` |
 |---|---|
 | `ppu` mean / worst | 4.1 to 4.9 ms / 8.6 ms |
 | `paint`, full, shiny panel up | about 4.1 ms, 4.7 ms worst |
 | `paint`, full, otherwise | 2.25 to 3.35 ms |
-| `upload.bot`, copy + flush + xfer | about 0.7 ms, up to 1.75 ms in battle |
+| `upload.bot`, copy + flush + xfer | about 0.7 ms, up to 1.75 ms in battle (the copy is gone now) |
 | `framebegin` (spare time) | 10.2 to 10.9 ms |
 
-A full paint under the shiny panel already finishes about 1 ms past the join,
-and the frame still has about 10 ms spare. So the skin has some room, but a full
-repaint is the case to watch, because it is the one that runs past the
-rasteriser. The single-core fallback, taken when no second core is available or
-built deliberately with `CTR_PPU_THREAD=0`, still pays
+A full repaint is the case to watch, because it is the one that can run past
+the rasteriser on a New 3DS and the one that costs a frame on an Old 3DS. The
+single-core fallback, taken when no second core is available or built
+deliberately with `CTR_PPU_THREAD=0`, still pays
 `fps = 3600 / (60 + repaints per second)`.
 
 So this step's budget is "no slower than today", measured rather than assumed:
 
 - The backdrop fill is a row copy of a pre-expanded tile (step 3), not a
   per-pixel palette lookup, so it lands near `UiClear`'s cost.
-- `UiNineSlice` over a full-area panel does one byte read and one palette
-  lookup per pixel, which is the same work `UiWindowFrame`'s 4bpp blits do
-  today, minus the nibble unpack. Expect it to be a wash; confirm it.
-- Read `paint` on the console before and after this step. A rise is a
-  regression to fix here, before step 5 builds on it.
+- `UiNineSlice`'s edges do one byte read and one palette lookup per pixel,
+  about what `UiWindowFrame`'s 4bpp edge blits do today. Its centre must be a
+  fill when the art is flat (step 3), because `UiWindowFrame`'s centre is a
+  fill today. A textured centre costs a lookup per pixel over most of the
+  screen, which today's frames do not pay; measure it before the art commits
+  to one.
+- Read `paint` on the console, **on an Old 3DS as well as a New one**, before
+  and after this step. A rise is a regression to fix here, before step 5 builds
+  on it.
 
 ---
 
@@ -428,22 +485,25 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:175](ui/tab_extra.c#L175)); `DrawBtn` ([tab_map.c:428](ui/tab_map.c#L428)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:885](ui/tab_party.c#L885)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:513](ui/bottom_screen.c#L513)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)) |
+| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:76](ui/ui_link.c#L76)); `DrawBtn` ([tab_map.c:428](ui/tab_map.c#L428)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:851](ui/tab_party.c#L851)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
+| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:885](ui/tab_party.c#L885)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
+| check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:204](ui/tab_extra.c#L204)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
 The BACK buttons are 38x22 ([tab_party.c:97](ui/tab_party.c#L97)), 42x22
 ([tab_dex.c:91](ui/tab_dex.c#L91), and the encounters view, which matched DEX
-on purpose) and 56x20 ([tab_bag.c:98](ui/tab_bag.c#L98), BAG's CANCEL). Add
-one widget to `ui_gfx`:
+on purpose), 56x20 ([tab_bag.c:98](ui/tab_bag.c#L98), BAG's CANCEL) and 60x22
+(LINK's card view, [ui_link.c:62](ui/ui_link.c#L62)). Add one widget to
+`ui_gfx`:
 
 ```c
 void UiButton(int x, int y, int w, int h, const u8 *label, int state);
 void UiButtonGlyph(int x, int y, int w, int h, int glyph, int state);   // pagers
 ```
 
-`DrawButtonH` and `DrawBtn` become wrappers, and every inline outline above
-becomes a call. The three bands already have meanings on screen: EXTRA, MAP,
+`DrawButtonH`, `DrawBtn` and LINK's `DrawButton` become wrappers, and every
+inline outline above becomes a call. `UiCheckBox` takes its box from the same
+sheet or from `chrome.png`. The three bands already have meanings on screen: EXTRA, MAP,
 TROPHY's page buttons and the IV/EV toggle all mark the active choice with a
 doubled accent inset, which
 is the `active` band. This is the reuse win that keeps the art set small: one
@@ -460,14 +520,14 @@ is wrong on two counts now:
 - It bakes the pressed state into the snapshot, and it doubles the full
   repaints every tap costs. A full repaint is the one case that already runs
   past the rasteriser on the second-core path (step 4).
-- On the single-core path, the bottom screen reaches the panel in 48-row bands,
-  five frames per picture, top to bottom ([video.c:558](host/video.c#L558)), and
-  a new picture waits for a run already in flight. A full repaint on press shows
-  1 to 5 frames after the touch depending on its row, the tab bar last, and on a
-  tap shorter than five frames it holds the release's result back by the
-  remainder. The second-core path has no such delay: since `59a0ba6` it uploads
-  the whole screen on the frame it was painted, and it slices only when
-  `sPpuCore < 0` ([video.c:732](host/video.c#L732)).
+- On the single-core path, a full repaint reaches the panel in 48-row bands
+  (`BOT_CHUNK_ROWS`, [video.c:732](host/video.c#L732)), five frames per
+  picture, top to bottom, and a new picture waits for a run already in flight.
+  A full repaint on press shows 1 to 5 frames after the touch depending on its
+  row, the tab bar last, and on a tap shorter than five frames it holds the
+  release's result back by the remainder. The second-core path has no such
+  delay: it uploads the whole dirty band on the frame it was painted, and it
+  slices only when `sPpuCore < 0` ([video.c:958](host/video.c#L958)).
 
 Instead, the pressed control is drawn **over** the snapshot, the way the party
 icons are:
@@ -475,11 +535,18 @@ icons are:
 1. `UiButton` records each button it draws (rect, label or glyph, state) in a
    small static table, cleared at the top of `Redraw()`.
 2. `ui_draw.c` gains `UiSetPointer(const CtrTouchState *)`, called once per
-   frame from `CtrBottomUpdate` ([bottom_screen.c:810](ui/bottom_screen.c#L810)).
+   frame from `CtrBottomUpdate` ([bottom_screen.c:870](ui/bottom_screen.c#L870)).
 3. `DrawAnimatedLayer` gains a last step, after whichever tenant it ran: while
    the pointer is `touching`, find the recorded button under it, restore its
    rect from the snapshot and draw it in the pressed band.
-4. `CtrBottomUpdate` asks for the cheap `RedrawAnimated` path on
+4. `AnimatedLayerActive()` must also be TRUE while a button is recorded,
+   so that `Redraw()` takes the snapshot on every tab. Since `af5780b` it is
+   TRUE only on PARTY and under the shiny notice, so without this change the
+   press step has no snapshot to restore from on BAG, MAP, DEX, TROPHY and
+   EXTRA. That puts the 307,200-byte `UiSnapshot()` copy back on every full
+   repaint of those tabs. Measure it on an Old 3DS; if it costs too much, take
+   the snapshot of the recorded button rects only.
+5. `CtrBottomUpdate` asks for the cheap `RedrawAnimated` path on
    `justPressed`, on sliding off a button, and on `justReleased`, never for a
    full `Redraw`. The release still acts through the tab's handler exactly as
    today, and that handler's `UiMarkDirty()` produces the full repaint it
@@ -487,22 +554,22 @@ icons are:
 
 Mind the touch latch. `sample_touch` holds the last contact point because
 `hidTouchRead` returns `(0,0)` on the release frame
-([host/main.c:107](host/main.c#L107)), which is why every handler opens with
+([host/main.c:114](host/main.c#L114)), which is why every handler opens with
 `if (!t->justReleased) return;`. The press step must gate on `t->touching`, not
 on coordinates alone, or the control under the last tap draws as held forever.
 
 About 50 lines. Judge the latency on the console rather than in Azahar. On the
-second-core path a press shows on the frame it is painted. Only the single-core
-path can still show the tab bar five frames late. If that reads as sluggish
-there, the follow-up is host-side (upload only the bands a press touched) and is
-not part of this plan.
+second-core path a press shows on the frame it is painted. On the single-core
+path a press step dirties only the button's rows, and since `040609a` the host
+uploads only those, so it too shows on the next frame, unless a full repaint's
+run is still in flight.
 
 ---
 
 ## Step 6: the shell, then the tabs
 
 **Shell, with all three overlays.** `DrawTabBar`
-([bottom_screen.c:661](ui/bottom_screen.c#L661)) currently draws flat
+([bottom_screen.c:664](ui/bottom_screen.c#L664)) currently draws flat
 rectangles. It becomes the bar's ground, a per-cell art state, an icon from
 `icons.png` and the label beneath it, at whatever `UI_TABBAR_H` `shell.png`
 established. The toast, the notice and the strip are re-fitted in the same pass,
@@ -513,8 +580,9 @@ overlays").
 screen: EXTRA first (pure chrome, no game art, so it validates the widget set),
 then PARTY (the most game art, and the animated layer's main tenant), then BAG
 with its picker, then DEX, then TROPHY (its category colors are the contrast
-check from step 3), then MAP with the encounters view last (the region map
-decode and cache is the most delicate thing on the screen).
+check from step 3), then LINK with its card view (the card is fixed art; only its chrome moves),
+then MAP with the encounters view last (the region map decode and cache is the
+most delicate thing on the screen).
 
 For each: run `skin.py probe` on its wireframe, replace that file's `#define`
 block with the probed constants, and update the draw and touch code together.
@@ -531,8 +599,10 @@ known game string; BAG's list panel is 24 tiles because that leaves exactly
 108px, the width of the widest item description line in the game
 ([tab_bag.c:41](ui/tab_bag.c#L41)). Narrowing any panel that shows game text
 means re-measuring that string, or implementing `UiClipPush/Pop` first (step 1
-of `SECOND_SCREEN_PLAN.md`; the blitters already do per-pixel bounds tests, so
-it is roughly four one-line edits and zero extra per-pixel cost).
+of `SECOND_SCREEN_PLAN.md`; the blitters already clamp against the screen, so
+each clamps against the clip instead, at no extra per-pixel cost). LINK shows a
+partner's name, which is player-authored: `DrawNameClipped` in `ui_card.c`
+measures and truncates it, and any re-fit of that page must keep the limit.
 
 ---
 
@@ -541,8 +611,9 @@ it is roughly four one-line edits and zero extra per-pixel cost).
 Modal state lives in file statics that survive a tab switch, so leaving a view
 by tapping another tab and coming back re-enters it: `sDetailOpen` (PARTY),
 `sEntryOpen` (DEX), `sView` (BAG's picker), `sOpen`
-([view_encounters.c:107](ui/view_encounters.c#L107), MAP's encounters view) and
-MAP's fly confirm, `sConfirm` ([tab_map.c:127](ui/tab_map.c#L127)). Known bug,
+([view_encounters.c:107](ui/view_encounters.c#L107), MAP's encounters view),
+MAP's fly confirm, `sConfirm` ([tab_map.c:127](ui/tab_map.c#L127)), and LINK's
+card view, `sCardOpen` ([ui_link.c:72](ui/ui_link.c#L72)). Known bug,
 step 0 of `SECOND_SCREEN_PLAN.md`. Folding the reset into the tab switch is a
 few lines while those files are already open. Out of scope unless explicitly
 taken up.
@@ -578,7 +649,7 @@ drawing API, which gains `UiPanel`, `UiButton` and the `ui_gfx` calls and loses
 the "text on a frame must use `UiThemeText()`" rule once frames no longer apply
 here; and section 14, the layout and overlay constants at whatever values
 `shell.png` settled. In code, the comment above the notice's geometry
-([bottom_screen.c:139](ui/bottom_screen.c#L139)), which says to keep the
+([bottom_screen.c:140](ui/bottom_screen.c#L140)), which says to keep the
 numbers in whole tiles. The same rule is implied by the toast's and the strip's
 `*_TX`/`*_TY` constants, and `UiPanel` retires it for all three.
 
@@ -609,12 +680,15 @@ bash 3ds/build_objs.sh && make -C 3ds
 - **Repaint cost, on the console.** Build with `CTR_DEBUG_MENU` and read
   `log.txt`'s `prof` lines before and after step 4, and again after step 5:
   `paint` must not rise, `ppu.wait` must stay above zero on frames that repaint,
-  `frame` worst must stay near 16.7 ms, and no "missed VBlank" line may appear.
+  `frame` worst must stay near 16.7 ms, and no "frames late" line may appear.
+  Run the same four on an Old 3DS, where the paint is not hidden behind the
+  rasteriser.
   Four scenarios: the PARTY tab in a battle while taking damage (a sliding HP
   bar forces full repaints), the quick-throw strip up (it repaints at least
   twice a turn), the shiny notice (the debug page's SHINY), and the shiny notice
   with the party grid under it, which is the measured worst case of about
-  4.1 ms (step 4). Compare against the `59a0ba6` numbers there. Azahar at its
+  4.1 ms at `59a0ba6` (step 4). Measure a fresh baseline before step 4; the
+  `59a0ba6` numbers predate the cheaper paint and upload. Azahar at its
   default clock doubles the rasteriser's cost and at 300% shows about two
   thirds of it, and it shows the upload at about a sixth, so its numbers are
   only a smoke test.
@@ -642,13 +716,14 @@ bash 3ds/build_objs.sh && make -C 3ds
   `preproc`. At the sizes above this is a few hundred KB total and unnoticeable;
   it would stop being unnoticeable at full-screen images, which is the second
   reason the backdrop is a tile.
-- **A full repaint already runs past the rasteriser.** Under the shiny panel,
-  paint plus upload finish about 1 ms after the join. The frame still has about
-  10 ms spare, so this costs no frame today, but it is the case that grows. Do
+- **A full repaint is the case that grows.** At `59a0ba6`, under the shiny
+  panel, paint plus upload finished about 1 ms after the join on a New 3DS.
+  `040609a` removed the copy since then. On an Old 3DS the paint is in series
+  with the rasteriser, and the port only just got that console to 60 Hz. Do
   not reason about anything this plan adds to a full repaint. Measure it
   (step 4).
 - **`UI_TABBAR_H` and `UI_CONTENT_H` moving is the expensive part.** Six tab
-  files, the encounters view and all three overlays derive their layout from
+  files, the encounters view, the LINK card view and all three overlays derive their layout from
   `UI_CONTENT_H`. Changing it is affordable here only because step 6 re-fits
   all of them against wireframes anyway. Change the constant with the surfaces
   it re-fits, never ahead of them.
