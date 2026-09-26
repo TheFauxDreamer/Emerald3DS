@@ -173,7 +173,7 @@ static const u16 sEventItems[] =
 // table below lists them MAIN first. Each page shows its color blocks in that
 // order.
 //
-// Ids are permanent. A new achievement takes the next unused id (85 now). A
+// Ids are permanent. A new achievement takes the next unused id (86 now). A
 // removed one leaves its id unused forever. Rows can move between groups,
 // because only the id is stored. C cannot check the ids at compile time, so the
 // debug page counts duplicate or out-of-range ids.
@@ -270,6 +270,13 @@ static const struct AchDef sMainBattle[] =
 {
     STAT(31, "Nothing Happened",   "Use Splash in battle",            GAME_STAT_USED_SPLASH, 1),
     STAT(30, "Battle Hardened",    "Fight 100 trainer battles",       GAME_STAT_TRAINER_BATTLES, 100),
+    // A win against a person, not against the game. Only one path raises the
+    // stat: CB2_ReturnFromCableClubBattle (src/cable_club.c) after a single or
+    // a double, and UpdatePlayerLinkBattleRecords (src/battle_records.c) drops
+    // a Union Room battle. Thus no Battle Frontier or Battle Tower win counts.
+    // Only a New Game clears the stat, and that is a different playthrough.
+    STAT(85, "Bested a True Rival", "Beat another player in a link battle",
+         GAME_STAT_LINK_BATTLE_WINS, 1),
 };
 
 // MAIN, Extras (blue): the activities around Hoenn outside the story, about in
