@@ -494,10 +494,11 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   drawn for an empty party slot, so its hit test carries the same species check
   ([tab_party.c:1063](ui/tab_party.c#L1063)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
-- **BACK buttons** are per-view rects, currently in three different places:
+- **BACK buttons** are per-view rects, currently in four different places:
   [tab_party.c:97](ui/tab_party.c#L97) (38x22),
-  [tab_dex.c:91](ui/tab_dex.c#L91) (42x22),
-  [tab_bag.c:98](ui/tab_bag.c#L98) (56x20 cancel).
+  [tab_dex.c:91](ui/tab_dex.c#L91) (42x22, which the encounters view matches),
+  [tab_bag.c:98](ui/tab_bag.c#L98) (56x20 cancel),
+  [ui_link.c:62](ui/ui_link.c#L62) (60x22, the card view).
 - **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`, the
   encounters view's `sOpen` and LINK's `sCardOpen`) are file statics that
   survive a tab switch, so leaving a detail view by tapping another tab and
