@@ -208,7 +208,7 @@ one-line verdict. When the mix is genuinely all zero the verdict walks the
 engine chain and names the first link that was never made, rather than just
 reporting silence.
 
-The debug page of the bottom screen's EXTRA tab silences one half of the mixer
+The DEBUG page of the bottom screen's HOME tab silences one half of the mixer
 at a time (PSG, reverb, DirectSound) and toggles the stereo downmix. Neither
 half can be judged by ear while the other is playing, so this is the only
 instrument there is for a fault about quality rather than plumbing. The stereo

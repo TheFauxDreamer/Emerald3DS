@@ -153,8 +153,9 @@ design record. Each is exactly 320x240, or an integer 2x / 4x multiple.
 | `encounters.png` | MAP's pushed view ([view_encounters.c](ui/view_encounters.c)) | header with the method name, the method chips, 3x2 grid with level and chance per cell, pagers, BACK |
 | `dex.png` | list and entry screen | |
 | `trophy.png` | the TROPHY tab ([tab_trophy.c](ui/tab_trophy.c)) | the MAIN and POST-GAME page buttons with their counts, list rows in the six category colors, a hidden row, NEW tags, the pagers |
-| `extra_p1.png`, `extra_p2.png`, `extra_p3.png`, `extra_p4.png` | EXTRA's four settings pages | the check rows (a box, a label and a dim hint, the whole row a target) as well as the button rows. Page 6, the debug menu, exists only under `CTR_DEBUG_MENU` and reuses page 3's grid |
-| `link.png` | EXTRA page 5, LINK ([ui_link.c](ui/ui_link.c)) | HOST, SCAN, the peer list, the status line, DISCONNECT and TRAINER CARDS |
+| `home.png` | HOME's launcher | the 4x3 grid of 80x64 tiles, each with a title and a small hint, and the empty cells |
+| `extra_p1.png`, `extra_p2.png`, `extra_p3.png`, `extra_p4.png` | HOME's four settings pages (SETTINGS, GAMEPLAY, EXTRAS, FOLLOWER) | the title line (title left, BACK right), the check rows (a box, a label and a dim hint, the whole row a target) as well as the button rows. DEBUG, the debug menu, exists only under `CTR_DEBUG_MENU` and reuses EXTRAS' grid |
+| `link.png` | HOME's LINK page ([ui_link.c](ui/ui_link.c)) | HOST, SCAN, the peer list, the status line, DISCONNECT and TRAINER CARDS |
 | `link_cards.png` | LINK's card view | the full content area: the 240x160 card at 1:1, the 1:4 thumbnails and their labels, the flip arrows and BACK. The card itself is the GBA's own art at an integer scale and is **not** reskinned; draw only the chrome around it |
 
 These are reference only and are never compiled: `generate_wasm_assets.py`
@@ -228,7 +229,7 @@ matching the convention `UiBlit4bppTile` already uses.
 | `panel.png` | 48x48 | 2,304 | nine-slice panel, 16px margins |
 | `button.png` | 48x144 | 6,912 | nine-slice button, three states stacked (idle / active / pressed), 48px each |
 | `tabbar.png` | 64x96 | 6,144 | tab cell, two states stacked, plus the bar's own ground |
-| `icons.png` | 144x24 | 3,456 | six 24x24 tab icons, in `enum UiTab` order: PARTY, BAG, MAP, DEX, TROPHY, EXTRA |
+| `icons.png` | 144x24 | 3,456 | six 24x24 tab icons, in `enum UiTab` order: PARTY, BAG, MAP, DEX, TROPHY, HOME |
 | `chrome.png` | 64x64 | 4,096 | atlas: arrows, pager pips, scrollbar, dividers |
 
 Roughly 27KB of const data, plus six palettes of at most 512 bytes each.
@@ -486,9 +487,9 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 
 | Kind | Where |
 |---|---|
-| named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:82](ui/ui_link.c#L82)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:954](ui/tab_party.c#L954)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
+| named helper | `DrawButtonH` ([tab_extra.c:219](ui/tab_extra.c#L219)); LINK's `DrawButton` ([ui_link.c:82](ui/ui_link.c#L82)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:954](ui/tab_party.c#L954)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
 | inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:988](ui/tab_party.c#L988)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:535](ui/bottom_screen.c#L535)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
-| check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:204](ui/tab_extra.c#L204)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
+| check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:241](ui/tab_extra.c#L241)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
 The BACK buttons are 38x22 ([tab_party.c:98](ui/tab_party.c#L98)), 42x22
