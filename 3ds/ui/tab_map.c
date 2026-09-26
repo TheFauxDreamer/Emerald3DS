@@ -39,6 +39,9 @@
 #include "item.h"                     // CheckBagHasItem, RemoveBagItem
 #include "item_use.h"                 // CanUseDigOrEscapeRopeOnCurMap
 #include "event_scripts.h"            // EventScript_UseDig
+#include "string_util.h"              // StringCopy, StringAppend
+#include "data.h"                     // gSpeciesNames
+#include "constants/characters.h"     // CHAR_0, EOS
 #include "constants/items.h"
 #include "constants/region_map_sections.h"
 #include "constants/flags.h"
@@ -49,6 +52,8 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "ui_marks.h"
+#include "../tweaks.h"                // Ctr3dsMapSpecies
 #include "view_encounters.h"
 
 // The real area of the art in the 64x64 tilemap. Everything outside it is the
@@ -134,6 +139,9 @@ static bool8 sConfirm;
 // TRUE when ESCAPE waits for YES. It belongs to the player's own location, so
 // any tap on the map clears it.
 static bool8 sEscConfirm;
+
+// The marks of the last paint (ui_marks.h). UiMapDraw fills it.
+static struct UiMarks sMarks;
 
 // ---------------------------------------------------------------- loading ---
 //
@@ -548,6 +556,142 @@ static void DrawPick(void)
            entry->width * 8, entry->height * 8, UI_COL_ACCENT);
 }
 
+// ----------------------------------------------------------------- marks ----
+//
+// A 6x6 dot for each kind of news at a place, outside the corners of its box
+// (the DrawPick box): REMATCH top left, ROAMER top right, OUTBREAK bottom
+// left. A route one tile wide still has room for all three.
+#define MARK_SIZE    6
+
+static const struct
+{
+    u8 kind;
+    const char *name;
+    u16 body, edge;
+} sMarkKinds[] =
+{
+    { UI_MARK_REMATCH,  "REMATCH",  UI_COL_MARK_REMATCH,  UI_COL_MARK_REMATCH_EDGE  },
+    { UI_MARK_ROAMER,   "ROAMING",  UI_COL_MARK_ROAMER,   UI_COL_MARK_ROAMER_EDGE   },
+    { UI_MARK_OUTBREAK, "OUTBREAK", UI_COL_MARK_OUTBREAK, UI_COL_MARK_OUTBREAK_EDGE },
+};
+
+static void DrawDot(int x, int y, u32 kindIndex)
+{
+    UiFillRect(x, y, MARK_SIZE, MARK_SIZE, sMarkKinds[kindIndex].edge);
+    UiFillRect(x + 1, y + 1, MARK_SIZE - 2, MARK_SIZE - 2, sMarkKinds[kindIndex].body);
+}
+
+static void DrawMarks(void)
+{
+    for (u32 mapSec = 0; mapSec < MAPSEC_NONE; mapSec++)
+    {
+        const struct RegionMapLocation *entry;
+        int x, y, w, h;
+
+        if (sMarks.kinds[mapSec] == 0)
+            continue;
+
+        entry = &gRegionMapEntries[mapSec];
+        x = MAP_PX + (entry->x + CTR_MAPCURSOR_X_MIN) * 8;
+        y = MAP_PY + (entry->y + CTR_MAPCURSOR_Y_MIN) * 8;
+        w = entry->width * 8;
+        h = entry->height * 8;
+
+        if (sMarks.kinds[mapSec] & UI_MARK_REMATCH)
+            DrawDot(x - 2, y - 2, 0);
+        if (sMarks.kinds[mapSec] & UI_MARK_ROAMER)
+            DrawDot(x + w - MARK_SIZE + 2, y - 2, 1);
+        if (sMarks.kinds[mapSec] & UI_MARK_OUTBREAK)
+            DrawDot(x - 2, y + h - MARK_SIZE + 2, 2);
+    }
+}
+
+// What the dots mean, in the map's bottom right corner, which is sea. It
+// shows only the kinds that are on the map.
+#define LEGEND_ROW_H  12
+#define LEGEND_W      64
+
+static void DrawLegend(void)
+{
+    u8 label[12];
+    u32 rows = 0;
+    int x = MAP_PX + MAP_TW * 8 - LEGEND_W - 2;
+    int y;
+
+    for (u32 i = 0; i < ARRAY_COUNT(sMarkKinds); i++)
+        if (sMarks.all & sMarkKinds[i].kind)
+            rows++;
+
+    if (rows == 0)
+        return;
+
+    y = MAP_PY + MAP_TH * 8 - rows * LEGEND_ROW_H - 4;
+    UiFillRect(x, y, LEGEND_W, rows * LEGEND_ROW_H + 2, UI_COL_BG);
+
+    for (u32 i = 0; i < ARRAY_COUNT(sMarkKinds); i++)
+    {
+        if (!(sMarks.all & sMarkKinds[i].kind))
+            continue;
+
+        DrawDot(x + 3, y + 3, i);
+        UiTextSmall(x + 3 + MARK_SIZE + 4, y, UiAscii(label, sMarkKinds[i].name, sizeof(label)),
+                    UI_COL_TEXT, UI_COL_SHADOW);
+        y += LEGEND_ROW_H;
+    }
+}
+
+// The caption's note for a place with news, in the game's text encoding. The
+// first of: the rematches, the outbreak, the roamer. Returns FALSE when the
+// place has none.
+static bool8 MarkNote(mapsec_u16_t mapSecId, u8 *out)
+{
+    u8 ascii[24];
+    u8 kinds = mapSecId < MAPSEC_NONE ? sMarks.kinds[mapSecId] : 0;
+
+    if (kinds & UI_MARK_REMATCH)
+    {
+        u8 n = sMarks.rematches[mapSecId];
+
+        out[0] = CHAR_0 + (n < 10 ? n : 9);
+        out[1] = EOS;
+        StringAppend(out, UiAscii(ascii, n == 1 ? " wants a rematch" : " want a rematch",
+                                  sizeof(ascii)));
+        return TRUE;
+    }
+
+    if (kinds & UI_MARK_OUTBREAK)
+    {
+        StringCopy(out, UiAscii(ascii, "Many ", sizeof(ascii)));
+        StringAppend(out, gSpeciesNames[Ctr3dsMapSpecies(gSaveBlock1Ptr->outbreakPokemonSpecies)]);
+        return TRUE;
+    }
+
+    if (kinds & UI_MARK_ROAMER)
+    {
+        StringCopy(out, gSpeciesNames[gSaveBlock1Ptr->roamer.species]);
+        StringAppend(out, UiAscii(ascii, " is here", sizeof(ascii)));
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+// Draws the note right-aligned to textRight, where a landmark goes, if it fits
+// after the place name. Returns TRUE when it drew.
+static bool8 DrawMarkNote(mapsec_u16_t mapSecId, const u8 *name, int textRight)
+{
+    u8 note[40];
+
+    if (!MarkNote(mapSecId, note))
+        return FALSE;
+
+    if (textRight - UiTextWidth(note) < CAP_MARGIN + UiTextWidth(name) + 8)
+        return FALSE;
+
+    UiTextRight(textRight, CAP_TEXT_Y, note, UiThemeText(), UiThemeShadow());
+    return TRUE;
+}
+
 // The same shape as the EXTRA buttons: a 1px border, with the accent doubled on
 // the button that commits. Thus a button looks the same on both tabs. Local,
 // because only two buttons outside tab_extra.c use it.
@@ -718,7 +862,11 @@ static void DrawCaption(void)
     // together.
     if (PickIsSet())
     {
-        DrawFlyControls(mapSecId, textRight);
+        // A route has no fly control, so its news goes there.
+        if (FlyState(mapSecId) == FLY_NOT_A_DEST)
+            DrawMarkNote(mapSecId, name, textRight);
+        else
+            DrawFlyControls(mapSecId, textRight);
     }
     else
     {
@@ -740,9 +888,11 @@ static void DrawCaption(void)
             }
 
             // With ESCAPE on the row, a long landmark can reach the place
-            // name. Then leave the landmark out. The name matters more.
+            // name. Then leave the landmark out. The name matters more. News
+            // of the place comes before its landmark.
             landmark = GetLandmarkName((mapsec_u8_t)mapSecId, posWithinMapSec, 0);
-            if (landmark != NULL
+            if (!DrawMarkNote(mapSecId, name, textRight)
+             && landmark != NULL
              && textRight - UiTextWidth(landmark)
                 >= CAP_MARGIN + UiTextWidth(name) + 8)
                 UiTextRight(textRight, CAP_TEXT_Y, landmark,
@@ -776,8 +926,12 @@ void UiMapDraw(void)
         return;
     }
 
+    UiMarksBuild(&sMarks);
+
     DrawMap();
     DrawPick();
+    DrawMarks();
+    DrawLegend();
     DrawPlayerIcon();
     DrawCaption();
 }
@@ -832,6 +986,10 @@ u32 UiMapStateKey(void)
     // It has its own multiplier. Two values folded through the same constant
     // can cancel.
     key ^= UiEncountersStateKey() * 0x85EBCA6Bu;
+
+    // The marks change with no touch: a trainer calls, the roamer moves, the
+    // news airs. Their own multiplier, for the same reason.
+    key ^= UiMarksKey() * 0x27D4EB2Fu;
 
     return key;
 }

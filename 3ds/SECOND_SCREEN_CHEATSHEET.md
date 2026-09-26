@@ -152,7 +152,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | File | Lines | Owns |
 |---|---|---|
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 1139 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 260 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/ui_shell.h](ui/ui_shell.h) | 269 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 931 / 38 | The battle panel: in place of the PARTY grid from the battle's first choice to its outcome (tappable only while the player chooses). A foe header (tap for a foe card with types, HP bar, status, stat stages and conditions), four move buttons (type, PP, and the multiplier against each opponent) that use the move, a party row with BAG and RUN, and a card with SWITCH IN (SEND OUT after a faint), INFO and the stat stages of a Pokemon that is out. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` / `Ctr3dsQueueBattleRun` |
@@ -160,8 +160,9 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_bag.c](ui/tab_bag.c) | 671 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
-| [ui/tab_map.c](ui/tab_map.c) | 1014 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
-| [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 840 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
+| [ui/tab_map.c](ui/tab_map.c) | 1172 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), the marks of `ui_marks.h` with their legend and caption note, and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
+| [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 950 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first, and the roamer (LAND, SURF) and the TV outbreak (LAND) at the top in a tagged frame when they are there: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
+| [ui/ui_marks.c](ui/ui_marks.c) / [.h](ui/ui_marks.h) | 135 / 46 | Which map sections have news, as the PokeNav Plus marks them: a trainer who wants a rematch (`trainerRematches` with `gRematchTable`), the roamer (active, and seen, as the Pokedex area screen asks), and the TV's mass outbreak. Only reads |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 1097 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a launcher of 80x64 tiles, and the pages they open as `UI_VIEW_HOME_PAGE`. The game data pages first (TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, drawn by the `view_*.c` of `view_home.h`, dim until a save loads), then SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`). Each page's top line holds its title and BACK |
 | [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 38 | The LINK page (a HOME tile): HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
@@ -584,7 +585,7 @@ MAP's fly row is the one other thing that depends on the party, and
   That is why `top[4]` is a dispatch, not an XOR of everything.
 - **Never share a slot between two keys.** Two contributions that happen to
   cancel show up as a panel that stops updating, which is the exact failure the
-  hash exists to prevent. See the comment at [tab_map.c:804](ui/tab_map.c#L804).
+  hash exists to prevent. See the comment at [tab_map.c:958](ui/tab_map.c#L958).
 - **Most new views need no key at all.** Static data (a learnset, a type chart,
   base stats) changes only under the view's own touch handler, which already
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
@@ -1155,7 +1156,7 @@ in its own input, so an overrun lands in the neighbouring statics.
 that decompresses to 8192 bytes while `gMonFrontPicTable` reports the size of
 one frame, and the 6KB overrun repainted the cached window-frame palette. The
 symptom was every other tab's border changing colour. See
-[ui_draw.c:686](ui/ui_draw.c#L686) and [tab_map.c:140](ui/tab_map.c#L140).
+[ui_draw.c:686](ui/ui_draw.c#L686) and [tab_map.c:148](ui/tab_map.c#L148).
 
 ---
 
@@ -1276,7 +1277,7 @@ screen, so driving one from here would fight the overworld for BG layers.
 
 ### Leaving the overworld
 
-`DoFly()` ([tab_map.c:331](ui/tab_map.c#L331)) is the reference for replacing
+`DoFly()` ([tab_map.c:339](ui/tab_map.c#L339)) is the reference for replacing
 `gMain.callback2` from the bottom screen. It is safe only because
 `CtrBottomUpdate` runs at the end of a frame. Before leaving you **must** call:
 

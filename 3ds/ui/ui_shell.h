@@ -86,6 +86,15 @@ enum UiTab
 #define UI_COL_ACH_PINK         0xF397   // RGB(240,112,184)
 #define UI_COL_ACH_PINK_EDGE    0x994D   // RGB(152, 40,104)
 
+// The marks on the MAP tab (ui_marks.h), one ramp for each kind: the body
+// fills the mark, and the edge outlines it.
+#define UI_COL_MARK_REMATCH       UI_COL_ACH_RED
+#define UI_COL_MARK_REMATCH_EDGE  UI_COL_ACH_RED_EDGE
+#define UI_COL_MARK_ROAMER        UI_COL_ACH_PURPLE
+#define UI_COL_MARK_ROAMER_EDGE   UI_COL_ACH_PURPLE_EDGE
+#define UI_COL_MARK_OUTBREAK      UI_COL_ACH_GREEN
+#define UI_COL_MARK_OUTBREAK_EDGE UI_COL_ACH_GREEN_EDGE
+
 struct UiRamp
 {
     u16 pale, body, edge;

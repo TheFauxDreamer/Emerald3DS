@@ -118,7 +118,16 @@ caption when they apply:
   the ones you have caught. Anything you have not seen yet is a silhouette, with
   its level and chance but no name, so the list reads as what is left to find
   rather than a spoiler for it. It follows the randomiser when that is on, and
-  it follows you from room to room inside a cave.
+  it follows you from room to room inside a cave. The roaming Latias or Latios
+  (once you have seen it) and the mass outbreak from the TV news go at the top
+  of the list of the place they are, in a coloured frame.
+
+Like the PokéNav Plus, the map also marks places with news: a red dot where a
+trainer wants a rematch, a purple one where the roamer is now, and a green one
+where the outbreak is. A small key in the corner says which is which, and
+the caption of a marked place says what is there ("2 want a rematch", "Many
+SEEDOT"). The marks follow the game: a trainer calls, the roamer moves when
+you change maps, and the outbreak ends when the game ends it.
 
 **TROPHY.** 86 achievements, earned by playing, from choosing your starter and
 getting the Bike through the eight badges, the HMs, the Master Ball and the
