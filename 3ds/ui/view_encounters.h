@@ -5,9 +5,13 @@
 // and the Pokedex seen flags. It is a separate file because tab_map.c already
 // holds the region map and the fly path.
 //
+// Chips across the top choose the method: LAND, SURF, SMASH (Rock Smash), and
+// the OLD, GOOD and SUPER rods. Only the methods that the place has show. Each
+// mon has its level range and its chance, most common first.
+//
 // A mon that the player has seen shows its icon, name and type badges. A mon
-// that the player has not seen shows only a silhouette. Thus the list shows
-// what is left to find, and does not spoil it.
+// that the player has not seen shows only a silhouette, and still its level and
+// chance. Thus the list shows what is left to find, and does not spoil it.
 
 #ifndef CTR_VIEW_ENCOUNTERS_H
 #define CTR_VIEW_ENCOUNTERS_H
