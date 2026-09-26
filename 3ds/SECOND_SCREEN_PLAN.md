@@ -164,9 +164,9 @@ The 6-mon party loop in the hash, which this section once counted as a win for t
 
 ### Build-script hazard, worth fixing regardless
 
-`3ds/build_objs.sh:114` globs `3ds/ui/*.c` non-recursively and writes `$OBJ/$(basename).o` into the same object directory as all of `src/*.c`, with `3ds/ui` globbed last. A file named `3ds/ui/pokedex.c` would silently overwrite `src/pokedex.o` and delete the game's Pokédex from the archive. This becomes likely the moment view files get named after game features.
+`3ds/build_objs.sh:120` globs `3ds/ui/*.c` non-recursively and writes `$OBJ/$(basename).o` into the same object directory as all of `src/*.c`, with `3ds/ui` globbed last. A file named `3ds/ui/pokedex.c` would silently overwrite `src/pokedex.o` and delete the game's Pokédex from the archive. This becomes likely the moment view files get named after game features.
 
-Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots, `view_*` for pushed views, and a comment in `build_objs.sh` saying why so nobody tidies the names later. Keep the directory flat; subdirectories are silently not compiled. The cheatsheet documents the hazard (section 12, "Object-name collision hazard"), but at `a036990` `build_objs.sh` has no such comment yet. The files added since (`ui_card.c`, `ui_link.c`, `ui_team.c`) follow the `ui_*` prefix. Three files still do not: `bottom_screen.c`, `matchup.c` and `status_tags.c`. None of them collides with a `src/` name today.
+Mitigation: mandatory prefixes, `ui_*` for shared, `tab_*` for the six tab roots, `view_*` for pushed views, and a comment in `build_objs.sh` saying why so nobody tidies the names later. Keep the directory flat; subdirectories are silently not compiled. The cheatsheet documents the hazard (section 12, "Object-name collision hazard"), and `build_objs.sh` now says it too, next to the glob. The files added since (`ui_card.c`, `ui_link.c`, `ui_team.c`) follow the `ui_*` prefix. Three files still do not: `bottom_screen.c`, `matchup.c` and `status_tags.c`. None of them collides with a `src/` name today.
 
 ---
 

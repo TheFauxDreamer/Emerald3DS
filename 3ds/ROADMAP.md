@@ -24,7 +24,10 @@ The done parts stay in this file because their facts are recorded nowhere else.
 
 The large pieces:
 - **[SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md):** a view stack, a widget
-  layer, text clipping and a catalogue of new views. Not started.
+  layer, text clipping and a catalogue of new views. The structure is not
+  started. Some catalogue items shipped without it: the IV/EV spread, the
+  encounters view, the TROPHY tab and the link trainer cards. The player's own
+  trainer card is the next cheap one, because the card renderer exists.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
