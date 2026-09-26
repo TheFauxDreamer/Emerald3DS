@@ -31,6 +31,7 @@
 #include "ui_shell.h"
 #include "status_tags.h"
 #include "ui_team.h"
+#include "ui_view.h"
 
 #define POCKET_COUNT  5
 #define POCKET_BAR_H  22
@@ -107,11 +108,14 @@ static u16 sCursor;                  // the row of the cursor, absolute
 // UiHoldRepeat.
 static UiHold sHoldUp, sHoldDn;
 
-// The picker is modal over the full content area, like the detail view of the
-// PARTY tab.
-enum { VIEW_LIST, VIEW_PICK_MON };
-static u8  sView;
-static u16 sPickItem;                // the item that USE was tapped for
+// The picker covers the full content area, like the detail view of the PARTY
+// tab. It is UI_VIEW_BAG_PICK on the view stack, with the item that USE was
+// tapped for as its arg, so a tab switch closes it and nothing is left behind
+// (ui_view.h).
+static bool8 PickerOpen(void)
+{
+    return UiViewIsOpen(UI_VIEW_BAG_PICK);
+}
 
 enum { MSG_NONE, MSG_USED, MSG_NO_EFFECT, MSG_NOT_NOW, MSG_QUEUED, MSG_USE_IN_MENU };
 static u8 sMessage;
@@ -509,7 +513,7 @@ static void DrawPicker(void)
 
 void UiBagDraw(void)
 {
-    if (sView == VIEW_PICK_MON)
+    if (PickerOpen())
     {
         DrawPicker();
         return;
@@ -522,7 +526,7 @@ void UiBagDraw(void)
 
 bool8 UiBagPickerOpen(void)
 {
-    return sView == VIEW_PICK_MON;
+    return PickerOpen();
 }
 
 // --------------------------------------------------------------- input -----
@@ -544,9 +548,8 @@ static void UseTapped(void)
     switch (ItemTargeting(item))
     {
     case TARGET_MON:
-        sPickItem = item;
         sMessage = MSG_NONE;
-        sView = VIEW_PICK_MON;
+        UiViewPush(UI_VIEW_BAG_PICK, item);
         break;
 
     case TARGET_NONE:
@@ -563,8 +566,7 @@ static void PickerTouch(const CtrTouchState *t)
 {
     if (UiHit(t, PICK_CANCEL_X, PICK_CANCEL_Y, PICK_CANCEL_W, PICK_CANCEL_H))
     {
-        sView = VIEW_LIST;
-        UiMarkDirty();
+        UiViewPop();
         return;
     }
 
@@ -582,9 +584,8 @@ static void PickerTouch(const CtrTouchState *t)
         // A single tap commits here. The USE tap was the second, deliberate
         // tap, and a 160x56 cell is too large for a slip.
         UiSetSelectedMon(i);
-        UseItemOn(sPickItem, i);
-        sView = VIEW_LIST;
-        UiMarkDirty();
+        UseItemOn(UiViewArg(UI_VIEW_BAG_PICK), i);
+        UiViewPop();
         return;
     }
 }
@@ -593,7 +594,7 @@ void UiBagTouch(const CtrTouchState *t)
 {
     u16 count;
 
-    if (sView == VIEW_PICK_MON)
+    if (PickerOpen())
     {
         if (t->justReleased)
             PickerTouch(t);

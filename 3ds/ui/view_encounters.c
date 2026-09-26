@@ -36,6 +36,7 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "ui_view.h"
 #include "view_encounters.h"
 
 // ---------------------------------------------------------------- layout ---
@@ -163,7 +164,6 @@ static mapsec_u16_t sBuiltMapSec;
 // shows its own name, not the outdoor name that the region map gives.
 static mapsec_u16_t sTitleMapSec;
 
-static bool8 sOpen;
 static u8    sSrc;
 static mapsec_u16_t sOpenMapSec;
 static u8    sMethod;
@@ -699,9 +699,11 @@ bool8 UiEncountersAvailable(u8 source, mapsec_u16_t mapSecId)
     return TotalCount() > 0;
 }
 
+// Open is UI_VIEW_MAP_ENCOUNTERS on the view stack, so a tab switch closes the
+// list (ui_view.h). The place and the method stay here: the stack arg has no
+// room for both, and they are set again on every open.
 void UiEncountersOpen(u8 source, mapsec_u16_t mapSecId)
 {
-    sOpen = TRUE;
     sSrc = source;
     sOpenMapSec = mapSecId;
     sPage = 0;
@@ -710,21 +712,18 @@ void UiEncountersOpen(u8 source, mapsec_u16_t mapSecId)
     // the choice is made against the place that opens.
     Ensure(source, mapSecId);
     sMethod = FirstMethod();
-    UiMarkDirty();
+    UiViewPush(UI_VIEW_MAP_ENCOUNTERS, 0);
 }
 
 void UiEncountersClose(void)
 {
-    if (!sOpen)
-        return;
-
-    sOpen = FALSE;
-    UiMarkDirty();
+    if (UiViewTop() == UI_VIEW_MAP_ENCOUNTERS)
+        UiViewPop();
 }
 
 bool8 UiEncountersIsOpen(void)
 {
-    return sOpen;
+    return UiViewIsOpen(UI_VIEW_MAP_ENCOUNTERS);
 }
 
 void UiEncountersTouch(const CtrTouchState *t)
@@ -790,7 +789,7 @@ u32 UiEncountersStateKey(void)
     u32 key;
     u32 first;
 
-    if (!sOpen)
+    if (!UiEncountersIsOpen())
         return 0;
 
     Ensure(sSrc, sOpenMapSec);

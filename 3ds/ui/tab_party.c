@@ -29,6 +29,7 @@
 #include "matchup.h"
 #include "status_tags.h"
 #include "ui_team.h"
+#include "ui_view.h"
 
 #define COLS      2
 #define ROWS      3
@@ -124,7 +125,12 @@
 #define SPREAD_IV_R     156
 #define SPREAD_EV_R     188
 
-static bool8 sDetailOpen;
+// The detail view is UI_VIEW_PARTY_DETAIL on the view stack, not a flag here,
+// so a tab switch closes it (ui_view.h).
+static bool8 DetailOpen(void)
+{
+    return UiViewIsOpen(UI_VIEW_PARTY_DETAIL);
+}
 
 // TRUE when the left column shows the IV/EV spread, not the stats. This does
 // not reset with sMoveSel. It is a preference, so it stays when the player
@@ -182,7 +188,7 @@ static bool8 TagFlipVisible(void)
     if (!UiStatusTagsFlipped())
         return FALSE;
 
-    if (sDetailOpen)
+    if (DetailOpen())
         return UiStatusTagCycles(UiSelectedMon());
 
     for (u8 i = 0; i < PARTY_SIZE; i++)
@@ -296,7 +302,7 @@ bool8 UiPartyAnimOnly(void)
 {
     // The HP readout of the detail view is not on the animated layer, so a
     // slide there needs a full repaint.
-    if (sDetailOpen && sHpMoving)
+    if (DetailOpen() && sHpMoving)
         return FALSE;
 
     return sIconStepped || sHpMoving || sTagFlipped;
@@ -408,7 +414,7 @@ void UiPartyRedrawAnimated(void)
     const struct CellRows *rows = StripOn() ? &sRowsTight : &sRowsFull;
 
     // The detail view covers the grid. It has one icon and one badge.
-    if (sDetailOpen)
+    if (DetailOpen())
     {
         struct Pokemon *mon = UiPartyMon(UiSelectedMon());
         u32 species = GetMonData(mon, MON_DATA_SPECIES);
@@ -1120,7 +1126,7 @@ u32 UiPartyStateKey(void)
 {
     u32 key = UiTweakStateKey();
 
-    if (sDetailOpen && sSpreadOpen)
+    if (DetailOpen() && sSpreadOpen)
         key ^= (u32)GetMonEVCount(UiPartyMon(UiSelectedMon())) * 2654435761u;
 
     return key;
@@ -1128,7 +1134,7 @@ u32 UiPartyStateKey(void)
 
 void UiPartyDraw(void)
 {
-    if (sDetailOpen)
+    if (DetailOpen())
     {
         DrawDetail();
         return;
@@ -1145,11 +1151,11 @@ void UiPartyTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
-    if (sDetailOpen)
+    if (DetailOpen())
     {
         if (UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
         {
-            sDetailOpen = FALSE;
+            UiViewPop();
             sMoveSel = -1;
             UiMarkDirty();
             return;
@@ -1208,7 +1214,7 @@ void UiPartyTouch(const CtrTouchState *t)
         // view. BAG needs the selection, and this gets it without a long press.
         if (UiSelectedMon() == i)
         {
-            sDetailOpen = TRUE;
+            UiViewPush(UI_VIEW_PARTY_DETAIL, 0);
             sMoveSel = -1;   // never show the previous mon's move
         }
         else

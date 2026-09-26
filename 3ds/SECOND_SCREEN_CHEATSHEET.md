@@ -39,7 +39,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)                                      FULL rate, divider or not
      sample_touch(&touch)            3ds/host/main.c:99
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:875   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:899   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        AchTick()          achievement checks
                                        toast / strip / tab-bar tap  OR  UiXTouch(touch)
@@ -151,22 +151,23 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1100 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 243 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1121 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 246 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 1222 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 670 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/tab_party.c](ui/tab_party.c) | 1228 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/tab_bag.c](ui/tab_bag.c) | 671 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
-| [ui/tab_map.c](ui/tab_map.c) | 1006 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
+| [ui/tab_map.c](ui/tab_map.c) | 1014 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
 | [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 840 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
-| [ui/tab_dex.c](ui/tab_dex.c) | 514 | Dex list with cursor and scroll, entry screen |
+| [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 944 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 LINK (drawn by `ui_link.c`), page 6 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
-| [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 475 / 39 | The LINK page: HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
+| [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 39 | The LINK page: HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
 | [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 524 / 42 | A trainer card from `gTrainerCards`, drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 445 / 73 | Reads about the opposing mon: type effectiveness for the party badges and each move (`UiMatchupMove`, as `Cmd_typecalc` finds it, for either opponent in a double), a move's real type (`UiMatchupMoveType`: Hidden Power, Weather Ball), `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 341 / 62 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
+| [ui/ui_view.c](ui/ui_view.c) / [.h](ui/ui_view.h) | 79 / 66 | The view stack: which detail screens are open over the active tab, 4 deep, no heap. The tabs draw and dispatch their own views and ask the stack whether each is open. The shell empties it on every tab change |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 203 / 50 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
 | [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 187 / 52 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
@@ -213,7 +214,7 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:132](ui/bottom_screen.c#L132)) is the
+- The **shiny notice** ([bottom_screen.c:151](ui/bottom_screen.c#L151)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -365,7 +366,7 @@ The steps below are for a tab, and are kept for the record.
 
 1. Add to `enum UiTab` in [ui_shell.h:24](ui/ui_shell.h#L24), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:61](ui/bottom_screen.c#L61):
+3. Add a row to `sTabs[]` at [bottom_screen.c:62](ui/bottom_screen.c#L62):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
 4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L776))
    and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L968)).
@@ -392,7 +393,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:875](ui/bottom_screen.c#L875)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:899](ui/bottom_screen.c#L899)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -438,14 +439,14 @@ Order matters: test overlays and pagers **before** the controls underneath them
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
-as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L237).
+as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:243](ui/tab_dex.c#L243).
 
 ### Press and hold
 
 `UiHoldRepeat` ([ui_draw.c:1330](ui/ui_draw.c#L1330)) is the one exception to the
 `justReleased` guard, and it is why the guard moved down a few lines in the
-three list tabs. The scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)),
-BAG ([tab_bag.c:606](ui/tab_bag.c#L606)) and TROPHY
+three list tabs. The scroll controls in DEX ([tab_dex.c:478](ui/tab_dex.c#L478)),
+BAG ([tab_bag.c:607](ui/tab_bag.c#L607)) and TROPHY
 ([tab_trophy.c:411](ui/tab_trophy.c#L411)) run through it:
 
 ```c
@@ -485,27 +486,33 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   dedicated button (BAG's USE, MAP's YES/NO confirm).
 - **One column, several tenants.** The party detail view's left column shows the
   stat block, a tapped move's details, or the IV/EV spread
-  ([tab_party.c:858](ui/tab_party.c#L858)), never two at once, while the moves
+  ([tab_party.c:864](ui/tab_party.c#L864)), never two at once, while the moves
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:948](ui/tab_party.c#L948), dim frame off, doubled accent outline on). A
+  ([:954](ui/tab_party.c#L954), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
-  ([tab_party.c:1160](ui/tab_party.c#L1160)). Without it the toggle would flip
+  ([tab_party.c:1166](ui/tab_party.c#L1166)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in four different places:
-  [tab_party.c:97](ui/tab_party.c#L97) (38x22),
-  [tab_dex.c:91](ui/tab_dex.c#L91) (42x22, which the encounters view matches),
-  [tab_bag.c:98](ui/tab_bag.c#L98) (56x20 cancel),
-  [ui_link.c:62](ui/ui_link.c#L62) (60x22, the card view).
-- **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`, the
-  encounters view's `sOpen` and LINK's `sCardOpen`) are file statics that
-  survive a tab switch, so leaving a detail view by tapping another tab and
-  coming back re-enters it. `sCardOpen` also closes itself when the cards go
-  away. Fixing this is step 0 of
-  `SECOND_SCREEN_PLAN.md`. If you add a modal, you inherit the same bug.
+  [tab_party.c:98](ui/tab_party.c#L98) (38x22),
+  [tab_dex.c:92](ui/tab_dex.c#L92) (42x22, which the encounters view matches),
+  [tab_bag.c:99](ui/tab_bag.c#L99) (56x20 cancel),
+  [ui_link.c:63](ui/ui_link.c#L63) (60x22, the card view).
+- **A detail screen is a view, not a flag.** The PARTY detail, a DEX entry,
+  BAG's picker, MAP's encounter list and LINK's cards are entries on the view
+  stack ([ui_view.h](ui/ui_view.h)). Open one with `UiViewPush(id, arg)`, close
+  it with `UiViewPop()`, and test it with `UiViewIsOpen(id)`. Every tab change
+  goes through the shell's `LeaveTab`, which empties the stack, so leaving a
+  view by tapping another tab and coming back shows the tab's top, and a tap
+  on the tab that is already up does the same. Anything a view needs comes
+  from its `arg` (BAG's picker keeps the item there) or from the game when it
+  draws. A new detail screen must be a view too: a file static that says "open"
+  comes back after a tab switch. Questions that wait for an answer, like MAP's
+  FLY and ESCAPE confirms, are cleared by the tab's leave hook
+  (`UiMapLeave`).
 
 ---
 
@@ -540,7 +547,7 @@ Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:544](ui/bottom_screen.c#L544)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:563](ui/bottom_screen.c#L563)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -581,7 +588,7 @@ MAP's fly row is the one other thing that depends on the party, and
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:1119](ui/tab_party.c#L1119)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1125](ui/tab_party.c#L1125)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
@@ -1061,7 +1068,7 @@ invisible text. Do not "simplify" `ui_text.c` back onto it.
 Every panel width in the tree that existed before the clip is hand-measured
 against the longest known game string. For example BAG's list panel is 24 tiles
 because that leaves exactly 108px, the width of the widest item description
-line in the game ([tab_bag.c:41](ui/tab_bag.c#L41)).
+line in the game ([tab_bag.c:42](ui/tab_bag.c#L42)).
 
 That does not survive player-authored text: nicknames, OT names, box names. For
 any of those, use the two calls that fit text to a width:
@@ -1101,7 +1108,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:82
+static bool8 SaveDataLive(void);   // bottom_screen.c:83
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -1155,7 +1162,7 @@ symptom was every other tab's border changing colour. See
 Two things write: the BAG tab, and the quick-throw strip. Their gates are the
 design, not a detail.
 
-### Out of battle: four gates ([tab_bag.c:148](ui/tab_bag.c#L148))
+### Out of battle: four gates ([tab_bag.c:152](ui/tab_bag.c#L152))
 
 ```c
 static bool8 CanUseItemNow(void)
@@ -1217,7 +1224,7 @@ lives in `UiQuickBallItem()` where those constants are. That is the exception to
 
 ### Classify by the game's tables, not by item id
 
-`ItemTargeting()` ([tab_bag.c:181](ui/tab_bag.c#L181)) drives everything off
+`ItemTargeting()` ([tab_bag.c:185](ui/tab_bag.c#L185)) drives everything off
 `GetItemEffectType()` and `GetItemBattleUsage()`, so it classifies every item of
 a class the same way and cannot fall behind the data. Items needing a move
 choice as well as a target are refused outright rather than defaulting to slot 0.
@@ -1485,7 +1492,7 @@ appears.
 | A panel stops updating | Two state-key contributions cancelling in one hash slot. |
 | A readout goes stale until you switch tabs | State changes without a touch and has no state key. |
 | Every tap lands at (0,0) | Reading touch coordinates without the latch, or dropping the `justReleased` guard. |
-| Detail view reopens after a tab switch | Modal file statics survive the switch. Known bug. |
+| Detail view reopens after a tab switch | It is a file static, not a view. Make it an entry on the view stack (`ui_view.h`). |
 | HP bars, badges or the selected mon jump to another Pokemon while the game's own party menu is open in battle | A raw `gPlayerParty[slot]` read. That menu keeps the array in battle order while it is up. Read through `UiPartyMon` (section 10). |
 | A battle partner's Pokemon look like the player's | A party view that does not ask `UiAllySlot` (section 10). In a partner battle slots 3-5 are the partner's. |
 | A battler is drawn in front of the textbox during a move's effect (top screen) | An OBJ-window sprite rendered as an ordinary one. `rp2350/ppu.c` implements the OBJ window now; see `docs/PORTING.md`, the reference-inherited defects. |

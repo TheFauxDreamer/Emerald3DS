@@ -25,6 +25,7 @@
 #include "ui_draw.h"
 #include "ui_text.h"
 #include "ui_shell.h"
+#include "ui_view.h"
 
 // Defined in the game's data, and only declared extern here (as in
 // src/international_string_util.c).
@@ -95,7 +96,12 @@ extern const struct PokedexEntry gPokedexEntries[];
 
 static u16   sScroll;
 static u16   sCursor;          // the row index in the current dex order
-static bool8 sEntryOpen;
+// The entry screen is UI_VIEW_DEX_ENTRY on the view stack, so a tab switch
+// closes it (ui_view.h).
+static bool8 EntryOpen(void)
+{
+    return UiViewIsOpen(UI_VIEW_DEX_ENTRY);
+}
 // One counter for each arrow, so a held arrow scrolls the list. The dex has 386
 // rows, which is why UiHoldRepeat exists.
 static UiHold sHoldUp, sHoldDn;
@@ -441,7 +447,7 @@ void UiDexDraw(void)
     else if (sCursor >= sScroll + VISIBLE_ROWS)
         sScroll = (u16)(sCursor - VISIBLE_ROWS + 1);
 
-    if (sEntryOpen)
+    if (EntryOpen())
     {
         DrawEntry();
         return;
@@ -455,11 +461,11 @@ void UiDexTouch(const CtrTouchState *t)
 {
     u16 len;
 
-    if (sEntryOpen)
+    if (EntryOpen())
     {
         if (t->justReleased && UiHit(t, BACK_X, BACK_Y, BACK_W, BACK_H))
         {
-            sEntryOpen = FALSE;
+            UiViewPop();
             UiMarkDirty();
         }
         return;
@@ -502,7 +508,7 @@ void UiDexTouch(const CtrTouchState *t)
             if (!GetSetPokedexFlag(RowToNationalNum(index), FLAG_GET_SEEN))
                 return;
 
-            sEntryOpen = TRUE;
+            UiViewPush(UI_VIEW_DEX_ENTRY, 0);
         }
         else
         {

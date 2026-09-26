@@ -838,6 +838,14 @@ u32 UiMapStateKey(void)
 
 // --------------------------------------------------------------- input -----
 
+void UiMapLeave(void)
+{
+    // The selected place stays: it is where the player was looking, not a
+    // question waiting for an answer.
+    sConfirm = FALSE;
+    sEscConfirm = FALSE;
+}
+
 // The controls of the caption band. Returns TRUE when it used the tap.
 static bool8 HandleFlyTouch(const CtrTouchState *t)
 {
