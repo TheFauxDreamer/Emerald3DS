@@ -636,9 +636,9 @@ static void DrawMessage(void)
     const char *text;
 
     // The card shows why a switch cannot happen (DrawCard), so this line only
-    // has the hint and a refused tap. In a wild battle the quick-throw strip
-    // covers it while the player chooses an action. A refusal that shows here
-    // comes from the move menu, when the strip is down.
+    // has the hint and a refused tap. In a wild battle the quick-throw box
+    // covers its right end, and the open strip covers all of it, while the
+    // player chooses an action. The hint is short enough to clear the box.
     switch (sMsg)
     {
     case MSG_NOT_NOW:

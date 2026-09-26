@@ -198,7 +198,7 @@ to the current 192px content area:
 |---|---|---|
 | achievement toast | 320x40 at (0, 0), so y 0..40 | [ui_achtoast.h:27](ui/ui_achtoast.h#L27) (`UI_AT_*`) |
 | shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:177](ui/bottom_screen.c#L177) (`NOTICE_*`) |
-| quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:25](ui/ui_quickball.h#L25) (`UI_QB_*`) |
+| quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:30](ui/ui_quickball.h#L30) (`UI_QB_*`) |
 
 The three **tile the content area exactly**. The toast ends at y 40, where the
 notice starts. The notice ends at y 152, where the strip starts. The strip ends
@@ -364,7 +364,7 @@ BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
 encounters view ([view_encounters.c:773](ui/view_encounters.c#L773)), and all
 three overlays ([ui_achtoast.c:122](ui/ui_achtoast.c#L122),
 [bottom_screen.c:502](ui/bottom_screen.c#L502),
-[ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
+[ui_quickball.c:221](ui/ui_quickball.c#L221)). Reimplement its body as a
 `UiNineSlice` of `UI_SHEET_PANEL` and every one of them is reskinned untouched.
 Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
 function a one-line wrapper, so the 8px grid stops being a constraint on
@@ -488,7 +488,7 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 | Kind | Where |
 |---|---|
 | named helper | `DrawButtonH` ([tab_extra.c:249](ui/tab_extra.c#L249)); LINK's `DrawButton` ([ui_link.c:82](ui/ui_link.c#L82)); `DrawBtn` ([tab_map.c:698](ui/tab_map.c#L698)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:966](ui/tab_party.c#L966)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:1000](ui/tab_party.c#L1000)); encounters pagers, method chips and BACK ([view_encounters.c:720](ui/view_encounters.c#L720)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:549](ui/bottom_screen.c#L549)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
+| inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:1000](ui/tab_party.c#L1000)); encounters pagers, method chips and BACK ([view_encounters.c:720](ui/view_encounters.c#L720)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:271](ui/ui_quickball.c#L271)); DISMISS ([bottom_screen.c:549](ui/bottom_screen.c#L549)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
 | check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:271](ui/tab_extra.c#L271)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 

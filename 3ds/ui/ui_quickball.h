@@ -8,6 +8,11 @@
 //
 // It is an overlay (3ds/SECOND_SCREEN_CHEATSHEET.md, section 5). It draws over
 // the current tab and takes every touch in its rect first.
+//
+// It starts small: a box in the bottom right corner with the ball and its
+// count, so it does not cover the tab. A tap on the box opens the full strip.
+// The strip's HIDE button makes it small again. It is small again at the next
+// encounter.
 
 #ifndef CTR_UI_QUICKBALL_H
 #define CTR_UI_QUICKBALL_H
@@ -32,6 +37,12 @@
 #define UI_QB_W  (UI_QB_TW * 8)     // 320
 #define UI_QB_H  (UI_QB_TH * 8)     // 40
 
+// The small box, 7x5 tiles, at the right end of the strip's row.
+#define UI_QB_MINI_TW 7
+#define UI_QB_MINI_TX (UI_QB_TX + UI_QB_TW - UI_QB_MINI_TW)
+#define UI_QB_MINI_X  (UI_QB_MINI_TX * 8)     // 264
+#define UI_QB_MINI_W  (UI_QB_MINI_TW * 8)     // 56
+
 // TRUE while the strip is up. It asks four questions, in this order:
 //
 //  1. Is the EXTRA tab's QUICK BALL switch on? (Cheapest, so a player who
@@ -46,6 +57,11 @@
 bool8 UiQuickBallActive(void);
 
 void UiQuickBallDraw(void);
+
+// TRUE when the touch is on the overlay as it shows now: the small box, or the
+// full strip. The shell gives the touch to UiQuickBallTouch only then, so the
+// rest of the strip's row stays with the tab while the box is small.
+bool8 UiQuickBallHit(const CtrTouchState *t);
 void UiQuickBallTouch(const CtrTouchState *t);
 
 // Clears the state of one encounter (the cycled-to ball and any refusal

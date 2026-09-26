@@ -31,7 +31,13 @@
 #define QB_TEXT_Y  (QB_IN_Y + (QB_IN_H - UI_GLYPH_H) / 2)
 #define QB_BALL_Y  (QB_IN_Y + (QB_IN_H - UI_BALL_ICON_H) / 2)
 
-#define QB_BALL_X  (QB_IN_X + 6)
+// HIDE is the left end of the strip: a down arrow that makes it small again.
+#define QB_HIDE_X  QB_IN_X
+#define QB_HIDE_W  26
+#define QB_HIDE_H  22
+#define QB_HIDE_Y  (QB_IN_Y + (QB_IN_H - QB_HIDE_H) / 2)
+
+#define QB_BALL_X  (QB_HIDE_X + QB_HIDE_W + 8)
 #define QB_NAME_X  (QB_BALL_X + UI_BALL_ICON_W + 7)
 
 // The button is the right end of the strip. At 80px wide, a finger on the name
@@ -44,11 +50,16 @@
 // Everything to the left of the button, which is the area that cycles. Use the
 // full area, not the name's width: the target is "the ball". The widest ball
 // name is 72px in a 224px band.
-#define QB_PICK_X  QB_IN_X
-#define QB_PICK_W  (QB_BTN_X - QB_IN_X - 8)
+#define QB_PICK_X  (QB_HIDE_X + QB_HIDE_W + 4)
+#define QB_PICK_W  (QB_BTN_X - QB_PICK_X - 8)
 
 // The quantity and the messages share this right edge, clear of the button.
 #define QB_RIGHT   (QB_BTN_X - 10)
+
+// The small box: the ball and its count in the 40x24 interior.
+#define QB_MINI_IN_X  (UI_QB_MINI_X + 8)
+#define QB_MINI_BALL_X (QB_MINI_IN_X + 2)
+#define QB_MINI_RIGHT (UI_QB_MINI_X + UI_QB_MINI_W - 9)
 
 // The ball that the player cycled to in this battle, or ITEM_NONE for the
 // remembered ball.
@@ -58,6 +69,9 @@
 // what the player looked at.
 static u16 sOverride;
 static u8  sMessage;
+
+// TRUE after a tap on the small box, until HIDE or the end of the encounter.
+static bool8 sOpen;
 
 enum { QB_MSG_NONE, QB_MSG_NO_ROOM, QB_MSG_NOT_NOW };
 
@@ -163,10 +177,27 @@ u32 UiQuickBallStateKey(void)
     // can occur with no other change.
     return (u32)item
          | ((u32)CountTotalItemQuantityInBag(item) << 16)
-         | ((u32)sMessage << 28);
+         | ((u32)sMessage << 28)
+         | ((u32)sOpen << 31);
 }
 
 // ------------------------------------------------------------ drawing -------
+
+// The small box: the ball and how many there are, with no controls. A tap
+// anywhere on it opens the strip.
+static void DrawMini(u16 item)
+{
+    u8 label[4];
+    s32 qty = (s32)CountTotalItemQuantityInBag(item);
+
+    UiWindowFrame(UI_QB_MINI_TX, UI_QB_TY, UI_QB_MINI_TW, UI_QB_TH);
+    UiBallIcon(QB_MINI_BALL_X, QB_BALL_Y, item);
+
+    UiAscii(label, "x", sizeof(label));
+    UiText(QB_MINI_RIGHT - UiNumWidth(qty) - UiTextWidth(label), QB_TEXT_Y,
+           label, UI_COL_DIM, UiThemeShadow());
+    UiNumRight(QB_MINI_RIGHT, QB_TEXT_Y, qty, UiThemeText(), UiThemeShadow());
+}
 
 void UiQuickBallDraw(void)
 {
@@ -179,9 +210,19 @@ void UiQuickBallDraw(void)
     if (item == ITEM_NONE)
         return;
 
+    if (!sOpen)
+    {
+        DrawMini(item);
+        return;
+    }
+
     canCycle = (BallCount() > 1);
 
     UiWindowFrame(UI_QB_TX, UI_QB_TY, UI_QB_TW, UI_QB_TH);
+
+    UiRect(QB_HIDE_X, QB_HIDE_Y, QB_HIDE_W, QB_HIDE_H, UI_COL_DIM);
+    UiArrow(QB_HIDE_X + (QB_HIDE_W - UI_ARROW_W) / 2,
+            QB_HIDE_Y + (QB_HIDE_H - UI_ARROW_H) / 2, FALSE, UI_COL_DIM);
 
     // The ball's own art, not a generic ball. The player reads it while
     // cycling.
@@ -302,12 +343,36 @@ static void ThrowTapped(void)
     }
 }
 
+bool8 UiQuickBallHit(const CtrTouchState *t)
+{
+    if (sOpen)
+        return UiHit(t, UI_QB_X, UI_QB_Y, UI_QB_W, UI_QB_H);
+
+    return UiHit(t, UI_QB_MINI_X, UI_QB_Y, UI_QB_MINI_W, UI_QB_H);
+}
+
 void UiQuickBallTouch(const CtrTouchState *t)
 {
     // Act on release, like every other control on this screen. A touch that
     // slides off THROW must not throw.
     if (!t->justReleased)
         return;
+
+    // The small box has one action. The first tap only opens the strip, so it
+    // cannot throw by accident.
+    if (!sOpen)
+    {
+        sOpen = TRUE;
+        UiMarkDirty();
+        return;
+    }
+
+    if (UiHit(t, QB_HIDE_X, QB_HIDE_Y, QB_HIDE_W, QB_HIDE_H))
+    {
+        sOpen = FALSE;
+        UiMarkDirty();
+        return;
+    }
 
     if (UiHit(t, QB_BTN_X, QB_BTN_Y, QB_BTN_W, QB_BTN_H))
     {
@@ -326,16 +391,17 @@ void UiQuickBallTouch(const CtrTouchState *t)
 
 // Called once each frame by the shell, with the strip up or down.
 //
-// The override and the message belong to one encounter, and nothing else clears
-// them. The strip is down for most of a battle, so it cannot clear its state
+// The override, the message and the open strip belong to one encounter, and
+// nothing else clears them. The strip is down for most of a battle, so it cannot clear its state
 // when it closes. A message from a full box would show again on the next mon.
 // Use gMain.inBattle, not gBattleOutcome, because it stays TRUE through the
 // catch and the nickname prompt, when this must not reset.
 void UiQuickBallTick(void)
 {
-    if (!gMain.inBattle && (sOverride != ITEM_NONE || sMessage != QB_MSG_NONE))
+    if (!gMain.inBattle && (sOverride != ITEM_NONE || sMessage != QB_MSG_NONE || sOpen))
     {
         sOverride = ITEM_NONE;
         sMessage = QB_MSG_NONE;
+        sOpen = FALSE;
     }
 }

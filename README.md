@@ -246,9 +246,11 @@ control to unmute it.
 
 **Quick throw.** The NDS games remembered which ball you last threw and kept it
 in reach on the touch screen. Emerald has no such idea, so this adds one: when a
-wild battle asks what you want to do, a strip appears along the bottom of
-whichever tab you are on with that ball, how many you have left, and a THROW
-button that spends your turn on it. Tap the name to cycle through the other
+wild battle asks what you want to do, a small box appears in the bottom right
+corner of whichever tab you are on, with that ball and how many you have left.
+It stays out of the way of the tab under it. Tap it and it opens into a strip
+along the bottom with a THROW button that spends your turn on it; the arrow at
+its left end makes it small again. Tap the name to cycle through the other
 balls you own; only an actual throw changes what it remembers, so browsing costs
 you nothing. It remembers across launches, and it learns from the in-game bag
 too, not just from itself.

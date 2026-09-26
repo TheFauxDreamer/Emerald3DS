@@ -174,7 +174,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/view_berries.c](ui/view_berries.c) | 265 | BERRIES: every planted tree with its place, stage, time to the next stage, yield once the game set it, and waterings. The place table comes from one walk of map group 0's object events |
 | [ui/view_daycare.c](ui/view_daycare.c) | 104 | DAY CARE: `GetDaycareState`, each Pokemon's level then and now (`Ctr3dsDaycareLevelNow`), and the old man's words (`Ctr3dsDaycareCompatibilityText`, `src/daycare.c`) |
 | [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 445 / 73 | Reads about the opposing mon: type effectiveness for the party badges and each move (`UiMatchupMove`, as `Cmd_typecalc` finds it, for either opponent in a double), a move's real type (`UiMatchupMoveType`: Hidden Power, Weather Ball), `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
-| [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 341 / 62 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
+| [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 407 / 78 | The quick-throw strip, small until tapped: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_view.c](ui/ui_view.c) / [.h](ui/ui_view.h) | 79 / 66 | The view stack: which detail screens are open over the active tab, 4 deep, no heap. The tabs draw and dispatch their own views and ask the stack whether each is open. The shell empties it on every tab change |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 203 / 50 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
@@ -229,8 +229,11 @@ third is what copying them looks like:
   overlay paint order.
 - The **quick-throw strip** ([ui_quickball.c](ui/ui_quickball.c)) is a 320x40
   band along the bottom of the content area, offering back the ball the player
-  last threw. It lives in its OWN file and the shell calls five functions:
-  `Active`, `Draw`, `Touch`, `StateKey` and `Tick`. That is the shape to copy
+  last threw. It starts as a 56x40 box at the band's right end (`UI_QB_MINI_*`)
+  with the ball and its count, and a tap opens the full band, whose HIDE arrow
+  closes it again. `UiQuickBallHit` gives the shell the rect that shows now.
+  It lives in its OWN file and the shell calls six functions: `Active`, `Draw`,
+  `Hit`, `Touch`, `StateKey` and `Tick`. That is the shape to copy
   for a new overlay. Its geometry starts at y 152 for one reason: the notice ends
   there, so the two abut exactly and neither has to paint over the other's
   border in the case where both are up, which is a catchable shiny.

@@ -985,9 +985,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
             LeaveTab(UI_TAB_TROPHY);
     }
     // The quick-throw strip, on the same terms. It takes every touch in its
-    // rect, so a drag that starts on it does not reach the tab.
+    // rect, so a drag that starts on it does not reach the tab. While it is
+    // the small box, that rect is only the box.
     else if (touch != NULL
-             && UiHit(touch, UI_QB_X, UI_QB_Y, UI_QB_W, UI_QB_H)
+             && UiQuickBallHit(touch)
              && UiQuickBallActive())
     {
         UiQuickBallTouch(touch);
