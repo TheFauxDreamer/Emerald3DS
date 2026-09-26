@@ -377,8 +377,8 @@ directory.
 | `3ds/build_objs.sh` | Game sources to `libpokeemerald.a` (ARM11). |
 | `3ds/Makefile`, `3ds/emerald3ds.rsf` | Host sources, link, and makerom packaging. |
 | `3ds/meta/` | Icon, banner art and banner audio for the CIA. |
-| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c` (including the rasteriser's worker thread), `audio.c`, `save.c`, `settings.c`, `log.c`, `io_thread.c` (the background SD writer), `achievements.c` (the per-playthrough achievement and place bits). |
-| `3ds/ui/` | **The second screen**, game side: `bottom_screen.c` is the shell, one `tab_*.c` per tab, `view_encounters.c` and `matchup.c` are overlays, `ui_quickball.c` and `ui_achtoast.c` are the two overlays that live in files of their own, `ui_draw.c` and `ui_text.c` are the primitives. |
+| `3ds/host/` | libctru side: `main.c` (entry point, per-frame hook, input, every port setting), `video.c` (including the rasteriser's worker thread), `audio.c`, `save.c`, `settings.c`, `log.c`, `io_thread.c` (the background SD writer), `achievements.c` (the per-playthrough achievement and place bits), `link.c` (the Cable Club carried over local wireless). |
+| `3ds/ui/` | **The second screen**, game side: `bottom_screen.c` is the shell, one `tab_*.c` per tab, `view_encounters.c` and `matchup.c` are overlays, `ui_quickball.c` and `ui_achtoast.c` are the two overlays that live in files of their own, `ui_link.c` is the LINK page and `ui_card.c` the trainer cards it shows, `ui_draw.c` and `ui_text.c` are the primitives. |
 | `rp2350/` | The RP2350 port this is built on. `ppu.c` and the `m4a_*.c` pair are shared. |
 | `src/`, `data/`, `graphics/`, `sound/` | Upstream pokeemerald sources and assets. |
 | `web/`, `tools/wasm_*` | The WASM build, retained as the rasteriser reference. |
