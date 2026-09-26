@@ -26,8 +26,24 @@ The large pieces:
 - **[SECOND_SCREEN_PLAN.md](SECOND_SCREEN_PLAN.md):** a view stack, a widget
   layer, text clipping and a catalogue of new views. Text clipping (step 1)
   is done; the view stack and widgets are not started. Some catalogue items shipped without it: the IV/EV spread, the
-  encounters view, the TROPHY tab and the link trainer cards. The player's own
-  trainer card is the next cheap one, because the card renderer exists.
+  encounters view, the TROPHY tab, the link trainer cards, and the DS-style
+  items below.
+- **DS-style second screen: test on hardware.** The battle panel's foe cards,
+  BAG, RUN and touch send-out, the five game pages of HOME (TRAINER, CLOCK,
+  DOWSING, BERRIES, DAY CARE) and the MAP marks are built and compile-checked,
+  but no console has run them yet. Check these:
+  - RUN escapes a wild battle. A trainer battle gives the game's refusal, and
+    Wobbuffet or Wrap gives "can't escape". BAG goes to the BAG tab.
+  - A foe card shows stat drops after Growl or Leer.
+  - After a faint, the panel asks. A tap and SEND OUT sends the chosen
+    Pokemon. A press of A opens the game's party menu as before.
+  - TRAINER agrees with the game's own card. CLOCK's egg steps go down as the
+    player walks. DOWSING's dots go when an item is picked up, and agree with
+    the Itemfinder. BERRIES agrees with the trees on the routes. DAY CARE
+    agrees with the old man's words and levels.
+  - A trainer who calls for a rematch gets a MAP mark. The Latias or Latios
+    mark moves after each map change. A TV outbreak marks its route and shows
+    in its WILD list.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
