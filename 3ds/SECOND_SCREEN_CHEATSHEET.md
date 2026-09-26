@@ -154,7 +154,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/ui_shell.h](ui/ui_shell.h) | 243 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1295 / 258 | Framebuffer pointer and dirty band, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 442 / 60 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 1125 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/tab_party.c](ui/tab_party.c) | 1222 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 670 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
@@ -164,7 +164,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_extra.c](ui/tab_extra.c) | 944 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 LINK (drawn by `ui_link.c`), page 6 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
 | [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 475 / 39 | The LINK page: HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
 | [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 524 / 42 | A trainer card from `gTrainerCards`, drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
-| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 299 / 56 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
+| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 445 / 73 | Reads about the opposing mon: type effectiveness for the party badges and each move (`UiMatchupMove`, as `Cmd_typecalc` finds it, for either opponent in a double), a move's real type (`UiMatchupMoveType`: Hidden Power, Weather Ball), `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
 | [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 341 / 62 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
 | [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 203 / 50 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
@@ -484,15 +484,15 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   dedicated button (BAG's USE, MAP's YES/NO confirm).
 - **One column, several tenants.** The party detail view's left column shows the
   stat block, a tapped move's details, or the IV/EV spread
-  ([tab_party.c:761](ui/tab_party.c#L761)), never two at once, while the moves
+  ([tab_party.c:858](ui/tab_party.c#L858)), never two at once, while the moves
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:851](ui/tab_party.c#L851), dim frame off, doubled accent outline on). A
+  ([:948](ui/tab_party.c#L948), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
-  ([tab_party.c:1063](ui/tab_party.c#L1063)). Without it the toggle would flip
+  ([tab_party.c:1160](ui/tab_party.c#L1160)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in four different places:
   [tab_party.c:97](ui/tab_party.c#L97) (38x22),
@@ -580,7 +580,7 @@ MAP's fly row is the one other thing that depends on the party, and
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:1022](ui/tab_party.c#L1022)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1119](ui/tab_party.c#L1119)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that

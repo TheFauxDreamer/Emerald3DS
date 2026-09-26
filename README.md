@@ -51,7 +51,11 @@ and an HP bar that slides the way the battle bar does instead of jumping. Status
 is the party menu's own PSN/SLP/BRN badge. In battle each card also gets **type
 matchup arrows**, one for how hard that mon hits the opponent and one for how
 dangerous the opponent is to it. Tap a mon for stats, ability, nature, held item
-and moves, and an **IV/EV** button there swaps the stat block for the full
+and moves. In battle each move there gets its own arrow against the opponent
+(two in a double battle), and tapping a move shows the exact multiplier, x2 or
+x0.5. The marks follow the battle's own rules: Hidden Power's real type, Weather
+Ball in weather, Levitate, Foresight, and the fixed-damage moves that only care
+whether they can hit at all. An **IV/EV** button there swaps the stat block for the full
 spread: base stat, IV and EV beside the computed total for each of the six, the
 EV total against the 510 cap, perfect IVs and maxed EVs marked, and the nature's
 boosted and hindered stats signed. Emerald works all of that out and shows you

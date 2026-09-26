@@ -316,6 +316,23 @@ static u8 OverlayIconFrame(void)
 #define ARROW_GAP 3
 #define ARROW_PAIR_W (UI_ARROW_W * 2 + ARROW_GAP)
 
+// One offence arrow, for a multiplier on the x10 scale. Up and green is super
+// effective. Down is weaker: amber for a resisted move, red only for a move
+// that has no effect. Nothing for neutral or UI_MATCHUP_NA, the usual cases.
+//
+// The party grid and the move list both use this, so a mark means the same on
+// both.
+static void DrawOffenceArrow(int x, int y, u16 mul)
+{
+    if (mul == UI_MATCHUP_NA || mul == TYPE_MUL_NORMAL)
+        return;
+
+    if (mul > TYPE_MUL_NORMAL)
+        UiArrow(x, y, TRUE, UI_COL_HP_HIGH);
+    else
+        UiArrow(x, y, FALSE, (mul == 0) ? UI_COL_HP_LOW : UI_COL_HP_MID);
+}
+
 // Two arrows, only when the matchup is not neutral. Neutral is the usual case.
 //
 // The direction gives the meaning and the color supports it: up and green is
@@ -339,14 +356,7 @@ static void DrawMatchupArrows(int x, int y, int xLimit, struct Pokemon *mon)
     off  = UiMatchupOffence(mon);
     risk = UiMatchupRisk(mon);
 
-    if (off != UI_MATCHUP_NA && off != TYPE_MUL_NORMAL)
-    {
-        // Amber for a resisted move. Red only for a move that has no effect.
-        if (off > TYPE_MUL_NORMAL)
-            UiArrow(x, y, TRUE, UI_COL_HP_HIGH);
-        else
-            UiArrow(x, y, FALSE, (off == 0) ? UI_COL_HP_LOW : UI_COL_HP_MID);
-    }
+    DrawOffenceArrow(x, y, off);
 
     // Risk is the opposite: a large multiplier against the player is bad.
     if (risk != UI_MATCHUP_NA && risk != TYPE_MUL_NORMAL)
@@ -654,8 +664,40 @@ static void DrawCell(int index)
 
 }
 
-// One move row: the game's type icon, the name, and a highlight when the row's
-// details show.
+// In battle, each move row has an offence arrow for each opponent in its
+// top-right corner: one in a single battle, two in a double, in the
+// opponents' field order (left, then right).
+//
+// The corner is free space. Move names are capitals, whose ink is 9 to 18px
+// below the row's top (the font's rows 3 to 12, drawn at row + 6). The
+// selection outline uses the top 2px. Thus rows 2 to 8 are clear, also under
+// THUNDERSHOCK, the longest name, which ends at x 306.
+#define MOVE_MARK_Y(i)  (MOVE_ROW_Y(i) + 2)
+#define MOVE_MARK_X     (MOVES_X + MOVE_ROW_W - 3 - UI_ARROW_W)
+#define MOVE_MARK2_X    (MOVE_MARK_X - ARROW_GAP - UI_ARROW_W)
+
+static void DrawMoveMarks(struct Pokemon *mon, u16 move, u8 i)
+{
+    bool8 left = UiMatchupFoePresent(B_POSITION_OPPONENT_LEFT);
+    bool8 right = UiMatchupFoePresent(B_POSITION_OPPONENT_RIGHT);
+
+    // The right opponent's arrow is at the right, so the pair reads in field
+    // order. With one opponent left in a double, its arrow keeps its place.
+    if (right)
+        DrawOffenceArrow(MOVE_MARK_X, MOVE_MARK_Y(i),
+                         UiMatchupMove(mon, move, B_POSITION_OPPONENT_RIGHT));
+    if (left)
+        DrawOffenceArrow((gBattleTypeFlags & BATTLE_TYPE_DOUBLE) ? MOVE_MARK2_X
+                                                                 : MOVE_MARK_X,
+                         MOVE_MARK_Y(i),
+                         UiMatchupMove(mon, move, B_POSITION_OPPONENT_LEFT));
+}
+
+// One move row: the type icon, the name, the matchup marks in battle, and a
+// highlight when the row's details show.
+//
+// The icon is the type the move has for this mon (UiMatchupMoveType), so
+// Hidden Power shows its real type.
 //
 // Empty slots show a dim "-", so the list always has four rows.
 static void DrawMoveRow(struct Pokemon *mon, u8 i)
@@ -680,15 +722,67 @@ static void DrawMoveRow(struct Pokemon *mon, u8 i)
     }
 
     UiTypeIcon(MOVE_ICON_X, y + (MOVE_ROW_H - UI_TYPE_ICON_H) / 2,
-               gBattleMoves[move].type);
+               UiMatchupMoveType(mon, move));
     UiText(MOVE_NAME_X, y + (MOVE_ROW_H - UI_GLYPH_H) / 2, gMoveNames[move],
            UiThemeText(), UiThemeShadow());
+    DrawMoveMarks(mon, move, i);
 }
 
 static void DrawMoveList(struct Pokemon *mon)
 {
     for (u8 i = 0; i < MAX_MON_MOVES; i++)
         DrawMoveRow(mon, i);
+}
+
+// The exact multiplier against the opponent, right-aligned on the type line,
+// after the same arrow as the row. The number is in the theme's text colour,
+// because the 20 window frames make a coloured number hard to read on some of
+// them; the arrow carries the colour. In a double battle it is the left
+// opponent's, or the right one's when the left one is gone.
+//
+// The values are the game's x10 scale: 40, 20, 10, 5, 2 (a quarter, rounded
+// down by the chart walk) and 0.
+#define MOVEINFO_MUL_RIGHT (MOVEINFO_X + MOVEINFO_W)
+
+static void DrawMoveInfoMultiplier(struct Pokemon *mon, u16 move)
+{
+    u8 label[8];
+    const char *text;
+    u8 position;
+    u16 mul;
+    int x;
+
+    if (UiMatchupFoePresent(B_POSITION_OPPONENT_LEFT))
+        position = B_POSITION_OPPONENT_LEFT;
+    else if (UiMatchupFoePresent(B_POSITION_OPPONENT_RIGHT))
+        position = B_POSITION_OPPONENT_RIGHT;
+    else
+        return;
+
+    mul = UiMatchupMove(mon, move, position);
+
+    if (mul == UI_MATCHUP_NA)
+        return;
+    else if (mul >= 40)
+        text = "x4";
+    else if (mul >= 20)
+        text = "x2";
+    else if (mul >= TYPE_MUL_NORMAL)
+        text = "x1";
+    else if (mul >= 5)
+        text = "x0.5";
+    else if (mul > 0)
+        text = "x0.25";
+    else
+        text = "x0";
+
+    x = UiTextRight(MOVEINFO_MUL_RIGHT,
+                    MOVEINFO_Y + (UI_TYPE_ICON_H - UI_GLYPH_H) / 2,
+                    UiAscii(label, text, sizeof(label)),
+                    UiThemeText(), UiThemeShadow());
+
+    DrawOffenceArrow(MOVEINFO_MUL_RIGHT - x - ARROW_GAP - UI_ARROW_W,
+                     MOVEINFO_Y + (UI_TYPE_ICON_H - UI_ARROW_H) / 2, mul);
 }
 
 // The tapped move's details, in the space of the stats block.
@@ -700,17 +794,20 @@ static void DrawMoveInfo(struct Pokemon *mon, u8 i)
     u8 label[24];
     u16 move = (u16)GetMonData(mon, MON_DATA_MOVE1 + i);
     const struct BattleMove *info;
+    u8 type;
     int y;
 
     if (move == MOVE_NONE)
         return;
 
     info = &gBattleMoves[move];
+    type = UiMatchupMoveType(mon, move);
 
-    UiTypeIcon(MOVEINFO_X, MOVEINFO_Y, info->type);
+    UiTypeIcon(MOVEINFO_X, MOVEINFO_Y, type);
     UiText(MOVEINFO_X + UI_TYPE_ICON_W + 6,
            MOVEINFO_Y + (UI_TYPE_ICON_H - UI_GLYPH_H) / 2,
-           gTypeNames[info->type], UiThemeText(), UiThemeShadow());
+           gTypeNames[type], UiThemeText(), UiThemeShadow());
+    DrawMoveInfoMultiplier(mon, move);
 
     y = MOVEINFO_Y + UI_TYPE_ICON_H + 6;
 
