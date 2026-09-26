@@ -50,12 +50,13 @@
 #define MOVE_NAME_DX (MOVE_ICON_DX + UI_TYPE_ICON_W + 4)
 #define MOVE_TEXT_DY 2
 #define MOVE_PP_DY   18
-// The effectiveness arrows sit in the button's top-right corner, as on the
-// PARTY detail view: one for each opponent, left then right. The longest move
-// name ends at x+112, clear of the second arrow at x+121.
-#define MOVE_ARROW_X (MOVE_W - 3 - UI_ARROW_W)
-#define MOVE_ARROW2_X (MOVE_ARROW_X - 3 - UI_ARROW_W)
-#define MOVE_ARROW_DY 4
+// The effectiveness goes on the PP line, right-aligned: the exact multiplier
+// with its arrow (UiMultiplierRight), one for each opponent, the right
+// opponent at the right. It shows even when neutral, as a dim "x1", so the
+// player always sees an answer. "PP 35/35" ends near x+60, and two values with
+// their arrows take about 80px, so they fit in the 149px button.
+#define MOVE_MUL_RIGHT (MOVE_W - 4)
+#define MOVE_MUL_GAP  6
 
 // The party row: six 50px cells from x 10. The interior is y 96..144: the icon,
 // then the HP bar.
@@ -82,10 +83,15 @@
 #define SWITCH_Y     10
 #define SWITCH_W     104
 #define INFO_X       204
-#define INFO_Y       44
+#define INFO_Y       38
 #define INFO_W       50
 #define BACK_X       258
 #define BACK_W       50
+// Why SWITCH IN cannot work, on the card's last line, under the types. It is
+// here and not on the message line, because in a wild battle the quick-throw
+// strip covers the message line (y 152..192).
+#define CARD_WHY_Y   64
+#define CARD_WHY_W   (CTR_BOTTOM_WIDTH - 12 - CARD_TEXT_X)
 
 // ------------------------------------------------------------------ state ---
 
@@ -194,15 +200,16 @@ static void DrawMove(u8 battler, u8 i)
                  UI_COL_DIM, UiThemeShadow());
     UiNum(px, y + MOVE_PP_DY, maxPp, UI_COL_DIM, UiThemeShadow());
 
-    // One arrow for each opponent on the field, right opponent at the right.
+    // One value for each opponent on the field, the right one at the right,
+    // so the pair reads in field order. A status move has none.
+    px = x + MOVE_MUL_RIGHT;
     if (UiMatchupFoePresent(B_POSITION_OPPONENT_RIGHT))
-        UiOffenceArrow(x + MOVE_ARROW_X, y + MOVE_ARROW_DY,
-                       UiMatchupMove(mon, move, B_POSITION_OPPONENT_RIGHT));
+        px = UiMultiplierRight(px, y + MOVE_PP_DY,
+                               UiMatchupMove(mon, move, B_POSITION_OPPONENT_RIGHT))
+           - MOVE_MUL_GAP;
     if (UiMatchupFoePresent(B_POSITION_OPPONENT_LEFT))
-        UiOffenceArrow(x + ((gBattleTypeFlags & BATTLE_TYPE_DOUBLE) ? MOVE_ARROW2_X
-                                                                     : MOVE_ARROW_X),
-                       y + MOVE_ARROW_DY,
-                       UiMatchupMove(mon, move, B_POSITION_OPPONENT_LEFT));
+        UiMultiplierRight(px, y + MOVE_PP_DY,
+                          UiMatchupMove(mon, move, B_POSITION_OPPONENT_LEFT));
 }
 
 static bool8 SlotIsOut(u8 slot)
@@ -274,7 +281,7 @@ static void DrawCard(u8 slot)
     struct Pokemon *mon = UiPartyMon(slot);
     u16 species = GetMonData(mon, MON_DATA_SPECIES);
     u8 name[POKEMON_NAME_LENGTH + 1];
-    u8 label[16];
+    u8 label[40];
     int x;
     bool8 canSwitch = Ctr3dsCanSwitchTo(slot) == CTR3DS_SWITCH_OK;
 
@@ -315,6 +322,17 @@ static void DrawCard(u8 slot)
         UiRect(SWITCH_X + 2, SWITCH_Y + 2, SWITCH_W - 4, CARD_BTN_H - 4, UI_COL_ACCENT);
     DrawButton(INFO_X, INFO_Y, INFO_W, CARD_BTN_H, "INFO", TRUE);
     DrawButton(BACK_X, INFO_Y, BACK_W, CARD_BTN_H, "BACK", TRUE);
+
+    // Always the reason when there is one, not only after a tap: the player
+    // sees why before trying.
+    if (!canSwitch)
+        UiTextClipped(CARD_TEXT_X, CARD_WHY_Y, CARD_WHY_W,
+                      UiAscii(label, SwitchReason(Ctr3dsCanSwitchTo(slot)), sizeof(label)),
+                      UiThemeText(), UiThemeShadow());
+    else if (sMsg == MSG_BACK_OUT)
+        UiTextClipped(CARD_TEXT_X, CARD_WHY_Y, CARD_WHY_W,
+                      UiAscii(label, "Press B on the top screen first.", sizeof(label)),
+                      UiThemeText(), UiThemeShadow());
 }
 
 static void DrawMessage(void)
@@ -322,16 +340,13 @@ static void DrawMessage(void)
     u8 label[40];
     const char *text;
 
+    // The card shows why a switch cannot happen (DrawCard), so this line only
+    // has the hint and a refused move. In a wild battle the quick-throw strip
+    // covers it, which loses nothing the player needs.
     switch (sMsg)
     {
     case MSG_NOT_NOW:
         text = "Not right now.";
-        break;
-    case MSG_BACK_OUT:
-        text = "Press B on the top screen to switch.";
-        break;
-    case MSG_SWITCH_REASON:
-        text = sSel != NO_SLOT ? SwitchReason(Ctr3dsCanSwitchTo(sSel)) : "";
         break;
     default:
         text = sSel != NO_SLOT ? "SWITCH IN sends it out."

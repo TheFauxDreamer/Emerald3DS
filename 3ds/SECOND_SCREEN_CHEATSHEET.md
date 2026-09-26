@@ -152,11 +152,11 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | File | Lines | Owns |
 |---|---|---|
 | [ui/bottom_screen.c](ui/bottom_screen.c) | 1128 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 252 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/ui_shell.h](ui/ui_shell.h) | 256 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 486 / 35 | The battle panel: in place of the PARTY grid while the player chooses, four move buttons (type, PP, arrows) that use the move, a party row, and a card with SWITCH IN and INFO. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` |
-| [ui/tab_party.c](ui/tab_party.c) | 1247 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 501 / 35 | The battle panel: in place of the PARTY grid while the player chooses, four move buttons (type, PP, and the multiplier against each opponent) that use the move, a party row, and a card with SWITCH IN and INFO. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` |
+| [ui/tab_party.c](ui/tab_party.c) | 1258 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 671 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
@@ -482,15 +482,15 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   dedicated button (BAG's USE, MAP's YES/NO confirm).
 - **One column, several tenants.** The party detail view's left column shows the
   stat block, a tapped move's details, or the IV/EV spread
-  ([tab_party.c:865](ui/tab_party.c#L865)), never two at once, while the moves
+  ([tab_party.c:876](ui/tab_party.c#L876)), never two at once, while the moves
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:955](ui/tab_party.c#L955), dim frame off, doubled accent outline on). A
+  ([:966](ui/tab_party.c#L966), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
-  ([tab_party.c:1179](ui/tab_party.c#L1179)). Without it the toggle would flip
+  ([tab_party.c:1190](ui/tab_party.c#L1190)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in four different places:
   [tab_party.c:99](ui/tab_party.c#L99) (38x22),
@@ -584,7 +584,7 @@ MAP's fly row is the one other thing that depends on the party, and
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:1126](ui/tab_party.c#L1126)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1137](ui/tab_party.c#L1137)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
