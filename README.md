@@ -72,8 +72,9 @@ PP, or one that is Disabled or Taunted, gets the game's own refusal, and a
 trapped Pokémon gets the party menu's "can't be switched out". A fainted
 Pokémon, an egg, one already out or a partner's Pokémon shows why on the panel.
 In a double battle, a move that needs a target uses the game's own target
-choice on the top screen. The panel goes while the turn plays out, and the
-grid comes back.
+choice on the top screen. The panel stays for the whole battle: while the turn
+plays out the moves stay on screen, and the next choice lights them up again.
+The grid comes back when the battle ends.
 
 **BAG.** Pockets, quantities, and a details pane with the item's sprite and
 description. USE opens a picker of your team, so a Potion asks who it is for

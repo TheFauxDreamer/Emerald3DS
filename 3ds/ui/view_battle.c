@@ -107,30 +107,61 @@ enum
 
 static u8 sSel = NO_SLOT;         // the selected party slot, field order
 static u8 sMsg = MSG_HINT;
-static u8 sLastBattler = MAX_BATTLERS_COUNT;
 
-static u8 ChoosingBattler(void)
+// The panel stays up for the whole battle, not only while the player chooses.
+// A panel that went back to the grid for every turn's animations and came back
+// for the next choice flickered between two screens all battle.
+//
+// It starts at the battle's first choice, not when gMain.inBattle goes TRUE:
+// until the intro loads them, gBattleMons still holds the last battle's mons
+// (the same reason status_tags.c waits). It ends when the battle has an
+// outcome, so the grid is back for the experience and the catch.
+//
+// sShown is the battler whose moves show: the one choosing, or between choices
+// the one that chose last.
+static bool8 sLive;
+static u8 sShown = MAX_BATTLERS_COUNT;
+
+static void Refresh(void)
 {
-    return Ctr3dsBattleChoosingBattler();
-}
+    u8 battler;
 
-// A new choice (the next turn, or the second battler in a double) starts
-// clean, so a selection or a refusal from the last one never shows.
-static void SyncToBattler(void)
-{
-    u8 battler = ChoosingBattler();
-
-    if (battler != sLastBattler)
+    if (!gMain.inBattle || gBattleOutcome != 0)
     {
-        sLastBattler = battler;
+        sLive = FALSE;
+        sShown = MAX_BATTLERS_COUNT;
+        sSel = NO_SLOT;
+        sMsg = MSG_HINT;
+        return;
+    }
+
+    battler = Ctr3dsBattleChoosingBattler();
+    if (battler >= MAX_BATTLERS_COUNT)
+        return;
+
+    sLive = TRUE;
+
+    // The other battler of a double starts clean, so a card or a refusal from
+    // one never shows for the other.
+    if (battler != sShown)
+    {
+        sShown = battler;
         sSel = NO_SLOT;
         sMsg = MSG_HINT;
     }
 }
 
+// TRUE while the shown battler is the one choosing: the only time a move or a
+// switch can be tapped.
+static bool8 Choosing(void)
+{
+    return sLive && Ctr3dsBattleChoosingBattler() == sShown;
+}
+
 bool8 UiBattlePanelActive(void)
 {
-    return ChoosingBattler() < MAX_BATTLERS_COUNT;
+    Refresh();
+    return sLive && sShown < MAX_BATTLERS_COUNT;
 }
 
 void UiBattlePanelLeave(void)
@@ -178,13 +209,14 @@ static void DrawMove(u8 battler, u8 i)
 
     pp = gBattleMons[battler].pp[i];
     maxPp = CalculatePPWithBonus(move, gBattleMons[battler].ppBonuses, i);
-    usable = pp > 0 && Ctr3dsBattleCanTapMoves();
+    usable = pp > 0;
 
-    // The doubled accent inset of the EXTRA and MAP buttons marks a move the
-    // player can tap. One with no PP still takes the tap, and the engine says
+    // The accent inset of the EXTRA and MAP buttons marks a move the player can
+    // tap now: only while choosing. Between choices the buttons stay, as they
+    // are, without it. One with no PP still takes the tap, and the engine says
     // why it cannot be used, but it is drawn dim so the player knows first.
     UiRect(x, y, MOVE_W, MOVE_H, UI_COL_DIM);
-    if (usable)
+    if (usable && Choosing() && Ctr3dsBattleCanTapMoves())
         UiRect(x + 2, y + 2, MOVE_W - 4, MOVE_H - 4, UI_COL_ACCENT);
 
     UiTypeIcon(x + MOVE_ICON_DX, y + MOVE_TEXT_DY, UiMatchupMoveType(mon, move));
@@ -272,7 +304,7 @@ static const char *SwitchReason(u8 reason)
     case CTR3DS_SWITCH_IN_BATTLE: return "It is already in battle.";
     case CTR3DS_SWITCH_EGG:       return "An EGG can't battle.";
     case CTR3DS_SWITCH_CHOSEN:    return "It is already chosen.";
-    default:                      return "Not right now.";
+    default:                      return "Wait for your turn to choose.";
     }
 }
 
@@ -349,7 +381,8 @@ static void DrawMessage(void)
         text = "Not right now.";
         break;
     default:
-        text = sSel != NO_SLOT ? "SWITCH IN sends it out."
+        text = !Choosing()     ? "Waiting for your turn."
+             : sSel != NO_SLOT ? "SWITCH IN sends it out."
              : Ctr3dsBattleCanTapMoves() ? "Tap a move, or a POKEMON to switch."
                                          : "Tap a POKEMON to switch.";
         break;
@@ -362,11 +395,12 @@ static void DrawMessage(void)
 
 void UiBattlePanelDraw(void)
 {
-    u8 battler = ChoosingBattler();
+    u8 battler;
 
-    SyncToBattler();
+    Refresh();
+    battler = sShown;
 
-    if (battler >= MAX_BATTLERS_COUNT)
+    if (!sLive || battler >= MAX_BATTLERS_COUNT)
         return;
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, TOP_TH);
@@ -419,7 +453,11 @@ static void TouchCard(const CtrTouchState *t)
 
 static void TouchMoves(const CtrTouchState *t)
 {
-    u8 battler = ChoosingBattler();
+    u8 battler = sShown;
+
+    // Between choices the buttons show the moves but do nothing.
+    if (!Choosing())
+        return;
 
     for (u8 i = 0; i < MAX_MON_MOVES; i++)
     {
@@ -444,12 +482,13 @@ void UiBattlePanelTouch(const CtrTouchState *t)
     if (!t->justReleased)
         return;
 
-    SyncToBattler();
+    Refresh();
 
-    if (ChoosingBattler() >= MAX_BATTLERS_COUNT)
+    if (!sLive || sShown >= MAX_BATTLERS_COUNT)
         return;
 
-    // The party row first: it is the same in both states.
+    // The party row first: it is the same in both states. A card opens between
+    // choices too, to read it or open INFO; SWITCH IN says to wait.
     for (u8 i = 0; i < PARTY_SIZE; i++)
     {
         if (!UiHit(t, CELL_X(i), CELL_Y, CELL_W, CELL_H))
@@ -478,13 +517,15 @@ u32 UiBattlePanelKey(void)
     u8 battler;
     u32 key;
 
-    SyncToBattler();
-    battler = ChoosingBattler();
+    Refresh();
+    battler = sShown;
 
-    if (battler >= MAX_BATTLERS_COUNT)
+    if (!sLive || battler >= MAX_BATTLERS_COUNT)
         return 0;
 
-    key = 1u | ((u32)battler << 1) | ((u32)sSel << 4) | ((u32)sMsg << 12);
+    // Choosing changes the move buttons' inset and the hint, with no touch.
+    key = 1u | ((u32)battler << 1) | ((u32)sSel << 4) | ((u32)sMsg << 12)
+        | ((u32)Choosing() << 16);
 
     // PP drops after a move, and the battler's moves change with Transform or
     // Mimic, with no touch here. The party's HP and status are already in the
