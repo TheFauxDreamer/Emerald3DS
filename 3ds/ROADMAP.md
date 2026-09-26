@@ -6,7 +6,7 @@ built and why it is structured the way it is.
 
 ## Status
 
-Checked against `d482f2a` on 2026-09-18.
+Checked against `5684e2f` on 2026-09-26.
 
 | Part | State |
 |---|---|
@@ -15,7 +15,7 @@ Checked against `d482f2a` on 2026-09-18.
 | D: Gameplay tweaks | **Done.** |
 | Save durability | **Done.** |
 | The busy-wait audit | **Done.** |
-| C: Local wireless | **Pairs and links on hardware; a trade is waiting on a console test.** The transport delivers each command once, the handshake waits for the host's confirm, `GetMultiplayerId()` answers correctly, and a departing console says goodbye. The fault that ended every link about ten seconds in is fixed: the game made a command for each of its own frames while the transport carried one for each frame that landed, and the send queue took the difference until it overflowed. On the `local-wireless` branch. |
+| C: Local wireless | **Done.** A trade and a two-player battle both ran to completion on hardware, New 3DS against Old 3DS. The transport delivers each command once, the handshake waits for the host's confirm, `GetMultiplayerId()` answers correctly, and a departing console says goodbye. The last fault, which ended every link about ten seconds in, is fixed: the game made a command for each of its own frames while the transport carried one for each frame that landed, and the send queue took the difference until it overflowed. |
 | E: Achievements | **Built in.** Two items are left. |
 
 The done parts stay in this file because their facts are recorded nowhere else.
@@ -31,53 +31,19 @@ The large pieces:
   come from aarant's pokeemerald fork and pokeemerald-expansion: shiny-aware
   icons, day and night lighting, a key item wheel and others, with the port
   rules from the follower work. Item 1, the follower options, is done.
-- **Part C, the Cable Club over local wireless.** The `local-wireless` branch
-  now carries main. C.3 is decided: LINK is page 5 of EXTRA. Pairing and the
-  transport both run on hardware. Three faults are confirmed fixed on hardware:
-  the transport lost and repeated commands, the link went live at pairing time
-  instead of at the host's confirm, and a console that closed a link told its peer
-  nothing. A fourth ended every link within about ten seconds: the game made a
-  command for each of its own frames while the transport carried one for each
-  frame that landed, and the send queue took the difference until it overflowed.
-
-  That fourth fix was tested on hardware and it froze both consoles at the last
-  step of a trade, so it took a second pass. The cap itself is right; the signal
-  it read was not. It made a command only when `LINK_STAT_RECEIVED_NOTHING` was
-  clear, and that bit is set on every frame of an IDLE link, because the pump
-  queues a received set only when it is non-zero. `gLinkCallback` is the only
-  writer of commands, so gating it on commands arriving makes a quiet link
-  permanently mute. `LinkCB_ReadyCloseLink` and `LinkCB_Standby` are the two
-  callbacks built to run on a quiet link, and neither could run at all;
-  `CB_WaitToStartTrade` installs the first of them after a fade with no traffic
-  in it, so both consoles sat on a black screen while the transport kept
-  reporting a healthy link. Nothing in either log named it.
-
-  The signal is now what the transport DELIVERED: `sCtrFrameDelivered`, set by
-  `Ctr3dsLinkPump` when a frame lands and consumed by `LinkMain2`. Delivery does
-  not depend on the game, because the pump sends a zero-filled command when the
-  queue is empty, so a frame lands whether or not either console had anything to
-  say, and the cap cannot deadlock. `LinkMain2` also counts consecutive frames a
-  callback has waited on nothing and writes `link callback starved` once at 120,
-  which is the line this class of fault had no way to produce.
-
-  The next run must show `sendq` near zero on every period line, which is the
-  whole test, with `lost 0` and `short 0` beside it, `local` and `sio` agreeing in
-  the `link ids` line, no `link callback starved` anywhere, and no `link error`
-  through a trade entered, confirmed, completed and exited. A confirmed trade must
-  log `link session reset (close)` on both consoles, which is the line whose
-  absence proved the freeze. Cancel one at the confirm prompt too, because
-  `CB_InitExitCanceledTrade` takes the same close path. Then stay linked two or
-  three minutes, which is the test the first runs never reached, because ten
-  seconds was enough to kill a link. Run it with the Old 3DS hosting, which is the
-  configuration that failed.
+- **Part C is done.** Pairing, the transport, a full trade and a two-player
+  battle all ran on hardware, New 3DS against Old 3DS. Several faults were found
+  and fixed there, and Part C below keeps the account of each one, because this
+  file is the only place they are recorded. What is left of it is the trainer
+  card item below.
 - **Trainer cards before the link-up.** The LINK page can only show a card once
   the Cable Club link-up has delivered one, because that is what fills
   `gTrainerCards` (`Task_LinkupAwaitTrainerCardData`, `src/cable_club.c`). The
   panel now says so instead of leaving a dim button unexplained. Having the port
-  carry the card itself is deferred until the trade above runs clean, with
-  `lost 0` and `short 0` across a session, because it puts a second kind of
-  traffic on a transport that is still the suspect for every link fault. What
-  the research settled, so it is not re-derived:
+  carry the card itself was deferred until a trade ran clean, because it puts a
+  second kind of traffic on a transport that was then the suspect for every link
+  fault. That gate is now open. What the research settled, so it is not
+  re-derived:
   - `sizeof(struct TrainerCard)` is exactly 100 bytes and a `LinkPacket` already
     carries 128 in its `cmd[8][16]`. One packet, no chunking, and the 136-byte
     size stays, so the strict size filter in `drain()` and the meaning of
@@ -206,21 +172,24 @@ The small ones:
   yet made the frame the client wants. A lockstep transport advances at the
   slower console's rate while each console's game advances at its own.
 
-  `LinkMain2` now skips `gLinkCallback` when `LINK_STAT_RECEIVED_NOTHING` is set,
-  under `#if PLATFORM_3DS`: one command for each delivered frame, which is what a
-  cable gives for free because a cable cannot run slower than the game. The block
-  transfer waits instead. `ProcessRecvCmds` still runs, and must, because it
-  skips any player whose command is 0 and it clears `gLinkPartnersHeldKeys`.
-  `TrySetLinkErrorBuffer` still runs because every link error passes through it.
-  The vanilla two lines are repeated under `#else` rather than left hanging off
-  the guard, so nothing added later can be captured by it in one configuration
-  only.
+  `LinkMain2` now calls `gLinkCallback` only on a frame the transport DELIVERED
+  (`sCtrFrameDelivered`), under `#if PLATFORM_3DS`: one command for each
+  delivered frame, which is what a cable gives for free because a cable cannot
+  run slower than the game. The block transfer waits instead.
+
+  The first attempt gated on `LINK_STAT_RECEIVED_NOTHING` instead, and that
+  deadlocked a quiet link: the only writer of commands then waits on the commands
+  it is the only writer of. Both consoles froze on a black screen at the last
+  step of a trade, with the transport reporting a healthy link throughout. The
+  long comment in `LinkMain2` (`src/link.c`) holds the full account, because that
+  is where the next person will read it.
 
   The period line now carries `sendq`, the deepest the queue got in the period.
   It must sit near zero. That number is the whole test, and its absence is why
   this went unseen through two console runs.
 
-  Not confirmed on hardware.
+  Confirmed on hardware: a trade and a two-player battle both ran to completion,
+  New 3DS against Old 3DS.
 - **Why the obvious fix is not available, so nobody tries it again.** Raising
   `LINK_WAIT_US` from 8 ms would pace the faster console by making it wait, and
   the `link caught up after 1 missed frames (9 ms)` lines say 8 to 11 ms more
@@ -862,17 +831,16 @@ save is 28 hook calls.
 
 ---
 
-# Part C: Local wireless (Cable Club over UDS)
+# Part C: Local wireless (Cable Club over UDS) (done)
 
-**Status: merged with main, not yet built.** The work started as one commit,
+**Status: done, and proven on hardware.** The work started as one commit,
 `feb3472` ("link: Cable Club over 3DS local wireless (UDS)"), on the
-`local-wireless` branch. That branch has since merged main, which resolved the
-conflicts in `3ds/Makefile`, `3ds/bridge.h`, `3ds/host/main.c`,
-`3ds/ui/bottom_screen.c` and `3ds/ui/ui_shell.h`, and settled C.3.
+`local-wireless` branch, and reached main at `5684e2f`. C.2 is as written below:
+`src/link.c` and `include/link.h` merged with no conflict at all.
 
-`src/link.c` and `include/link.h` merged with no conflict at all, so C.2 is
-exactly as written below. Nothing has been built or run on hardware yet: the
-transport is unproven and the numbers below are still estimates.
+What follows is the design as planned, then the faults the console runs found in
+it. Read both. Where a number below was an estimate, the console runs replaced
+it, and the sections after this one say so.
 
 ## Context
 
@@ -1088,7 +1056,10 @@ SIO symbols, the way the RTC change was checked.
 word-split unquoted `$var`, and that has produced false results twice in this
 repo already.
 
-Two Azahar instances in one multiplayer room, both on the same build:
+Two Azahar instances in one multiplayer room, both on the same build. The list
+is now a regression list: on hardware, New 3DS against Old 3DS, the first four
+have all passed, a trade and a two-player battle both to completion. Record
+mixing and the mid-trade disconnect are still untried.
 
 - EXTRA page 5 on both. HOST on one, SCAN on the other; the host console's
   username should appear. It is the console name, not the trainer name: the
@@ -1105,19 +1076,18 @@ Two Azahar instances in one multiplayer room, both on the same build:
 
 ## C: Known, found while merging
 
-Neither is merge damage. Both were in the branch as first written, and both
-want a decision after the first run, not before it.
+Neither was merge damage. Both were in the branch as first written, and both
+waited on the first console run rather than on an argument.
 
-The first hardware run has since happened, New 3DS against Old 3DS. Pairing
-worked and the panel reported both consoles. Entering the Cable Club then gave
-Emerald's communication error within seconds, from two separate faults: the
-frame counter in `Ctr3dsLinkExchange` advanced on every call, so consoles at
-different frame rates drifted apart permanently, and the pump reported lag on
-the first missed frame, which the game treats as fatal. Both are fixed; neither
-fix is confirmed on hardware yet.
+The first hardware run, New 3DS against Old 3DS: pairing worked and the panel
+reported both consoles. Entering the Cable Club then gave Emerald's
+communication error within seconds, from two separate faults. The frame counter
+in `Ctr3dsLinkExchange` advanced on every call, so consoles at different frame
+rates drifted apart permanently, and the pump reported lag on the first missed
+frame, which the game treats as fatal.
 
-Both are now fixed, after a base 3DS log showed how bad each one is. Neither
-fix is confirmed on hardware.
+All of it is now fixed and confirmed on hardware, a trade and a two-player
+battle both to completion. A base 3DS log showed how bad the two below were.
 
 - **The bounded wait was a busy spin, not a sleep.** `Ctr3dsLinkExchange`
   called `udsWaitDataAvailable(&sBind, false, false)` in a loop. The third
