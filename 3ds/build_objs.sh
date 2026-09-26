@@ -109,6 +109,12 @@ n=0
 # define the same 31 symbols, so both together give a link error. This compiles
 # m4a_mix.c, because it is the entry point of the host into the mixer, not the
 # mixer.
+#
+# All objects go into one flat directory, and 3ds/ui/*.c comes last. Thus a
+# 3ds/ui file with the same basename as a src file replaces that src object,
+# and the game loses that feature with no error. Name 3ds/ui files ui_*, tab_*
+# or view_*. Do not remove the prefixes. Subdirectories of 3ds/ui are not
+# compiled.
 for src in src/*.c rp2350/bios.c rp2350/asm_stubs.c rp2350/psg.c \
            rp2350/m4a_mix.c \
            3ds/gba_mem.c 3ds/tweaks.c 3ds/achievements.c 3ds/ui/*.c; do

@@ -369,7 +369,7 @@ The steps below are for a tab, and are kept for the record.
 4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L776))
    and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L968)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
-   glob in [build_objs.sh:114](build_objs.sh#L114). **See the naming hazard in
+   glob in [build_objs.sh:120](build_objs.sh#L120). **See the naming hazard in
    section 12.**
 
 Tab visibility mirrors `BuildNormalStartMenu()` (`src/start_menu.c`): a tab
@@ -1257,7 +1257,7 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ### Object-name collision hazard
 
-[build_objs.sh:114](build_objs.sh#L114) globs `3ds/ui/*.c` non-recursively and
+[build_objs.sh:120](build_objs.sh#L120) globs `3ds/ui/*.c` non-recursively and
 writes `$OBJ/$(basename).o` into the **same** object directory as all of
 `src/*.c`, with `3ds/ui` globbed last. A file named `3ds/ui/pokedex.c` would
 silently overwrite `src/pokedex.o` and delete the game's Pokedex from the
@@ -1265,6 +1265,7 @@ archive, with no error at any stage.
 
 **Mandatory prefixes:** `ui_*` for shared code, `tab_*` for tab roots, `view_*`
 for pushed views. Keep the directory flat; subdirectories are not compiled.
+`build_objs.sh` has a comment above the glob that says the same.
 
 ---
 

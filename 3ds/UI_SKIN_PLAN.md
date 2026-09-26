@@ -638,7 +638,7 @@ six `3ds/ui/tab_*.c`.
 
 **Untouched:** the Makefiles, `build_objs.sh`, the `.rsf`, CI, the host side,
 and every `src/` file. `3ds/ui/*.c` is already globbed by
-[build_objs.sh:114](build_objs.sh#L114), and `INCGFX` lines there are already in
+[build_objs.sh:120](build_objs.sh#L120), and `INCGFX` lines there are already in
 `generate_wasm_assets.py`'s scope.
 
 **When this lands, update the documents that describe the code as it is.**
