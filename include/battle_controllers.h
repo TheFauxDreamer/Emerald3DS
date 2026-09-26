@@ -346,6 +346,42 @@ enum
 
 bool8 Ctr3dsPlayerIsChoosingAction(void);
 u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot);
+
+// Second-screen moves and switches, on the same terms: the touch screen makes
+// the choice the d-pad would, and the engine checks it as it checks the d-pad's.
+//
+// The player battler that is choosing now: in action selection, or in the move
+// menu (FIGHT pressed on the top screen). MAX_BATTLERS_COUNT when none is. In a
+// double battle this is the left battler first, then the right one.
+u8 Ctr3dsBattleChoosingBattler(void);
+
+// FALSE in the Battle Palace, where the game chooses the moves.
+bool8 Ctr3dsBattleCanTapMoves(void);
+
+// Uses the move in slot 0-3 of the choosing battler. Returns CTR3DS_ITEM_QUEUED
+// or CTR3DS_ITEM_NOT_NOW.
+u8 Ctr3dsQueueBattleMove(u8 moveSlot);
+
+// Why a party slot cannot be switched in, in the order the party menu asks
+// (TrySwitchInPokemon, src/party_menu.c). A trap (Wrap, Mean Look, Shadow Tag
+// and the others) is not here: the engine finds it, and the game's party menu
+// then says so.
+enum
+{
+    CTR3DS_SWITCH_OK,
+    CTR3DS_SWITCH_NOT_NOW,     // no battler is choosing, or an empty slot
+    CTR3DS_SWITCH_PARTNER,     // a multi battle partner's Pokemon
+    CTR3DS_SWITCH_FAINTED,
+    CTR3DS_SWITCH_IN_BATTLE,
+    CTR3DS_SWITCH_EGG,
+    CTR3DS_SWITCH_CHOSEN,      // the other battler already chose it this turn
+};
+
+u8 Ctr3dsCanSwitchTo(u8 partySlot);
+
+// Switches the choosing battler with a party slot, from action selection only.
+// Returns CTR3DS_ITEM_QUEUED or CTR3DS_ITEM_NOT_NOW.
+u8 Ctr3dsQueueBattleSwitch(u8 partySlot);
 #endif
 
 #endif // GUARD_BATTLE_CONTROLLERS_H

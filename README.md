@@ -61,6 +61,19 @@ EV total against the 510 cap, perfect IVs and maxed EVs marked, and the nature's
 boosted and hindered stats signed. Emerald works all of that out and shows you
 none of it.
 
+**Fight from the touch screen.** While you are choosing what to do in a
+battle, the PARTY tab becomes a battle panel, as on the DS: your four moves as
+big buttons, each with its type, PP and effectiveness arrows, and your team in
+a row below. Tap a move to use it. Tap a Pokémon to see its card, then SWITCH
+IN to send it out, or INFO for its full details. Both go through the game's
+own battle menus, so the game's rules and messages still apply: a move with no
+PP, or one that is Disabled or Taunted, gets the game's own refusal, and a
+trapped Pokémon gets the party menu's "can't be switched out". A fainted
+Pokémon, an egg, one already out or a partner's Pokémon shows why on the panel.
+In a double battle, a move that needs a target uses the game's own target
+choice on the top screen. The panel goes while the turn plays out, and the
+grid comes back.
+
 **BAG.** Pockets, quantities, and a details pane with the item's sprite and
 description. USE opens a picker of your team, so a Potion asks who it is for
 instead of guessing. Items work in the field **and in battle**, where using one
@@ -253,6 +266,7 @@ emulator.
 | Bottom: encounter lists, Fly and Dig / Escape Rope from the map | ✅ |
 | Tweaks: EXP All, level cap, randomiser, bag sort | ✅ |
 | Battle items from the touch screen | ✅ |
+| Moves and switching from the touch screen | ✅ |
 | Bottom: quick throw of your last used ball | ✅ |
 | Bottom: achievements and unlock toasts | 🚧 On the `achievements` branch, not yet tested on a console |
 | Audio | ✅ Stereo PCM16: music, cries and PSG. Needs a DSP firmware dump |

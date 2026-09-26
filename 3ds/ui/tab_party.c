@@ -30,6 +30,7 @@
 #include "status_tags.h"
 #include "ui_team.h"
 #include "ui_view.h"
+#include "view_battle.h"
 
 #define COLS      2
 #define ROWS      3
@@ -326,9 +327,9 @@ static u8 OverlayIconFrame(void)
 // effective. Down is weaker: amber for a resisted move, red only for a move
 // that has no effect. Nothing for neutral or UI_MATCHUP_NA, the usual cases.
 //
-// The party grid and the move list both use this, so a mark means the same on
-// both.
-static void DrawOffenceArrow(int x, int y, u16 mul)
+// The party grid, the move list and the battle panel (view_battle.c) all use
+// this, so a mark means the same on each.
+void UiOffenceArrow(int x, int y, u16 mul)
 {
     if (mul == UI_MATCHUP_NA || mul == TYPE_MUL_NORMAL)
         return;
@@ -362,7 +363,7 @@ static void DrawMatchupArrows(int x, int y, int xLimit, struct Pokemon *mon)
     off  = UiMatchupOffence(mon);
     risk = UiMatchupRisk(mon);
 
-    DrawOffenceArrow(x, y, off);
+    UiOffenceArrow(x, y, off);
 
     // Risk is the opposite: a large multiplier against the player is bad.
     if (risk != UI_MATCHUP_NA && risk != TYPE_MUL_NORMAL)
@@ -690,10 +691,10 @@ static void DrawMoveMarks(struct Pokemon *mon, u16 move, u8 i)
     // The right opponent's arrow is at the right, so the pair reads in field
     // order. With one opponent left in a double, its arrow keeps its place.
     if (right)
-        DrawOffenceArrow(MOVE_MARK_X, MOVE_MARK_Y(i),
+        UiOffenceArrow(MOVE_MARK_X, MOVE_MARK_Y(i),
                          UiMatchupMove(mon, move, B_POSITION_OPPONENT_RIGHT));
     if (left)
-        DrawOffenceArrow((gBattleTypeFlags & BATTLE_TYPE_DOUBLE) ? MOVE_MARK2_X
+        UiOffenceArrow((gBattleTypeFlags & BATTLE_TYPE_DOUBLE) ? MOVE_MARK2_X
                                                                  : MOVE_MARK_X,
                          MOVE_MARK_Y(i),
                          UiMatchupMove(mon, move, B_POSITION_OPPONENT_LEFT));
@@ -787,7 +788,7 @@ static void DrawMoveInfoMultiplier(struct Pokemon *mon, u16 move)
                     UiAscii(label, text, sizeof(label)),
                     UiThemeText(), UiThemeShadow());
 
-    DrawOffenceArrow(MOVEINFO_MUL_RIGHT - x - ARROW_GAP - UI_ARROW_W,
+    UiOffenceArrow(MOVEINFO_MUL_RIGHT - x - ARROW_GAP - UI_ARROW_W,
                      MOVEINFO_Y + (UI_TYPE_ICON_H - UI_ARROW_H) / 2, mul);
 }
 
@@ -1129,6 +1130,10 @@ u32 UiPartyStateKey(void)
     if (DetailOpen() && sSpreadOpen)
         key ^= (u32)GetMonEVCount(UiPartyMon(UiSelectedMon())) * 2654435761u;
 
+    // The battle panel, while it has this tab: its own multiplier, so it
+    // cannot cancel the tweak bits.
+    key ^= UiBattlePanelKey() * 0x85EBCA6Bu;
+
     return key;
 }
 
@@ -1137,6 +1142,14 @@ void UiPartyDraw(void)
     if (DetailOpen())
     {
         DrawDetail();
+        return;
+    }
+
+    // While the player chooses in battle, the panel has this tab (view_battle.c).
+    // The detail view above still opens over it, from the panel's INFO.
+    if (UiBattlePanelActive())
+    {
+        UiBattlePanelDraw();
         return;
     }
 
@@ -1196,6 +1209,12 @@ void UiPartyTouch(const CtrTouchState *t)
             return;
         }
 
+        return;
+    }
+
+    if (UiBattlePanelActive())
+    {
+        UiBattlePanelTouch(t);
         return;
     }
 
