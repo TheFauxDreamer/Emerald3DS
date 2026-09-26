@@ -149,6 +149,10 @@ void UiSetSelectedMon(u8 index);
 // it too, so a mark means the same on both.
 void UiOffenceArrow(int x, int y, u16 mul);
 
+// The exact multiplier ("x2", "x0.5", a dim "x1") right-aligned to xRight on
+// the glyph row at y, with UiOffenceArrow to its left. Returns its left edge.
+int  UiMultiplierRight(int xRight, int y, u16 mul);
+
 // ---- per-tab entry points ----
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);

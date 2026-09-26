@@ -63,8 +63,9 @@ none of it.
 
 **Fight from the touch screen.** While you are choosing what to do in a
 battle, the PARTY tab becomes a battle panel, as on the DS: your four moves as
-big buttons, each with its type, PP and effectiveness arrows, and your team in
-a row below. Tap a move to use it. Tap a Pokémon to see its card, then SWITCH
+big buttons, each with its type, PP and how well it hits the opponent (x2,
+x0.5, x0, or a dim x1 when neutral, with a coloured arrow), and your team in a
+row below. A Pokémon's card says why it cannot switch in, if it cannot. Tap a move to use it. Tap a Pokémon to see its card, then SWITCH
 IN to send it out, or INFO for its full details. Both go through the game's
 own battle menus, so the game's rules and messages still apply: a move with no
 PP, or one that is Disabled or Taunted, gets the game's own refusal, and a

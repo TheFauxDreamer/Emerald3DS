@@ -340,6 +340,47 @@ void UiOffenceArrow(int x, int y, u16 mul)
         UiArrow(x, y, FALSE, (mul == 0) ? UI_COL_HP_LOW : UI_COL_HP_MID);
 }
 
+// The exact multiplier as text, right-aligned to `xRight` on the glyph row at
+// `y`, with the offence arrow to its left. The game's x10 scale reads 40, 20,
+// 10, 5, 2 (a quarter, rounded down by the chart walk) and 0.
+//
+// The number is in the theme's text colour, because the 20 window frames make
+// a coloured number hard to read on some of them; the arrow carries the colour.
+// A neutral x1 is dim and has no arrow. Returns the left edge of what it drew,
+// or xRight for UI_MATCHUP_NA.
+int UiMultiplierRight(int xRight, int y, u16 mul)
+{
+    u8 label[8];
+    const char *text;
+    int w;
+
+    if (mul == UI_MATCHUP_NA)
+        return xRight;
+    else if (mul >= 40)
+        text = "x4";
+    else if (mul >= 20)
+        text = "x2";
+    else if (mul >= TYPE_MUL_NORMAL)
+        text = "x1";
+    else if (mul >= 5)
+        text = "x0.5";
+    else if (mul > 0)
+        text = "x0.25";
+    else
+        text = "x0";
+
+    w = UiTextRight(xRight, y, UiAscii(label, text, sizeof(label)),
+                    (mul == TYPE_MUL_NORMAL) ? UI_COL_DIM : UiThemeText(),
+                    UiThemeShadow());
+
+    if (mul == TYPE_MUL_NORMAL)
+        return xRight - w;
+
+    UiOffenceArrow(xRight - w - ARROW_GAP - UI_ARROW_W,
+                   y + (UI_GLYPH_H - UI_ARROW_H) / 2, mul);
+    return xRight - w - ARROW_GAP - UI_ARROW_W;
+}
+
 // Two arrows, only when the matchup is not neutral. Neutral is the usual case.
 //
 // The direction gives the meaning and the color supports it: up and green is
@@ -741,23 +782,14 @@ static void DrawMoveList(struct Pokemon *mon)
         DrawMoveRow(mon, i);
 }
 
-// The exact multiplier against the opponent, right-aligned on the type line,
-// after the same arrow as the row. The number is in the theme's text colour,
-// because the 20 window frames make a coloured number hard to read on some of
-// them; the arrow carries the colour. In a double battle it is the left
-// opponent's, or the right one's when the left one is gone.
-//
-// The values are the game's x10 scale: 40, 20, 10, 5, 2 (a quarter, rounded
-// down by the chart walk) and 0.
+// The exact multiplier against the opponent, right-aligned on the type line
+// (UiMultiplierRight). In a double battle it is the left opponent's, or the
+// right one's when the left one is gone.
 #define MOVEINFO_MUL_RIGHT (MOVEINFO_X + MOVEINFO_W)
 
 static void DrawMoveInfoMultiplier(struct Pokemon *mon, u16 move)
 {
-    u8 label[8];
-    const char *text;
     u8 position;
-    u16 mul;
-    int x;
 
     if (UiMatchupFoePresent(B_POSITION_OPPONENT_LEFT))
         position = B_POSITION_OPPONENT_LEFT;
@@ -766,30 +798,9 @@ static void DrawMoveInfoMultiplier(struct Pokemon *mon, u16 move)
     else
         return;
 
-    mul = UiMatchupMove(mon, move, position);
-
-    if (mul == UI_MATCHUP_NA)
-        return;
-    else if (mul >= 40)
-        text = "x4";
-    else if (mul >= 20)
-        text = "x2";
-    else if (mul >= TYPE_MUL_NORMAL)
-        text = "x1";
-    else if (mul >= 5)
-        text = "x0.5";
-    else if (mul > 0)
-        text = "x0.25";
-    else
-        text = "x0";
-
-    x = UiTextRight(MOVEINFO_MUL_RIGHT,
-                    MOVEINFO_Y + (UI_TYPE_ICON_H - UI_GLYPH_H) / 2,
-                    UiAscii(label, text, sizeof(label)),
-                    UiThemeText(), UiThemeShadow());
-
-    UiOffenceArrow(MOVEINFO_MUL_RIGHT - x - ARROW_GAP - UI_ARROW_W,
-                     MOVEINFO_Y + (UI_TYPE_ICON_H - UI_ARROW_H) / 2, mul);
+    UiMultiplierRight(MOVEINFO_MUL_RIGHT,
+                      MOVEINFO_Y + (UI_TYPE_ICON_H - UI_GLYPH_H) / 2,
+                      UiMatchupMove(mon, move, position));
 }
 
 // The tapped move's details, in the space of the stats block.
