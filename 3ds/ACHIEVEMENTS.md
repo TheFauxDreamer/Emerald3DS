@@ -6,7 +6,7 @@ this list still matches them (see
 [Keeping this list current](#keeping-this-list-current)).
 Part E of [ROADMAP.md](ROADMAP.md) has what is left to do.
 
-**85 achievements**: 67 main, 18 post-game.
+**86 achievements**: 68 main, 18 post-game.
 
 - **Two pages.** MAIN holds everything that can be done up to the Hall of Fame.
   POST-GAME holds what only opens up after it. Its rows read "Hidden
@@ -98,6 +98,7 @@ knockout, so these still unlock with the randomiser on.
 |---|---|---|---|
 | 31 | Nothing Happened | Use Splash in battle | `GAME_STAT_USED_SPLASH` reaches 1 |
 | 30 | Battle Hardened | Fight 100 trainer battles | `GAME_STAT_TRAINER_BATTLES` reaches 100. Counter |
+| 85 | Bested a True Rival | Beat another player in a link battle | `GAME_STAT_LINK_BATTLE_WINS` reaches 1. Only `CB2_ReturnFromCableClubBattle` (`src/cable_club.c`) raises it, after a single or a double, and `UpdatePlayerLinkBattleRecords` (`src/battle_records.c`) drops a Union Room battle. No Battle Frontier or Battle Tower win counts. Only a New Game clears it |
 
 ### Extras (blue)
 
@@ -183,6 +184,6 @@ for the store. The `achievements-list` job in
 
 - **Ids are permanent.** An achievement's id is its bit in `achievements.bin`,
   so a new one takes the next unused id and a retired one's id is never handed
-  out again. Row order is free. The next unused id is **85**.
+  out again. Row order is free. The next unused id is **86**.
 - **Text has to fit:** 212px for a title and 268px for a description, measured
   by the debug page, since the TROPHY tab does not clip.

@@ -1173,12 +1173,13 @@ run (published as the `emerald3ds-elf` artifact alongside `emerald3ds.map`).
 
 # Part E: Achievements (built in; RetroAchievements later, maybe)
 
-The built-in set is done: 85 achievements on MAIN and POST-GAME pages (the
+The built-in set is done: 86 achievements on MAIN and POST-GAME pages (the
 post-game ones hidden until the Hall of Fame), the TROPHY tab and the unlock
 toast. [ACHIEVEMENTS.md](ACHIEVEMENTS.md) is the full list. What is left:
 
 - **Trade-dependent goals.** The Cable Club from Part C works now, and the
-  first row that needs it is in: Where'd the Cable Go?, one link trade. The
+  rows that need it are in: Where'd the Cable Go?, one link trade, and Bested
+  a True Rival, one link battle won. The
   complete Hoenn Pokedex and anything much past 200 in the National one still
   need trade evolutions, so they were left out rather than shipped
   unearnable. They can be added, each with the next unused id (ids are
