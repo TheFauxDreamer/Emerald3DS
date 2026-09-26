@@ -88,11 +88,13 @@ caption when they apply:
   game would let you use them. A Pokémon that knows Dig goes first, because it
   is free; otherwise it uses one Escape Rope from your bag. It asks before it
   acts, and names which one.
-- **WILD PKMN** lists what lives there: every wild species for that place with
-  its types, marked with a ball if you have caught it. Anything you have not
-  seen yet is a silhouette, so the list reads as what is left to find rather
-  than a spoiler for it. It follows the randomiser when that is on, and it
-  follows you from room to room inside a cave.
+- **WILD PKMN** lists what lives there, like the DexNav: one list for each way
+  to meet them (LAND, SURF, Rock SMASH, and the OLD, GOOD and SUPER rods), with
+  each Pokémon's types, level range and chance, most common first. A ball marks
+  the ones you have caught. Anything you have not seen yet is a silhouette, with
+  its level and chance but no name, so the list reads as what is left to find
+  rather than a spoiler for it. It follows the randomiser when that is on, and
+  it follows you from room to room inside a cave.
 
 **TROPHY.** 86 achievements, earned by playing, from choosing your starter and
 getting the Bike through the eight badges, the HMs, the Master Ball and the

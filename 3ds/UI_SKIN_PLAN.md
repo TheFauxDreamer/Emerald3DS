@@ -150,7 +150,7 @@ design record. Each is exactly 320x240, or an integer 2x / 4x multiple.
 | `bag.png` | pockets, list, details, USE | |
 | `bag_picker.png` | the target picker | a 24px header over a 2x3 grid of 160x56 |
 | `map.png` | the region map and caption band | the caption's FLY, ESCAPE and WILD PKMN buttons and the YES/NO confirm |
-| `encounters.png` | MAP's pushed view ([view_encounters.c](ui/view_encounters.c)) | header, 4x2 grid, pagers, BACK |
+| `encounters.png` | MAP's pushed view ([view_encounters.c](ui/view_encounters.c)) | header with the method name, the method chips, 3x2 grid with level and chance per cell, pagers, BACK |
 | `dex.png` | list and entry screen | |
 | `trophy.png` | the TROPHY tab ([tab_trophy.c](ui/tab_trophy.c)) | the MAIN and POST-GAME page buttons with their counts, list rows in the six category colors, a hidden row, NEW tags, the pagers |
 | `extra_p1.png`, `extra_p2.png`, `extra_p3.png`, `extra_p4.png` | EXTRA's four settings pages | the check rows (a box, a label and a dim hint, the whole row a target) as well as the button rows. Page 6, the debug menu, exists only under `CTR_DEBUG_MENU` and reuses page 3's grid |
@@ -360,7 +360,7 @@ not.
 **`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:477](ui/ui_draw.c#L477))
 has **16 call sites in ten files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
-encounters view ([view_encounters.c:414](ui/view_encounters.c#L414)), and all
+encounters view ([view_encounters.c:663](ui/view_encounters.c#L663)), and all
 three overlays ([ui_achtoast.c:122](ui/ui_achtoast.c#L122),
 [bottom_screen.c:469](ui/bottom_screen.c#L469),
 [ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
@@ -487,7 +487,7 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 | Kind | Where |
 |---|---|
 | named helper | `DrawButtonH` ([tab_extra.c:182](ui/tab_extra.c#L182)); LINK's `DrawButton` ([ui_link.c:76](ui/ui_link.c#L76)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:948](ui/tab_party.c#L948)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:982](ui/tab_party.c#L982)); encounters pagers and BACK ([view_encounters.c:383](ui/view_encounters.c#L383)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
+| inline outline | BAG pagers, USE ([tab_bag.c:416](ui/tab_bag.c#L416)) and CANCEL; DEX pagers and BACK ([tab_dex.c:404](ui/tab_dex.c#L404)); PARTY BACK ([tab_party.c:982](ui/tab_party.c#L982)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:516](ui/bottom_screen.c#L516)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:221](ui/ui_link.c#L221)) |
 | check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:204](ui/tab_extra.c#L204)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
@@ -612,7 +612,7 @@ measures and truncates it, and any re-fit of that page must keep the limit.
 Modal state lives in file statics that survive a tab switch, so leaving a view
 by tapping another tab and coming back re-enters it: `sDetailOpen` (PARTY),
 `sEntryOpen` (DEX), `sView` (BAG's picker), `sOpen`
-([view_encounters.c:107](ui/view_encounters.c#L107), MAP's encounters view),
+([view_encounters.c:166](ui/view_encounters.c#L166), MAP's encounters view),
 MAP's fly confirm, `sConfirm` ([tab_map.c:132](ui/tab_map.c#L132)), and LINK's
 card view, `sCardOpen` ([ui_link.c:72](ui/ui_link.c#L72)). Known bug,
 step 0 of `SECOND_SCREEN_PLAN.md`. Folding the reset into the tab switch is a
