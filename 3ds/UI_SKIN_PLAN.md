@@ -30,7 +30,7 @@ The bottom screen works but was never designed. It is drawn entirely from
 `UiFillRect` / `UiRect` primitives, and its whole visual identity is borrowed:
 every panel is one of Emerald's 20 option-menu window frames, and every ink
 colour is read back out of `gStandardMenuPalette` at runtime
-([ui_draw.c:491](ui/ui_draw.c#L491)). That was the right call while the port was
+([ui_draw.c:560](ui/ui_draw.c#L560)). That was the right call while the port was
 proving it could read game state at all, and it is why the code is littered with
 defensive decisions (outlines on every arrow, a chevron in theme colours, a Poke
 Ball that carries its own dark edge, a shiny notice that paints its own dark
@@ -88,7 +88,7 @@ uses it for Spinda's spots.
 |---|---|---|
 | **Indexed PNG, colour type 3** | `ReadPng` rejects RGB and RGBA outright | [convert_png.c:90](../tools/gbagfx/convert_png.c#L90) |
 | **Bit depth 8** | a depth-4 file is re-packed as one flat bitstream that ignores per-row padding, so any odd width shears silently | `ConvertBitDepth`, [convert_png.c:48](../tools/gbagfx/convert_png.c#L48) |
-| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:186](ui/ui_draw.c#L186) |
+| **Palette index 0 is transparent, and nothing else may use it** | there is no alpha channel and no blending anywhere in the blitters | `UiBlit4bppTile`, [ui_draw.c:253](ui/ui_draw.c#L253) |
 | **256 colours maximum per sheet** | one byte per pixel | `WritePlainImage` |
 
 Aseprite, GIMP and Photoshop all export this (Aseprite: Indexed mode, then Save
@@ -297,7 +297,7 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
 - The sheet table is `const struct { const u8 *px; const u16 *pal; u16 w, h,
   palCount; } sSheets[UI_SHEET_COUNT]`, with a parallel
   `static u16 sPal565[COUNT][256]` in `.bss` that `UiGfxInit` fills once via
-  the existing `UiLoadPal` ([ui_draw.c:94](ui/ui_draw.c#L94)). Convert
+  the existing `UiLoadPal` ([ui_draw.c:158](ui/ui_draw.c#L158)). Convert
   `palCount` entries, taken from `ARRAY_COUNT` of the `INCGFX` array, **not
   256**: `.gbapal` is only as long as the PNG's PLTE, and reading 256 would run
   past a shorter array. No const-cast, no per-draw conversion, no
@@ -310,10 +310,11 @@ void UiNineSlice(int x, int y, int w, int h, int sheet, int band);
   else repaints those rows. Every existing primitive in `ui_draw.c` does this;
   copy one.
 - Every entry point clamps against `0..UI_W` / `0..UI_H` exactly the way
-  `UiFillRect` ([ui_draw.c:125](ui/ui_draw.c#L125)) already does, so an
-  off-screen or oversized request is a no-op rather than an overrun. If `UiClipPush/Pop`
-  (`SECOND_SCREEN_PLAN.md` step 1) lands first, they clamp against **the clip**
-  instead, or a panel inside a clipped row paints over its neighbours.
+  `UiFillRect` ([ui_draw.c:189](ui/ui_draw.c#L189)) already does, so an
+  off-screen or oversized request is a no-op rather than an overrun. Since
+  `SECOND_SCREEN_PLAN.md` step 1 shipped, that means against **the clip**,
+  `gUiClip`, not the screen, or a panel inside a clipped row paints over its
+  neighbours.
 - `band` selects one state out of a stacked strip, so the three button states
   are one sheet and one palette rather than three of each.
 - Nine-slice **tiles** its edges rather than stretching them. For a 1px edge the
@@ -356,7 +357,7 @@ skin when the wireframes are drawn.
 Two function bodies and one colour block change, and about 350 call sites do
 not.
 
-**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:408](ui/ui_draw.c#L408))
+**`UiWindowFrame(tx, ty, wTiles, hTiles)`** ([ui_draw.c:477](ui/ui_draw.c#L477))
 has **16 call sites in ten files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
 encounters view ([view_encounters.c:414](ui/view_encounters.c#L414)), and all
@@ -368,7 +369,7 @@ Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
 function a one-line wrapper, so the 8px grid stops being a constraint on
 anything written from here on.
 
-**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:491](ui/ui_draw.c#L491))
+**`UiThemeText()` / `UiThemeShadow()`** ([ui_draw.c:560](ui/ui_draw.c#L560))
 are called **about 240 times**. Return the skin's ink colours instead of reading
 `gStandardMenuPalette` and every label on the screen becomes consistent in one
 edit.
@@ -384,7 +385,7 @@ drives the bottom screen it is a stale input to the repaint hash. `UiFrameId()`
 itself stays: it is still correct, and the top screen still uses the setting.
 
 Replace the in-game `UiClear(UI_COL_BG)` in `Redraw()`
-([bottom_screen.c:770](ui/bottom_screen.c#L770)) with a `UiTileFill` of the
+([bottom_screen.c:774](ui/bottom_screen.c#L774)) with a `UiTileFill` of the
 backdrop. The pre-game `UiClear(0)` a few lines above it stays black: that is
 the screen under the title, not a skin surface. Since this plan was first
 written, that screen also shows TOUCH TO START and the build id
@@ -406,7 +407,7 @@ edits at all.** That is the checkpoint worth building to before anything else.
 the tab bar. It paints the still screen (ground, tab, strip, toast, notice, bar), takes
 `UiSnapshot()` if `AnimatedLayerActive()`, and only then runs
 `DrawAnimatedLayer()` for the pieces that move. An animation step
-(`RedrawAnimated`, [:848](ui/bottom_screen.c#L848)) puts a few rects back from
+(`RedrawAnimated`, [:852](ui/bottom_screen.c#L852)) puts a few rects back from
 the snapshot and redraws only those.
 
 Since `af5780b` the snapshot is taken only while the animated layer has
@@ -535,7 +536,7 @@ icons are:
 1. `UiButton` records each button it draws (rect, label or glyph, state) in a
    small static table, cleared at the top of `Redraw()`.
 2. `ui_draw.c` gains `UiSetPointer(const CtrTouchState *)`, called once per
-   frame from `CtrBottomUpdate` ([bottom_screen.c:870](ui/bottom_screen.c#L870)).
+   frame from `CtrBottomUpdate` ([bottom_screen.c:875](ui/bottom_screen.c#L875)).
 3. `DrawAnimatedLayer` gains a last step, after whichever tenant it ran: while
    the pointer is `touching`, find the recorded button under it, restore its
    rect from the snapshot and draw it in the pressed band.
@@ -598,9 +599,9 @@ clipping.** Every panel width in the tree is hand-measured against the longest
 known game string; BAG's list panel is 24 tiles because that leaves exactly
 108px, the width of the widest item description line in the game
 ([tab_bag.c:41](ui/tab_bag.c#L41)). Narrowing any panel that shows game text
-means re-measuring that string, or implementing `UiClipPush/Pop` first (step 1
-of `SECOND_SCREEN_PLAN.md`; the blitters already clamp against the screen, so
-each clamps against the clip instead, at no extra per-pixel cost). LINK shows a
+means re-measuring that string, or drawing it through `UiTextClipped` /
+`UiTextWrapped` inside a `UiClipPush` (`SECOND_SCREEN_PLAN.md` step 1, shipped).
+LINK shows a
 partner's name, which is player-authored: `DrawNameClipped` in `ui_card.c`
 measures and truncates it, and any re-fit of that page must keep the limit.
 

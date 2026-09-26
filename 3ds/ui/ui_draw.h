@@ -39,6 +39,37 @@ void UiTouchRows(int y, int h);
 void UiDirtyRows(int *top, int *bot);
 void UiClearDirtyRows(void);
 
+// ---- the clip rect --------------------------------------------------------
+//
+// Every primitive that writes the framebuffer clips against this rect, and not
+// only against the screen: the fills, the rect, the tile and row blits, and the
+// text. The rect is the full screen unless a caller pushes a smaller one, so
+// code that never pushes draws as before.
+//
+// Push around anything whose size is not known in advance: a row of a list, a
+// cell of a grid, a panel that holds player text. A push is intersected with
+// the rect that is already there, so a nested push can only make it smaller.
+// Pop each push in the same function.
+//
+// UiClear ignores the clip: it is the whole-screen reset. UiRestoreRect
+// ignores it too, because it puts back pixels that were already clipped when
+// they were drawn.
+//
+// The shell resets it before each paint (UiClipReset), so a missing pop costs
+// one paint, not every paint after it.
+#define UI_CLIP_DEPTH 4
+
+// x1 and y1 are exclusive. Read it; change it only through the calls below.
+struct UiClipRect
+{
+    s16 x0, y0, x1, y1;
+};
+extern struct UiClipRect gUiClip;
+
+void UiClipPush(int x, int y, int w, int h);
+void UiClipPop(void);
+void UiClipReset(void);
+
 u16  UiBgr555ToRgb565(u16 bgr555);
 
 // Convert a GBA 16-color palette once. The per-pixel work is then a table
