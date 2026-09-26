@@ -158,7 +158,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/tab_bag.c](ui/tab_bag.c) | 670 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
-| [ui/tab_map.c](ui/tab_map.c) | 778 | Region map decode and cache, player tracking, fly-from-map, and the caption band that opens the encounters view |
+| [ui/tab_map.c](ui/tab_map.c) | 1006 | Region map decode and cache, player tracking, fly-from-map, ESCAPE (DIG or an ESCAPE ROPE from the player's own location), and the caption band that opens the encounters view. **Writes game state**, through the same gates as BAG (`OverworldIdle`) |
 | [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 552 / 51 | The wild encounter list for the place the MAP caption names: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
 | [ui/tab_dex.c](ui/tab_dex.c) | 514 | Dex list with cursor and scroll, entry screen |
 | [ui/tab_extra.c](ui/tab_extra.c) | 944 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 LINK (drawn by `ui_link.c`), page 6 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
@@ -574,7 +574,7 @@ MAP's fly row is the one other thing that depends on the party, and
   That is why `top[4]` is a dispatch, not an XOR of everything.
 - **Never share a slot between two keys.** Two contributions that happen to
   cancel show up as a panel that stops updating, which is the exact failure the
-  hash exists to prevent. See the comment at [tab_map.c:634](ui/tab_map.c#L634).
+  hash exists to prevent. See the comment at [tab_map.c:804](ui/tab_map.c#L804).
 - **Most new views need no key at all.** Static data (a learnset, a type chart,
   base stats) changes only under the view's own touch handler, which already
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
@@ -1124,7 +1124,7 @@ in its own input, so an overrun lands in the neighbouring statics.
 that decompresses to 8192 bytes while `gMonFrontPicTable` reports the size of
 one frame, and the 6KB overrun repainted the cached window-frame palette. The
 symptom was every other tab's border changing colour. See
-[ui_draw.c:618](ui/ui_draw.c#L618) and [tab_map.c:131](ui/tab_map.c#L131).
+[ui_draw.c:618](ui/ui_draw.c#L618) and [tab_map.c:140](ui/tab_map.c#L140).
 
 ---
 
@@ -1206,7 +1206,7 @@ screen, so driving one from here would fight the overworld for BG layers.
 
 ### Leaving the overworld
 
-`DoFly()` ([tab_map.c:313](ui/tab_map.c#L313)) is the reference for replacing
+`DoFly()` ([tab_map.c:331](ui/tab_map.c#L331)) is the reference for replacing
 `gMain.callback2` from the bottom screen. It is safe only because
 `CtrBottomUpdate` runs at the end of a frame. Before leaving you **must** call:
 

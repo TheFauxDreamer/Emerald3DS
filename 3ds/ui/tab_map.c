@@ -4,9 +4,9 @@
 // accessors are in the PLATFORM_3DS block of src/region_map.c, because the data
 // is file-static there.
 //
-// The map only reads. The fly controls write. They follow the rules of BAG's
-// item use: the game's own checks, a separate tap to commit, and a new check at
-// that moment. See FlyState.
+// The map only reads. The fly and escape controls write. They follow the rules
+// of BAG's item use: the game's own checks, a separate tap to commit, and a new
+// check at that moment. See FlyState and EscState.
 //
 // Three facts about the art:
 // - The background is 8bpp, not 4bpp. UiBlit4bppTile cannot draw it.
@@ -36,6 +36,10 @@
 #include "palette.h"                  // gPaletteFade
 #include "battle.h"                   // struct DisableStruct
 #include "party_menu.h"               // gPartyMenu.slotId selects the flyer
+#include "item.h"                     // CheckBagHasItem, RemoveBagItem
+#include "item_use.h"                 // CanUseDigOrEscapeRopeOnCurMap
+#include "event_scripts.h"            // EventScript_UseDig
+#include "constants/items.h"
 #include "constants/region_map_sections.h"
 #include "constants/flags.h"
 #include "constants/moves.h"
@@ -89,7 +93,8 @@
 
 // WILD PKMN opens the encounter list for the place in the caption. It shares
 // FLY's row. The right end of the caption holds [FLY] [WILD PKMN], one of them,
-// or neither.
+// or neither. ESCAPE uses FLY's slot, and the two never show together: FLY is
+// for a selected town, ESCAPE for the player's own location.
 //
 // WILD PKMN has a fixed slot at the right, and FLY moves inward when both show.
 // Most places have wild Pokemon, but FLY shows only on the towns that the
@@ -125,6 +130,10 @@ static s8 sPickY = -1;
 // TRUE when the selected destination waits for YES. Cleared when the selection
 // moves, so a confirm always belongs to the current town.
 static bool8 sConfirm;
+
+// TRUE when ESCAPE waits for YES. It belongs to the player's own location, so
+// any tap on the map clears it.
+static bool8 sEscConfirm;
 
 // ---------------------------------------------------------------- loading ---
 //
@@ -239,6 +248,30 @@ static u8 FlyerSlot(void)
     return PARTY_SIZE;
 }
 
+// The engine-state gate for FLY and ESCAPE: the same four conditions as the
+// BAG tab, and no fade. This runs from CtrBottomUpdate, which does not know
+// what the frame did. Both controls leave the map, so this gate is even more
+// important here.
+static bool8 OverworldIdle(void)
+{
+    if (gMain.inBattle)
+        return FALSE;
+    if (gMain.callback2 != CB2_Overworld)
+        return FALSE;
+    if (ArePlayerFieldControlsLocked())
+        return FALSE;
+    if (ScriptContext_IsEnabled())
+        return FALSE;
+
+    // Each exit from the overworld in the game waits for this: the start menu,
+    // item use and the PC all check `if (!gPaletteFade.active)`. A fade means
+    // that a transition has started. A second transition breaks the map.
+    if (gPaletteFade.active)
+        return FALSE;
+
+    return TRUE;
+}
+
 static u8 FlyState(mapsec_u16_t dest)
 {
     u8 type;
@@ -261,22 +294,7 @@ static u8 FlyState(mapsec_u16_t dest)
     if (type == MAPSECTYPE_CITY_CANTFLY)
         return FLY_UNVISITED;
 
-    // The same gate as the BAG tab. This runs from CtrBottomUpdate, which does
-    // not know what the frame did. A fly replaces the main callback, so this
-    // gate is even more important here.
-    if (gMain.inBattle)
-        return FLY_BUSY;
-    if (gMain.callback2 != CB2_Overworld)
-        return FLY_BUSY;
-    if (ArePlayerFieldControlsLocked())
-        return FLY_BUSY;
-    if (ScriptContext_IsEnabled())
-        return FLY_BUSY;
-
-    // Each exit from the overworld in the game waits for this: the start menu,
-    // item use and the PC all check `if (!gPaletteFade.active)`. A fade means
-    // that a transition has started. A second transition breaks the map.
-    if (gPaletteFade.active)
+    if (!OverworldIdle())
         return FLY_BUSY;
 
     // SetUpFieldMove_Fly. The party menu refuses indoors, in a cave or
@@ -354,6 +372,114 @@ static void DoFly(mapsec_u16_t mapSecId)
     sPickX = -1;
     sPickY = -1;
     sConfirm = FALSE;
+    sEscConfirm = FALSE;
+    UiMarkDirty();
+}
+
+// ---------------------------------------------------------------- escape ----
+//
+// ESCAPE takes the player out of a cave or a building to the place they went
+// in, as DIG and the ESCAPE ROPE do. It is for the player's own location, so it
+// shows only while no place is selected. The gates are the game's own:
+//
+//   engine state   OverworldIdle, as for FLY
+//   the place      CanUseDigOrEscapeRopeOnCurMap (both DIG and the rope)
+//   the means      a mon that knows DIG, as the party menu lists it, or an
+//                  ESCAPE ROPE in the bag
+//
+// DIG has no badge gate: only HMs have one (CursorCb_FieldMove). DIG comes
+// first, because the rope is used up and DIG is free.
+enum {
+    ESC_DIG,
+    ESC_ROPE,
+    ESC_NONE,       // no control: the place, the engine or the means says no
+};
+
+// The party slot of the mon that digs, or PARTY_SIZE. The same rules as
+// FlyerSlot.
+static u8 DiggerSlot(void)
+{
+    u8 i, j;
+
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gPlayerParty[i];
+
+        if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+            continue;
+        if (GetMonData(mon, MON_DATA_IS_EGG))
+            continue;
+
+        for (j = 0; j < MAX_MON_MOVES; j++)
+            if (GetMonData(mon, MON_DATA_MOVE1 + j) == MOVE_DIG)
+                return i;
+    }
+
+    return PARTY_SIZE;
+}
+
+// There is no refusal text, unlike FLY. The player did not ask about this
+// place, and "can't escape" on every route is noise. The button shows or it
+// does not.
+static u8 EscState(void)
+{
+    if (!OverworldIdle())
+        return ESC_NONE;
+    if (CanUseDigOrEscapeRopeOnCurMap() != TRUE)
+        return ESC_NONE;
+    if (DiggerSlot() < PARTY_SIZE)
+        return ESC_DIG;
+    if (CheckBagHasItem(ITEM_ESCAPE_ROPE, 1))
+        return ESC_ROPE;
+    return ESC_NONE;
+}
+
+// TRUE while the player is between two tiles.
+//
+// The game uses DIG and the rope from a menu, so the player always stands
+// still. This screen does not stop the d-pad. StartEscapeRopeFieldEffect
+// freezes every object and then waits for the player's held movement to end. A
+// walk that is frozen never ends, so the screen fades to black and stays
+// there. DIG's script waits for the player (lockall), but check it for both.
+//
+// Only the commit checks this. The button does not hide during a walk, or it
+// would flicker at each step.
+static bool8 PlayerIsMoving(void)
+{
+    struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+
+    if (gPlayerAvatar.tileTransitionState != T_NOT_MOVING)
+        return TRUE;
+
+    return player->heldMovementActive && !player->heldMovementFinished;
+}
+
+static void DoEscape(u8 state)
+{
+    if (state == ESC_DIG)
+    {
+        // DiggerSlot is never PARTY_SIZE here: EscState found the mon.
+        u8 slot = DiggerSlot();
+
+        // FieldCallback_Dig (src/fldeff_dig.c), the step after the party menu
+        // closes, without the menu. It reads the mon from the party menu's
+        // cursor, so set the cursor, as DoFly does.
+        gPartyMenu.slotId = (s8)slot;
+        Overworld_ResetStateAfterDigEscRope();
+        gFieldEffectArguments[0] = slot;
+        ScriptContext_SetupScript(EventScript_UseDig);
+    }
+    else
+    {
+        // ItemUseOnFieldCB_EscapeRope, then Task_UseDigEscapeRopeOnField
+        // (src/item_use.c), without the message box. The spin is the feedback.
+        Overworld_ResetStateAfterDigEscRope();
+        RemoveBagItem(ITEM_ESCAPE_ROPE, 1);
+        ResetInitialPlayerAvatarState();
+        StartEscapeRopeFieldEffect();
+    }
+
+    sEscConfirm = FALSE;
     UiMarkDirty();
 }
 
@@ -475,6 +601,8 @@ static int WildBtnX(mapsec_u16_t mapSecId)
     // a third button next to YES causes wrong taps.
     if (PickIsSet() && sConfirm && FlyState(mapSecId) == FLY_READY)
         return -1;
+    if (!PickIsSet() && sEscConfirm && EscState() != ESC_NONE)
+        return -1;
 
     // Otherwise, always the same slot. See the note on WILD_BTN_X.
     return WILD_BTN_X;
@@ -488,6 +616,26 @@ static int WildBtnX(mapsec_u16_t mapSecId)
 static int FlyBtnX(mapsec_u16_t mapSecId)
 {
     return WildBtnX(mapSecId) >= 0 ? FLY_INNER_X : FLY_BTN_X;
+}
+
+// ESCAPE takes FLY's slot, by the same rule.
+static int EscBtnX(mapsec_u16_t mapSecId)
+{
+    return FlyBtnX(mapSecId);
+}
+
+// The ESCAPE confirm: the same row shape as FLY's. The question names the
+// means, because DIG is free and the rope is used up.
+static void DrawEscConfirm(u8 state)
+{
+    u8 label[24];
+
+    UiTextRight(CFM_ASK_X, CAP_TEXT_Y,
+                UiAscii(label, state == ESC_DIG ? "DIG?" : "ESCAPE ROPE?",
+                        sizeof(label)),
+                UiThemeText(), UiThemeShadow());
+    DrawBtn(CFM_NO_X, CFM_W, "NO", FALSE);
+    DrawBtn(CFM_YES_X, CFM_W, "YES", TRUE);
 }
 
 // The right end of the caption row: a FLY button, the reason for no button, or
@@ -574,10 +722,32 @@ static void DrawCaption(void)
     }
     else
     {
-        landmark = GetLandmarkName((mapsec_u8_t)mapSecId, posWithinMapSec, 0);
-        if (landmark != NULL)
-            UiTextRight(textRight, CAP_TEXT_Y, landmark,
-                        UI_COL_DIM, UiThemeShadow());
+        u8 esc = EscState();
+
+        // A confirm uses the full row, as FLY's does, so no landmark.
+        if (esc != ESC_NONE && sEscConfirm)
+        {
+            DrawEscConfirm(esc);
+        }
+        else
+        {
+            if (esc != ESC_NONE)
+            {
+                int escX = EscBtnX(mapSecId);
+
+                DrawBtn(escX, FLY_BTN_W, "ESCAPE", FALSE);
+                textRight = escX - 8;
+            }
+
+            // With ESCAPE on the row, a long landmark can reach the place
+            // name. Then leave the landmark out. The name matters more.
+            landmark = GetLandmarkName((mapsec_u8_t)mapSecId, posWithinMapSec, 0);
+            if (landmark != NULL
+             && textRight - UiTextWidth(landmark)
+                >= CAP_MARGIN + UiTextWidth(name) + 8)
+                UiTextRight(textRight, CAP_TEXT_Y, landmark,
+                            UI_COL_DIM, UiThemeShadow());
+        }
     }
 
     if (wildX >= 0)
@@ -646,6 +816,15 @@ u32 UiMapStateKey(void)
 
         key ^= fly * 2654435761u;
     }
+    else
+    {
+        // The inputs of the ESCAPE control, for the same reasons as the fly
+        // row: a script that ends, a DIG mon put in the PC, the last rope
+        // used. Its own multiplier, so it cannot cancel the others.
+        u32 esc = (u32)EscState() | ((u32)(sEscConfirm != 0) << 2);
+
+        key ^= esc * 0xC2B2AE35u;
+    }
 
     // The inputs of the encounter panel: the page, the map, and whether each
     // mon on the page is seen. Zero while it is closed.
@@ -700,6 +879,51 @@ static bool8 HandleFlyTouch(const CtrTouchState *t)
     return FALSE;
 }
 
+// The ESCAPE control. Returns TRUE when it used the tap. Only while no place is
+// selected.
+static bool8 HandleEscTouch(const CtrTouchState *t)
+{
+    u8 posWithinMapSec = 0;
+    mapsec_u16_t mapSecId;
+    u8 state = EscState();
+
+    // Check again at the moment of the tap, as HandleFlyTouch does.
+    if (state == ESC_NONE)
+    {
+        sEscConfirm = FALSE;
+        return FALSE;
+    }
+
+    if (!sEscConfirm)
+    {
+        mapSecId = CaptionMapSec(&posWithinMapSec);
+        if (!UiHit(t, EscBtnX(mapSecId), FLY_BTN_Y, FLY_BTN_W, FLY_BTN_H))
+            return FALSE;
+
+        sEscConfirm = TRUE;
+        UiMarkDirty();
+        return TRUE;
+    }
+
+    if (UiHit(t, CFM_NO_X, FLY_BTN_Y, CFM_W, FLY_BTN_H))
+    {
+        sEscConfirm = FALSE;
+        UiMarkDirty();
+        return TRUE;
+    }
+
+    if (UiHit(t, CFM_YES_X, FLY_BTN_Y, CFM_W, FLY_BTN_H))
+    {
+        // Keep the confirm up. The next tap, after the step ends, acts. See
+        // PlayerIsMoving.
+        if (!PlayerIsMoving())
+            DoEscape(state);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 void UiMapTouch(const CtrTouchState *t)
 {
     int tx, ty;
@@ -728,6 +952,8 @@ void UiMapTouch(const CtrTouchState *t)
         // buttons show.
         if (PickIsSet() && HandleFlyTouch(t))
             return;
+        if (!PickIsSet() && HandleEscTouch(t))
+            return;
 
         capMapSec = CaptionMapSec(&posWithinMapSec);
         wildX = WildBtnX(capMapSec);
@@ -744,11 +970,12 @@ void UiMapTouch(const CtrTouchState *t)
     if (t->y < MAP_PY || t->y >= MAP_PY + MAP_TH * 8
      || t->x < MAP_PX || t->x >= MAP_PX + MAP_TW * 8)
     {
-        if (PickIsSet())
+        if (PickIsSet() || sEscConfirm)
         {
             sPickX = -1;
             sPickY = -1;
             sConfirm = FALSE;
+            sEscConfirm = FALSE;
             UiMarkDirty();
         }
         return;
@@ -774,5 +1001,6 @@ void UiMapTouch(const CtrTouchState *t)
     // moves to the next, and the next tap flies to a place that the player did
     // not confirm.
     sConfirm = FALSE;
+    sEscConfirm = FALSE;
     UiMarkDirty();
 }
