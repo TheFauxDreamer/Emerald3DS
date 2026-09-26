@@ -197,7 +197,7 @@ to the current 192px content area:
 | Overlay | Rect | Defined at |
 |---|---|---|
 | achievement toast | 320x40 at (0, 0), so y 0..40 | [ui_achtoast.h:27](ui/ui_achtoast.h#L27) (`UI_AT_*`) |
-| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:166](ui/bottom_screen.c#L166) (`NOTICE_*`) |
+| shiny notice | 240x112 at (40, 40), so y 40..152 | [bottom_screen.c:177](ui/bottom_screen.c#L177) (`NOTICE_*`) |
 | quick-throw strip | 320x40 at (0, 152), so y 152..192 | [ui_quickball.h:25](ui/ui_quickball.h#L25) (`UI_QB_*`) |
 
 The three **tile the content area exactly**. The toast ends at y 40, where the
@@ -363,7 +363,7 @@ has **16 call sites in ten files**, every one of them a panel: the tabs, the
 BAG picker's cells, MAP's caption band and its "Map unavailable" panel, the
 encounters view ([view_encounters.c:663](ui/view_encounters.c#L663)), and all
 three overlays ([ui_achtoast.c:122](ui/ui_achtoast.c#L122),
-[bottom_screen.c:491](ui/bottom_screen.c#L491),
+[bottom_screen.c:502](ui/bottom_screen.c#L502),
 [ui_quickball.c:184](ui/ui_quickball.c#L184)). Reimplement its body as a
 `UiNineSlice` of `UI_SHEET_PANEL` and every one of them is reskinned untouched.
 Add `UiPanel(x, y, w, h)` in pixels for new code and make the tile-granular
@@ -381,12 +381,12 @@ secondary labels, button outlines and arrow fills, so moving the block into
 `ui_skin.h` with the skin's values retargets all of them in the same edit.
 
 Then drop `top[0] = UiFrameId()` from `UiStateHash()`
-([bottom_screen.c:571](ui/bottom_screen.c#L571)). Once the frame no longer
+([bottom_screen.c:582](ui/bottom_screen.c#L582)). Once the frame no longer
 drives the bottom screen it is a stale input to the repaint hash. `UiFrameId()`
 itself stays: it is still correct, and the top screen still uses the setting.
 
 Replace the in-game `UiClear(UI_COL_BG)` in `Redraw()`
-([bottom_screen.c:805](ui/bottom_screen.c#L805)) with a `UiTileFill` of the
+([bottom_screen.c:816](ui/bottom_screen.c#L816)) with a `UiTileFill` of the
 backdrop. The pre-game `UiClear(0)` a few lines above it stays black: that is
 the screen under the title, not a skin surface. Since this plan was first
 written, that screen also shows TOUCH TO START and the build id
@@ -404,11 +404,11 @@ edits at all.** That is the checkpoint worth building to before anything else.
 
 ### The snapshot is on the skin's side
 
-`Redraw()` ([bottom_screen.c:749](ui/bottom_screen.c#L749)) no longer ends with
+`Redraw()` ([bottom_screen.c:760](ui/bottom_screen.c#L760)) no longer ends with
 the tab bar. It paints the still screen (ground, tab, strip, toast, notice, bar), takes
 `UiSnapshot()` if `AnimatedLayerActive()`, and only then runs
 `DrawAnimatedLayer()` for the pieces that move. An animation step
-(`RedrawAnimated`, [:883](ui/bottom_screen.c#L883)) puts a few rects back from
+(`RedrawAnimated`, [:883](ui/bottom_screen.c#L894)) puts a few rects back from
 the snapshot and redraws only those.
 
 Since `af5780b` the snapshot is taken only while the animated layer has
@@ -488,7 +488,7 @@ Every button on the screen is a 1px `UiRect` outline, in three shapes:
 | Kind | Where |
 |---|---|
 | named helper | `DrawButtonH` ([tab_extra.c:219](ui/tab_extra.c#L219)); LINK's `DrawButton` ([ui_link.c:82](ui/ui_link.c#L82)); `DrawBtn` ([tab_map.c:554](ui/tab_map.c#L554)), whose comment calls sharing it "premature" because it then had one other user; `DrawSpreadButton` ([tab_party.c:966](ui/tab_party.c#L966)); `DrawSectionButton` ([tab_trophy.c:268](ui/tab_trophy.c#L268)), TROPHY's MAIN and POST-GAME buttons, a copy of `DrawButtonH`'s doubled accent inset |
-| inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:1000](ui/tab_party.c#L1000)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:538](ui/bottom_screen.c#L538)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
+| inline outline | BAG pagers, USE ([tab_bag.c:420](ui/tab_bag.c#L420)) and CANCEL; DEX pagers and BACK ([tab_dex.c:410](ui/tab_dex.c#L410)); PARTY BACK ([tab_party.c:1000](ui/tab_party.c#L1000)); encounters pagers, method chips and BACK ([view_encounters.c:634](ui/view_encounters.c#L634)); TROPHY pagers ([tab_trophy.c:370](ui/tab_trophy.c#L370)); THROW ([ui_quickball.c:230](ui/ui_quickball.c#L230)); DISMISS ([bottom_screen.c:549](ui/bottom_screen.c#L549)); the toast's VIEW, in its category's colors ([ui_achtoast.c:165](ui/ui_achtoast.c#L165)); the card view's BACK ([ui_link.c:227](ui/ui_link.c#L227)) |
 | check row | `UiCheckBox` (`ui_draw.c`) inside `DrawCheckRow` ([tab_extra.c:241](ui/tab_extra.c#L241)), ten rows on EXTRA's pages. Not a button shape, but a control: it needs a checked and an unchecked art state, and the pressed band applies to the whole row, which is its touch target |
 | pager | a `UiArrow` centred in an outline, on BAG, DEX, TROPHY and the encounters view |
 
@@ -537,7 +537,7 @@ icons are:
 1. `UiButton` records each button it draws (rect, label or glyph, state) in a
    small static table, cleared at the top of `Redraw()`.
 2. `ui_draw.c` gains `UiSetPointer(const CtrTouchState *)`, called once per
-   frame from `CtrBottomUpdate` ([bottom_screen.c:906](ui/bottom_screen.c#L906)).
+   frame from `CtrBottomUpdate` ([bottom_screen.c:917](ui/bottom_screen.c#L917)).
 3. `DrawAnimatedLayer` gains a last step, after whichever tenant it ran: while
    the pointer is `touching`, find the recorded button under it, restore its
    rect from the snapshot and draw it in the pressed band.
@@ -571,7 +571,7 @@ run is still in flight.
 ## Step 6: the shell, then the tabs
 
 **Shell, with all three overlays.** `DrawTabBar`
-([bottom_screen.c:691](ui/bottom_screen.c#L691)) currently draws flat
+([bottom_screen.c:702](ui/bottom_screen.c#L702)) currently draws flat
 rectangles. It becomes the bar's ground, a per-cell art state, an icon from
 `icons.png` and the label beneath it, at whatever `UI_TABBAR_H` `shell.png`
 established. The toast, the notice and the strip are re-fitted in the same pass,
@@ -646,7 +646,7 @@ drawing API, which gains `UiPanel`, `UiButton` and the `ui_gfx` calls and loses
 the "text on a frame must use `UiThemeText()`" rule once frames no longer apply
 here; and section 14, the layout and overlay constants at whatever values
 `shell.png` settled. In code, the comment above the notice's geometry
-([bottom_screen.c:162](ui/bottom_screen.c#L162)), which says to keep the
+([bottom_screen.c:173](ui/bottom_screen.c#L173)), which says to keep the
 numbers in whole tiles. The same rule is implied by the toast's and the strip's
 `*_TX`/`*_TY` constants, and `UiPanel` retires it for all three.
 

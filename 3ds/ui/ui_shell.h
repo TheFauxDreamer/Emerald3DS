@@ -139,6 +139,10 @@ bool8 UiOverlayActive(void);
 // achievement toast has no VIEW button on the TROPHY tab.
 u8 UiActiveTab(void);
 
+// Switches to `tab` (enum UiTab) as a tap on the tab bar does, and closes what
+// the old tab had open. Does nothing for a tab that does not show.
+void UiSetTab(u8 tab);
+
 // The party slot that the BAG tab acts on. The party grid sets it.
 u8   UiSelectedMon(void);
 void UiSetSelectedMon(u8 index);

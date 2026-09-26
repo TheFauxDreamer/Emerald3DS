@@ -39,7 +39,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)                                      FULL rate, divider or not
      sample_touch(&touch)            3ds/host/main.c:99
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:906   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:917   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        AchTick()          achievement checks
                                        toast / strip / tab-bar tap  OR  UiXTouch(touch)
@@ -151,11 +151,11 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1128 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 256 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1139 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 260 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 542 / 38 | The battle panel: in place of the PARTY grid from the battle's first choice to its outcome (tappable only while the player chooses), four move buttons (type, PP, and the multiplier against each opponent) that use the move, a party row, and a card with SWITCH IN and INFO. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` |
+| [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 931 / 38 | The battle panel: in place of the PARTY grid from the battle's first choice to its outcome (tappable only while the player chooses). A foe header (tap for a foe card with types, HP bar, status, stat stages and conditions), four move buttons (type, PP, and the multiplier against each opponent) that use the move, a party row with BAG and RUN, and a card with SWITCH IN (SEND OUT after a faint), INFO and the stat stages of a Pokemon that is out. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` / `Ctr3dsQueueBattleRun` |
 | [ui/tab_party.c](ui/tab_party.c) | 1258 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 671 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
@@ -215,7 +215,7 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:154](ui/bottom_screen.c#L154)) is the
+- The **shiny notice** ([bottom_screen.c:165](ui/bottom_screen.c#L165)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -364,8 +364,8 @@ The steps below are for a tab, and are kept for the record.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
 3. Add a row to `sTabs[]` at [bottom_screen.c:63](ui/bottom_screen.c#L63):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L776))
-   and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L968)).
+4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L787))
+   and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L979)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:120](build_objs.sh#L120). **See the naming hazard in
    section 12.**
@@ -389,7 +389,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:906](ui/bottom_screen.c#L906)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:917](ui/bottom_screen.c#L917)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -543,7 +543,7 @@ Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:566](ui/bottom_screen.c#L566)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:577](ui/bottom_screen.c#L577)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -1174,7 +1174,7 @@ static bool8 CanUseItemNow(void)
 Mutating party or bag data mid-script can contradict whatever the script is
 about to do. Any new write path must pass the same four.
 
-### In battle: through the controller ([src/battle_controller_player.c:292](../src/battle_controller_player.c#L292))
+### In battle: through the controller ([src/battle_controller_player.c:295](../src/battle_controller_player.c#L295))
 
 `Ctr3dsQueueBattleItem(item, partySlot)` does **not** apply the effect itself. It
 requires `gBattlerControllerFuncs[player] == HandleInputChooseAction`
@@ -1209,9 +1209,22 @@ at the top of its handler:
   `Ctr3dsCanSwitchTo` copies `TrySwitchInPokemon`'s checks, read only, for the
   panel to dim SWITCH IN.
 
-`Ctr3dsBattleChoosingBattler()` is the gate for both: whichever player battler
-(left, then right in a double) is in `HandleInputChooseAction` or
-`HandleInputChooseMove`. `PlayerHandleChooseAction` clears every pending
+RUN (`Ctr3dsQueueBattleRun`) emits the d-pad's `B_ACTION_RUN` from action
+selection. The engine asks nothing more, and it refuses a trainer battle, a
+trap and the Frontier's forfeit with its own messages.
+
+A send-out (`PARTY_ACTION_SEND_OUT`: a faint, or Baton Pass) waits for the
+touch screen. `PlayerHandleChoosePokemon` puts the controller in
+`Ctr3dsWaitSendOutChoice` and prints "Choose a POKéMON." on the top screen. A
+pick from `Ctr3dsQueueBattleSwitch` answers it as the switch does. Any button
+press calls `PlayerHandleChoosePokemon` again with a one-shot flag, so the
+game's own fade and party menu open with no change. The Battle Arena, which
+answers a send-out by itself, is left alone. `Ctr3dsBattleSendingOut()` tells
+the panel.
+
+`Ctr3dsBattleChoosingBattler()` is the gate for all of them: whichever player
+battler (left, then right in a double) is in `HandleInputChooseAction`,
+`HandleInputChooseMove` or `Ctr3dsWaitSendOutChoice`. `PlayerHandleChooseAction` clears every pending
 answer, so one the engine never asked for cannot fire on a later turn. The
 battle panel ([view_battle.c](ui/view_battle.c)) is the only caller.
 

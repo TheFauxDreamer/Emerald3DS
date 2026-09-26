@@ -350,10 +350,16 @@ u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot);
 // Second-screen moves and switches, on the same terms: the touch screen makes
 // the choice the d-pad would, and the engine checks it as it checks the d-pad's.
 //
-// The player battler that is choosing now: in action selection, or in the move
-// menu (FIGHT pressed on the top screen). MAX_BATTLERS_COUNT when none is. In a
-// double battle this is the left battler first, then the right one.
+// The player battler that is choosing now: in action selection, in the move
+// menu (FIGHT pressed on the top screen), or before a send-out.
+// MAX_BATTLERS_COUNT when none is. In a double battle this is the left battler
+// first, then the right one.
 u8 Ctr3dsBattleChoosingBattler(void);
+
+// TRUE while the choosing battler waits for a Pokemon to send out: one fainted,
+// or Baton Pass asks. The engine then takes only a Pokemon, through
+// Ctr3dsQueueBattleSwitch. A button press opens the game's party menu.
+bool8 Ctr3dsBattleSendingOut(void);
 
 // FALSE in the Battle Palace, where the game chooses the moves.
 bool8 Ctr3dsBattleCanTapMoves(void);
@@ -379,9 +385,14 @@ enum
 
 u8 Ctr3dsCanSwitchTo(u8 partySlot);
 
-// Switches the choosing battler with a party slot, from action selection only.
-// Returns CTR3DS_ITEM_QUEUED or CTR3DS_ITEM_NOT_NOW.
+// Switches the choosing battler with a party slot, from action selection, or
+// sends it out when Ctr3dsBattleSendingOut(). Returns CTR3DS_ITEM_QUEUED or
+// CTR3DS_ITEM_NOT_NOW.
 u8 Ctr3dsQueueBattleSwitch(u8 partySlot);
+
+// Runs, from action selection only. The engine refuses a trainer battle or a
+// trap with its own message. Returns CTR3DS_ITEM_QUEUED or CTR3DS_ITEM_NOT_NOW.
+u8 Ctr3dsQueueBattleRun(void);
 #endif
 
 #endif // GUARD_BATTLE_CONTROLLERS_H

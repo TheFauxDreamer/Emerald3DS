@@ -37,6 +37,7 @@
 #include "constants/rgb.h"
 #if PLATFORM_3DS
 #include "event_object_movement.h"
+#include "strings.h"
 #endif
 
 static void PlayerHandleGetMonData(void);
@@ -151,6 +152,8 @@ static void EndDrawPartyStatusSummary(void);
 // the turn passes and nothing occurs.
 static void HandleInputChooseAction(void);
 static void PlayerBufferExecCompleted(void);
+static void PlayerHandleChoosePokemon(void);
+static void Ctr3dsWaitSendOutChoice(void);
 
 static u16 sCtr3dsPendingItem;
 
@@ -385,11 +388,20 @@ u8 Ctr3dsBattleChoosingBattler(void)
             continue;
 
         if (gBattlerControllerFuncs[battler] == HandleInputChooseAction
-         || gBattlerControllerFuncs[battler] == HandleInputChooseMove)
+         || gBattlerControllerFuncs[battler] == HandleInputChooseMove
+         || gBattlerControllerFuncs[battler] == Ctr3dsWaitSendOutChoice)
             return battler;
     }
 
     return MAX_BATTLERS_COUNT;
+}
+
+bool8 Ctr3dsBattleSendingOut(void)
+{
+    u8 battler = Ctr3dsBattleChoosingBattler();
+
+    return battler < MAX_BATTLERS_COUNT
+        && gBattlerControllerFuncs[battler] == Ctr3dsWaitSendOutChoice;
 }
 
 bool8 Ctr3dsBattleCanTapMoves(void)
@@ -420,7 +432,7 @@ u8 Ctr3dsQueueBattleMove(u8 moveSlot)
         BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_MOVE, 0);
         PlayerBufferExecCompleted();
     }
-    else
+    else if (gBattlerControllerFuncs[battler] == HandleInputChooseMove)
     {
         // The move menu is already up. Move the game's cursor, as the d-pad
         // does, and let HandleInputChooseMove confirm it on its next frame.
@@ -430,6 +442,12 @@ u8 Ctr3dsQueueBattleMove(u8 moveSlot)
         MoveSelectionDisplayPpNumber();
         MoveSelectionDisplayMoveType();
         sCtr3dsMoveConfirm = battler;
+    }
+    else
+    {
+        // A send-out takes no move.
+        gActiveBattler = savedBattler;
+        return CTR3DS_ITEM_NOT_NOW;
     }
 
     gActiveBattler = savedBattler;
@@ -493,8 +511,14 @@ static u8 Ctr3dsCanSwitchBattlerTo(u8 battler, u8 partySlot)
         return CTR3DS_SWITCH_EGG;
 
     // The engine passes this to the party menu as prevSelectedPartySlot: the
-    // Pokemon the partner battler chose to switch in this turn.
-    if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
+    // Pokemon the partner battler chose to switch in this turn. For a send-out
+    // it is in the engine's request, because the choices of the turn are old.
+    if (gBattlerControllerFuncs[battler] == Ctr3dsWaitSendOutChoice)
+    {
+        if (partySlot == gBattleBufferA[battler][2])
+            return CTR3DS_SWITCH_CHOSEN;
+    }
+    else if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
     {
         partner = GetBattlerAtPosition(BATTLE_PARTNER(GetBattlerPosition(battler)));
         if (partner < gBattlersCount
@@ -515,6 +539,19 @@ u8 Ctr3dsQueueBattleSwitch(u8 partySlot)
 {
     u8 battler = Ctr3dsBattleChoosingBattler();
     u8 savedBattler;
+
+    // For a send-out the engine already asked. Ctr3dsWaitSendOutChoice gives
+    // the answer on its next frame.
+    if (battler < MAX_BATTLERS_COUNT
+     && gBattlerControllerFuncs[battler] == Ctr3dsWaitSendOutChoice)
+    {
+        if (Ctr3dsCanSwitchBattlerTo(battler, partySlot) != CTR3DS_SWITCH_OK)
+            return CTR3DS_ITEM_NOT_NOW;
+
+        sCtr3dsPendingSwitch = partySlot;
+        sCtr3dsPendingBattler = battler;
+        return CTR3DS_ITEM_QUEUED;
+    }
 
     // Only from action selection: in the move menu the d-pad cannot switch
     // either, it must go back first.
@@ -538,6 +575,43 @@ u8 Ctr3dsQueueBattleSwitch(u8 partySlot)
     return CTR3DS_ITEM_QUEUED;
 }
 
+u8 Ctr3dsQueueBattleRun(void)
+{
+    u8 battler = Ctr3dsBattleChoosingBattler();
+    u8 savedBattler;
+
+    // Only from action selection, as for a switch.
+    if (battler >= MAX_BATTLERS_COUNT
+     || gBattlerControllerFuncs[battler] != HandleInputChooseAction)
+        return CTR3DS_ITEM_NOT_NOW;
+
+    savedBattler = gActiveBattler;
+    gActiveBattler = battler;
+
+    // The same as RUN with the d-pad. The engine asks nothing more. It refuses
+    // a trainer battle, a trap and the Frontier's forfeit with its own words.
+    BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_RUN, 0);
+    PlayerBufferExecCompleted();
+
+    gActiveBattler = savedBattler;
+    return CTR3DS_ITEM_QUEUED;
+}
+
+// What TrySwitchInPokemon and WaitForMonSelection do on success. The menu
+// positions come from the order the engine sent. The party menu also swaps
+// gPlayerParty in battle order, and UpdatePartyToFieldOrder undoes that when it
+// closes, so the array is not touched here.
+static void Ctr3dsAnswerWithMon(u8 slot)
+{
+    u8 activeMenuSlot = GetPartyIdFromBattlePartyId(gBattlerPartyIndexes[gActiveBattler]);
+    u8 chosenMenuSlot = GetPartyIdFromBattlePartyId(slot);
+
+    gSelectedMonPartyId = slot;
+    SwitchPartyMonSlots(activeMenuSlot, chosenMenuSlot);
+    BtlController_EmitChosenMonReturnValue(B_COMM_TO_ENGINE, gSelectedMonPartyId, gBattlePartyCurrentOrder);
+    PlayerBufferExecCompleted();
+}
+
 // From PlayerHandleChoosePokemon, after it copied gBattlePartyCurrentOrder.
 // Answers with the touch screen's Pokemon, as the party menu would, and returns
 // TRUE. Returns FALSE for anything it must not answer, and the party menu opens
@@ -546,7 +620,6 @@ u8 Ctr3dsQueueBattleSwitch(u8 partySlot)
 static bool8 Ctr3dsAnswerChoosePokemon(void)
 {
     u8 slot = sCtr3dsPendingSwitch;
-    u8 activeMenuSlot, chosenMenuSlot;
 
     if (slot >= PARTY_SIZE || sCtr3dsPendingBattler != gActiveBattler)
         return FALSE;
@@ -562,18 +635,69 @@ static bool8 Ctr3dsAnswerChoosePokemon(void)
     if (slot == gBattleBufferA[gActiveBattler][2])
         return FALSE;
 
-    // What TrySwitchInPokemon and WaitForMonSelection do on success. The menu
-    // positions come from the order the engine sent. The party menu also swaps
-    // gPlayerParty in battle order, and UpdatePartyToFieldOrder undoes that when
-    // it closes, so the array is not touched here.
-    activeMenuSlot = GetPartyIdFromBattlePartyId(gBattlerPartyIndexes[gActiveBattler]);
-    chosenMenuSlot = GetPartyIdFromBattlePartyId(slot);
-
-    gSelectedMonPartyId = slot;
-    SwitchPartyMonSlots(activeMenuSlot, chosenMenuSlot);
-    BtlController_EmitChosenMonReturnValue(B_COMM_TO_ENGINE, gSelectedMonPartyId, gBattlePartyCurrentOrder);
-    PlayerBufferExecCompleted();
+    Ctr3dsAnswerWithMon(slot);
     return TRUE;
+}
+
+// ---- second-screen send-out -------------------------------------------------
+//
+// When a Pokemon faints, or Baton Pass asks, the engine asks for a Pokemon with
+// PARTY_ACTION_SEND_OUT. The controller then waits in Ctr3dsWaitSendOutChoice
+// and does not fade to the party menu at once. The touch screen can choose in
+// that time. Any button press goes on to the game's own party menu.
+
+// Set for one call of PlayerHandleChoosePokemon, so that it opens the menu.
+static bool8 sCtr3dsSendOutToMenu;
+
+// From PlayerHandleChoosePokemon. Starts the wait and returns TRUE for a
+// send-out. Returns FALSE for all other requests, and after a button press.
+static bool8 Ctr3dsStartSendOutWait(void)
+{
+    if (sCtr3dsSendOutToMenu)
+    {
+        sCtr3dsSendOutToMenu = FALSE;
+        return FALSE;
+    }
+
+    // The Battle Arena answers a send-out by itself, with no menu.
+    if ((gBattleBufferA[gActiveBattler][1] & 0xF) != PARTY_ACTION_SEND_OUT
+     || (gBattleTypeFlags & BATTLE_TYPE_ARENA))
+        return FALSE;
+
+    // A pick from an older request must not answer this one.
+    sCtr3dsPendingSwitch = PARTY_SIZE;
+    sCtr3dsPendingBattler = CTR3DS_NO_BATTLER;
+
+    gBattle_BG0_X = 0;
+    gBattle_BG0_Y = 0;
+    BattlePutTextOnWindow(gText_ChoosePokemon, B_WIN_MSG);
+    gBattlerControllerFuncs[gActiveBattler] = Ctr3dsWaitSendOutChoice;
+    return TRUE;
+}
+
+static void Ctr3dsWaitSendOutChoice(void)
+{
+    u8 slot = sCtr3dsPendingSwitch;
+
+    if (slot < PARTY_SIZE && sCtr3dsPendingBattler == gActiveBattler)
+    {
+        sCtr3dsPendingSwitch = PARTY_SIZE;
+
+        if (Ctr3dsCanSwitchBattlerTo(gActiveBattler, slot) == CTR3DS_SWITCH_OK)
+        {
+            // WaitForMonSelection shows this after the menu.
+            PrintLinkStandbyMsg();
+            Ctr3dsAnswerWithMon(slot);
+            return;
+        }
+    }
+
+    // The game's own path, unchanged: the fade and the party menu.
+    if (gMain.newKeys != 0)
+    {
+        sCtr3dsSendOutToMenu = TRUE;
+        PlayerHandleChoosePokemon();
+    }
 }
 #endif // PLATFORM_3DS
 
@@ -3197,6 +3321,9 @@ static void PlayerHandleChoosePokemon(void)
     // A Pokemon chosen on the touch screen. Anything it must not answer (a
     // trap, a forced send-out) opens the party menu as usual.
     if (Ctr3dsAnswerChoosePokemon())
+        return;
+    // A send-out waits for a pick on the touch screen, or a button press.
+    if (Ctr3dsStartSendOutWait())
         return;
 #endif
 
