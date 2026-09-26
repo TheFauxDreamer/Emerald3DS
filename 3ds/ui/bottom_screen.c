@@ -30,6 +30,7 @@
 #include "ui_title.h"
 #include "ui_team.h"
 #include "ui_view.h"
+#include "view_battle.h"
 
 // Two flags. sNeedsRepaint: the framebuffer is stale. sDirty: the host has not
 // uploaded the framebuffer yet. Do not merge them.
@@ -129,6 +130,8 @@ static void LeaveTab(u8 next)
 
     if (sTab == UI_TAB_MAP)
         UiMapLeave();
+    else if (sTab == UI_TAB_PARTY)
+        UiBattlePanelLeave();
 
     sTab = next;
     sNeedsRepaint = 1;
@@ -736,7 +739,11 @@ static int AnimatedLayerActive(void)
     // and the bottom row of party icons is under it. A redraw there puts the
     // icons on top of the strip. The achievement toast has the same problem
     // with the top row.
-    return !UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY;
+    //
+    // Nor while the battle panel has the PARTY tab: its icons are still, and
+    // the grid's animated layer would draw grid icons over it.
+    return !UiQuickBallActive() && !UiAchToastActive() && sTab == UI_TAB_PARTY
+        && !UiBattlePanelActive();
 }
 
 static void Redraw(void)
@@ -1007,7 +1014,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     //
     // A step that moves only its own rects uses the cheap path. Other changes
     // need a full repaint. If you are not sure, ask for the full repaint.
-    if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY))
+    if (sInGame && UiPartyTick(sTab == UI_TAB_PARTY && !UiBattlePanelActive()))
     {
         if (!UiPartyAnimOnly())
         {

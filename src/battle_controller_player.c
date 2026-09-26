@@ -154,9 +154,22 @@ static void PlayerBufferExecCompleted(void);
 
 static u16 sCtr3dsPendingItem;
 
+// The touch screen's move and switch, waiting for the engine to ask for them
+// (see "second-screen moves and switches" below). A value for "none" in each.
+#define CTR3DS_NO_MOVE     0xFF
+#define CTR3DS_NO_BATTLER  0xFF
+static u8 sCtr3dsPendingMove = CTR3DS_NO_MOVE;
+static u8 sCtr3dsPendingSwitch = PARTY_SIZE;
+static u8 sCtr3dsPendingBattler = CTR3DS_NO_BATTLER;
+static u8 sCtr3dsMoveConfirm = CTR3DS_NO_BATTLER;
+
 static void Ctr3dsClearPending(void)
 {
     sCtr3dsPendingItem = ITEM_NONE;
+    sCtr3dsPendingMove = CTR3DS_NO_MOVE;
+    sCtr3dsPendingSwitch = PARTY_SIZE;
+    sCtr3dsPendingBattler = CTR3DS_NO_BATTLER;
+    sCtr3dsMoveConfirm = CTR3DS_NO_BATTLER;
 }
 
 // Which battler is the player. This is not gActiveBattler, on purpose.
@@ -324,6 +337,243 @@ u8 Ctr3dsQueueBattleItem(u16 item, u8 partySlot)
     gBattlerInMenuId = savedInMenu;
 
     return result;
+}
+
+// ---- second-screen moves and switches ---------------------------------------
+//
+// The same shape as the items above. From action selection, the touch screen
+// makes the choice the d-pad makes (B_ACTION_USE_MOVE or B_ACTION_SWITCH) and
+// leaves the answer pending. The engine then asks its follow-up question
+// (ChooseMove or ChoosePokemon), and a hook at the top of that handler answers
+// it instead of opening the menu.
+//
+// Everything the engine checks, it still checks, and it prints the game's own
+// message:
+// - Struggle and Encore: HandleTurnActionSelectionState (src/battle_main.c)
+//   does not ask for a move then. The pending move is cleared at the next
+//   selection.
+// - No PP, Disable, Taunt, Torment, Imprison and Choice Band: the engine
+//   refuses the move after it comes back and asks again, which opens the
+//   normal move menu.
+// - Wrap, Mean Look, Ingrain, the Battle Arena, Shadow Tag, Arena Trap and
+//   Magnet Pull: the engine asks with PARTY_ACTION_CANT_SWITCH or
+//   PARTY_ACTION_ABILITY_PREVENTS. The hook does not answer those, so the game's
+//   party menu opens and says why.
+//
+// The move is not sent straight to the engine. The ChooseMove hook puts the
+// game's own cursor on it and confirms it as an A press would, so the game's
+// own code picks the target: Curse's rule, the doubles rules, and in a double
+// battle the game's target selection on the top screen.
+
+// The player battler whose controller is in action selection or the move menu.
+// Both are the states in which the d-pad can make these choices. The test also
+// refuses the bag and party menus, animations, and every battle whose player
+// side runs another controller: recorded battles, the Safari Zone, Wally's
+// tutorial, and a multi battle partner.
+u8 Ctr3dsBattleChoosingBattler(void)
+{
+    static const u8 positions[] = { B_POSITION_PLAYER_LEFT, B_POSITION_PLAYER_RIGHT };
+
+    if (!gMain.inBattle)
+        return MAX_BATTLERS_COUNT;
+
+    for (u32 i = 0; i < ARRAY_COUNT(positions); i++)
+    {
+        u8 battler = GetBattlerAtPosition(positions[i]);
+
+        if (battler >= gBattlersCount || battler >= MAX_BATTLERS_COUNT)
+            continue;
+
+        if (gBattlerControllerFuncs[battler] == HandleInputChooseAction
+         || gBattlerControllerFuncs[battler] == HandleInputChooseMove)
+            return battler;
+    }
+
+    return MAX_BATTLERS_COUNT;
+}
+
+bool8 Ctr3dsBattleCanTapMoves(void)
+{
+    return !(gBattleTypeFlags & BATTLE_TYPE_PALACE);
+}
+
+u8 Ctr3dsQueueBattleMove(u8 moveSlot)
+{
+    u8 battler = Ctr3dsBattleChoosingBattler();
+    u8 savedBattler;
+
+    if (battler >= MAX_BATTLERS_COUNT || !Ctr3dsBattleCanTapMoves())
+        return CTR3DS_ITEM_NOT_NOW;
+    if (moveSlot >= MAX_MON_MOVES || gBattleMons[battler].moves[moveSlot] == MOVE_NONE)
+        return CTR3DS_ITEM_NOT_NOW;
+
+    // See Ctr3dsQueueBattleItem for why gActiveBattler is set and restored.
+    savedBattler = gActiveBattler;
+    gActiveBattler = battler;
+
+    if (gBattlerControllerFuncs[battler] == HandleInputChooseAction)
+    {
+        // The same as FIGHT with the d-pad. The engine answers with ChooseMove,
+        // and PlayerHandleChooseMove takes the slot from here.
+        sCtr3dsPendingMove = moveSlot;
+        sCtr3dsPendingBattler = battler;
+        BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_USE_MOVE, 0);
+        PlayerBufferExecCompleted();
+    }
+    else
+    {
+        // The move menu is already up. Move the game's cursor, as the d-pad
+        // does, and let HandleInputChooseMove confirm it on its next frame.
+        MoveSelectionDestroyCursorAt(gMoveSelectionCursor[battler]);
+        gMoveSelectionCursor[battler] = moveSlot;
+        MoveSelectionCreateCursorAt(moveSlot, 0);
+        MoveSelectionDisplayPpNumber();
+        MoveSelectionDisplayMoveType();
+        sCtr3dsMoveConfirm = battler;
+    }
+
+    gActiveBattler = savedBattler;
+    return CTR3DS_ITEM_QUEUED;
+}
+
+// From PlayerHandleChooseMove, before the game draws its move menu: put the
+// cursor on the move the touch screen chose, and confirm it.
+static void Ctr3dsSeedMoveCursor(void)
+{
+    if (sCtr3dsPendingMove == CTR3DS_NO_MOVE || sCtr3dsPendingBattler != gActiveBattler)
+        return;
+
+    gMoveSelectionCursor[gActiveBattler] = sCtr3dsPendingMove;
+    sCtr3dsPendingMove = CTR3DS_NO_MOVE;
+    sCtr3dsMoveConfirm = gActiveBattler;
+}
+
+// From HandleInputChooseMove: TRUE once, on the frame that should act as an A
+// press for the touch screen's move.
+static bool8 Ctr3dsTakeMoveConfirm(void)
+{
+    if (sCtr3dsMoveConfirm != gActiveBattler)
+        return FALSE;
+
+    sCtr3dsMoveConfirm = CTR3DS_NO_BATTLER;
+    return TRUE;
+}
+
+// The checks of TrySwitchInPokemon (src/party_menu.c), in its order, with no
+// menu. That function is static and prints to the party menu's window, so the
+// checks are copied here and it is not called.
+//
+// partySlot is a field-order index into gPlayerParty, which is the order
+// outside the party menu. gBattlerPartyIndexes holds the same ids.
+static u8 Ctr3dsCanSwitchBattlerTo(u8 battler, u8 partySlot)
+{
+    struct Pokemon *mon;
+    u8 partner;
+
+    if (battler >= MAX_BATTLERS_COUNT || partySlot >= PARTY_SIZE)
+        return CTR3DS_SWITCH_NOT_NOW;
+
+    mon = &gPlayerParty[partySlot];
+    if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+        return CTR3DS_SWITCH_NOT_NOW;
+
+    // In a multi battle the partner's three are slots 3-5 in field order. The
+    // party menu tests the same Pokemon in battle order (slots 1, 4 and 5).
+    if (IsMultiBattle() == TRUE && partySlot >= MULTI_PARTY_SIZE)
+        return CTR3DS_SWITCH_PARTNER;
+
+    if (GetMonData(mon, MON_DATA_HP) == 0)
+        return CTR3DS_SWITCH_FAINTED;
+
+    for (u32 i = 0; i < gBattlersCount; i++)
+        if (GetBattlerSide(i) == B_SIDE_PLAYER && gBattlerPartyIndexes[i] == partySlot)
+            return CTR3DS_SWITCH_IN_BATTLE;
+
+    if (GetMonData(mon, MON_DATA_IS_EGG))
+        return CTR3DS_SWITCH_EGG;
+
+    // The engine passes this to the party menu as prevSelectedPartySlot: the
+    // Pokemon the partner battler chose to switch in this turn.
+    if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
+    {
+        partner = GetBattlerAtPosition(BATTLE_PARTNER(GetBattlerPosition(battler)));
+        if (partner < gBattlersCount
+         && gChosenActionByBattler[partner] == B_ACTION_SWITCH
+         && *(gBattleStruct->monToSwitchIntoId + partner) == partySlot)
+            return CTR3DS_SWITCH_CHOSEN;
+    }
+
+    return CTR3DS_SWITCH_OK;
+}
+
+u8 Ctr3dsCanSwitchTo(u8 partySlot)
+{
+    return Ctr3dsCanSwitchBattlerTo(Ctr3dsBattleChoosingBattler(), partySlot);
+}
+
+u8 Ctr3dsQueueBattleSwitch(u8 partySlot)
+{
+    u8 battler = Ctr3dsBattleChoosingBattler();
+    u8 savedBattler;
+
+    // Only from action selection: in the move menu the d-pad cannot switch
+    // either, it must go back first.
+    if (battler >= MAX_BATTLERS_COUNT
+     || gBattlerControllerFuncs[battler] != HandleInputChooseAction)
+        return CTR3DS_ITEM_NOT_NOW;
+    if (Ctr3dsCanSwitchBattlerTo(battler, partySlot) != CTR3DS_SWITCH_OK)
+        return CTR3DS_ITEM_NOT_NOW;
+
+    savedBattler = gActiveBattler;
+    gActiveBattler = battler;
+
+    // The same as POKEMON with the d-pad. The engine answers with
+    // ChoosePokemon, and PlayerHandleChoosePokemon takes the slot from here.
+    sCtr3dsPendingSwitch = partySlot;
+    sCtr3dsPendingBattler = battler;
+    BtlController_EmitTwoReturnValues(B_COMM_TO_ENGINE, B_ACTION_SWITCH, 0);
+    PlayerBufferExecCompleted();
+
+    gActiveBattler = savedBattler;
+    return CTR3DS_ITEM_QUEUED;
+}
+
+// From PlayerHandleChoosePokemon, after it copied gBattlePartyCurrentOrder.
+// Answers with the touch screen's Pokemon, as the party menu would, and returns
+// TRUE. Returns FALSE for anything it must not answer, and the party menu opens
+// as usual: a trap, the Battle Arena, a forced send-out, or a choice that is no
+// longer valid.
+static bool8 Ctr3dsAnswerChoosePokemon(void)
+{
+    u8 slot = sCtr3dsPendingSwitch;
+    u8 activeMenuSlot, chosenMenuSlot;
+
+    if (slot >= PARTY_SIZE || sCtr3dsPendingBattler != gActiveBattler)
+        return FALSE;
+
+    sCtr3dsPendingSwitch = PARTY_SIZE;
+
+    if ((gBattleBufferA[gActiveBattler][1] & 0xF) != PARTY_ACTION_CHOOSE_MON)
+        return FALSE;
+    if (gBattleTypeFlags & BATTLE_TYPE_ARENA)
+        return FALSE;
+    if (Ctr3dsCanSwitchBattlerTo(gActiveBattler, slot) != CTR3DS_SWITCH_OK)
+        return FALSE;
+    if (slot == gBattleBufferA[gActiveBattler][2])
+        return FALSE;
+
+    // What TrySwitchInPokemon and WaitForMonSelection do on success. The menu
+    // positions come from the order the engine sent. The party menu also swaps
+    // gPlayerParty in battle order, and UpdatePartyToFieldOrder undoes that when
+    // it closes, so the array is not touched here.
+    activeMenuSlot = GetPartyIdFromBattlePartyId(gBattlerPartyIndexes[gActiveBattler]);
+    chosenMenuSlot = GetPartyIdFromBattlePartyId(slot);
+
+    gSelectedMonPartyId = slot;
+    SwitchPartyMonSlots(activeMenuSlot, chosenMenuSlot);
+    BtlController_EmitChosenMonReturnValue(B_COMM_TO_ENGINE, gSelectedMonPartyId, gBattlePartyCurrentOrder);
+    PlayerBufferExecCompleted();
+    return TRUE;
 }
 #endif // PLATFORM_3DS
 
@@ -685,7 +935,13 @@ static void HandleInputChooseMove(void)
     else
         gPlayerDpadHoldFrames = 0;
 
+#if PLATFORM_3DS
+    // A move tapped on the touch screen acts as an A press on the move under
+    // the cursor, so this code chooses its target as it does for the d-pad.
+    if (JOY_NEW(A_BUTTON) || Ctr3dsTakeMoveConfirm())
+#else
     if (JOY_NEW(A_BUTTON))
+#endif
     {
         u8 moveTarget;
 
@@ -2885,6 +3141,11 @@ static void PlayerHandleChooseMove(void)
     }
     else
     {
+#if PLATFORM_3DS
+        // A move chosen on the touch screen: the menu draws with the cursor on
+        // it, and HandleInputChooseMove confirms it.
+        Ctr3dsSeedMoveCursor();
+#endif
         InitMoveSelectionsVarsAndStrings();
         gBattlerControllerFuncs[gActiveBattler] = HandleChooseMoveAfterDma3;
     }
@@ -2931,6 +3192,13 @@ static void PlayerHandleChoosePokemon(void)
 
     for (i = 0; i < (int)ARRAY_COUNT(gBattlePartyCurrentOrder); i++)
         gBattlePartyCurrentOrder[i] = gBattleBufferA[gActiveBattler][4 + i];
+
+#if PLATFORM_3DS
+    // A Pokemon chosen on the touch screen. Anything it must not answer (a
+    // trap, a forced send-out) opens the party menu as usual.
+    if (Ctr3dsAnswerChoosePokemon())
+        return;
+#endif
 
     if (gBattleTypeFlags & BATTLE_TYPE_ARENA && (gBattleBufferA[gActiveBattler][1] & 0xF) != PARTY_ACTION_CANT_SWITCH)
     {

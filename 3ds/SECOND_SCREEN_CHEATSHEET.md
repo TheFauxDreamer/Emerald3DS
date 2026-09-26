@@ -39,7 +39,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)                                      FULL rate, divider or not
      sample_touch(&touch)            3ds/host/main.c:99
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:899   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:906   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        AchTick()          achievement checks
                                        toast / strip / tab-bar tap  OR  UiXTouch(touch)
@@ -151,11 +151,12 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1121 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 246 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1128 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 252 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 1228 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 486 / 35 | The battle panel: in place of the PARTY grid while the player chooses, four move buttons (type, PP, arrows) that use the move, a party row, and a card with SWITCH IN and INFO. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` |
+| [ui/tab_party.c](ui/tab_party.c) | 1247 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 671 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
 | [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
@@ -214,7 +215,7 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:151](ui/bottom_screen.c#L151)) is the
+- The **shiny notice** ([bottom_screen.c:154](ui/bottom_screen.c#L154)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -361,7 +362,7 @@ The steps below are for a tab, and are kept for the record.
 
 1. Add to `enum UiTab` in [ui_shell.h:24](ui/ui_shell.h#L24), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:62](ui/bottom_screen.c#L62):
+3. Add a row to `sTabs[]` at [bottom_screen.c:63](ui/bottom_screen.c#L63):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
 4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L776))
    and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L968)).
@@ -388,7 +389,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:899](ui/bottom_screen.c#L899)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:906](ui/bottom_screen.c#L906)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -481,18 +482,18 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   dedicated button (BAG's USE, MAP's YES/NO confirm).
 - **One column, several tenants.** The party detail view's left column shows the
   stat block, a tapped move's details, or the IV/EV spread
-  ([tab_party.c:864](ui/tab_party.c#L864)), never two at once, while the moves
+  ([tab_party.c:865](ui/tab_party.c#L865)), never two at once, while the moves
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:954](ui/tab_party.c#L954), dim frame off, doubled accent outline on). A
+  ([:955](ui/tab_party.c#L955), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
-  ([tab_party.c:1166](ui/tab_party.c#L1166)). Without it the toggle would flip
+  ([tab_party.c:1179](ui/tab_party.c#L1179)). Without it the toggle would flip
   invisibly and surface on the next mon opened.
 - **BACK buttons** are per-view rects, currently in four different places:
-  [tab_party.c:98](ui/tab_party.c#L98) (38x22),
+  [tab_party.c:99](ui/tab_party.c#L99) (38x22),
   [tab_dex.c:92](ui/tab_dex.c#L92) (42x22, which the encounters view matches),
   [tab_bag.c:99](ui/tab_bag.c#L99) (56x20 cancel),
   [ui_link.c:63](ui/ui_link.c#L63) (60x22, the card view).
@@ -542,7 +543,7 @@ Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:563](ui/bottom_screen.c#L563)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:566](ui/bottom_screen.c#L566)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -583,7 +584,7 @@ MAP's fly row is the one other thing that depends on the party, and
   calls `UiMarkDirty()`. IVs are in this class too: they are fixed when the mon
   is created and can never go stale.
 - **Key only what is actually on screen, and only while it is.**
-  `UiPartyStateKey()` ([tab_party.c:1125](ui/tab_party.c#L1125)) folds in the
+  `UiPartyStateKey()` ([tab_party.c:1126](ui/tab_party.c#L1126)) folds in the
   selected mon's EV total *only* while the IV/EV panel is open. EVs are the
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
@@ -1103,7 +1104,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:83
+static bool8 SaveDataLive(void);   // bottom_screen.c:84
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -1173,7 +1174,7 @@ static bool8 CanUseItemNow(void)
 Mutating party or bag data mid-script can contradict whatever the script is
 about to do. Any new write path must pass the same four.
 
-### In battle: through the controller ([src/battle_controller_player.c:279](../src/battle_controller_player.c#L279))
+### In battle: through the controller ([src/battle_controller_player.c:292](../src/battle_controller_player.c#L292))
 
 `Ctr3dsQueueBattleItem(item, partySlot)` does **not** apply the effect itself. It
 requires `gBattlerControllerFuncs[player] == HandleInputChooseAction`
@@ -1187,6 +1188,32 @@ looks like: it calls that one function and has **no gate of its own**, because
 everything it would need to refuse for -- the wrong moment, a barred battle
 type, a full party and box -- is already inside. A second copy of those checks
 out here is a second copy free to be subtly wrong.
+
+**Moves and switches follow the same shape** (`Ctr3dsQueueBattleMove`,
+`Ctr3dsQueueBattleSwitch`, `Ctr3dsCanSwitchTo`, in the same file). From action
+selection they emit the d-pad's `B_ACTION_USE_MOVE` or `B_ACTION_SWITCH` and
+leave the answer pending; the engine's follow-up request is answered by a hook
+at the top of its handler:
+
+- `PlayerHandleChooseMove` puts the game's cursor on the pending move, and
+  `HandleInputChooseMove` treats it as an A press (`Ctr3dsTakeMoveConfirm`).
+  So the game's own code picks the target, including the doubles target
+  picker, and the engine still refuses no PP, Disable, Taunt, Torment,
+  Imprison and Choice Band with its own message. If the move menu is already
+  up (FIGHT pressed), the tap moves that menu's cursor and confirms it.
+- `PlayerHandleChoosePokemon` answers `PARTY_ACTION_CHOOSE_MON` as
+  `TrySwitchInPokemon` and `WaitForMonSelection` would
+  (`SwitchPartyMonSlots`, `BtlController_EmitChosenMonReturnValue`), and
+  answers nothing else: for a trap (`PARTY_ACTION_CANT_SWITCH`,
+  `ABILITY_PREVENTS`) the game's party menu opens and says why.
+  `Ctr3dsCanSwitchTo` copies `TrySwitchInPokemon`'s checks, read only, for the
+  panel to dim SWITCH IN.
+
+`Ctr3dsBattleChoosingBattler()` is the gate for both: whichever player battler
+(left, then right in a double) is in `HandleInputChooseAction` or
+`HandleInputChooseMove`. `PlayerHandleChooseAction` clears every pending
+answer, so one the engine never asked for cannot fire on a later turn. The
+battle panel ([view_battle.c](ui/view_battle.c)) is the only caller.
 
 Note what this means for the Safari Zone. `Ctr3dsPlayerIsChoosingAction()` asks
 about the PLAYER controller, and the Safari Zone runs

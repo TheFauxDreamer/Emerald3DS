@@ -143,6 +143,12 @@ u8 UiActiveTab(void);
 u8   UiSelectedMon(void);
 void UiSetSelectedMon(u8 index);
 
+// One offence arrow for a multiplier on the game's x10 scale: up and green for
+// super effective, down and amber for resisted, down and red for no effect, and
+// nothing for neutral or UI_MATCHUP_NA. In tab_party.c; the battle panel uses
+// it too, so a mark means the same on both.
+void UiOffenceArrow(int x, int y, u16 mul);
+
 // ---- per-tab entry points ----
 void UiPartyDraw(void);
 void UiPartyTouch(const CtrTouchState *t);
