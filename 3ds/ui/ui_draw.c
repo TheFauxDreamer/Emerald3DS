@@ -75,6 +75,70 @@ void UiClearDirtyRows(void)
     sDirtyBot = 0;
 }
 
+// ---- the clip rect --------------------------------------------------------
+//
+// See ui_draw.h. The stack holds the rects to go back to. A push past
+// UI_CLIP_DEPTH is not stored, and it still narrows the rect, so the drawing
+// stays inside it. Its pop then has nothing to restore and resets to the full
+// screen, which is the safe side: a later draw can reach too far, but nothing
+// that must show is hidden.
+struct UiClipRect gUiClip = { 0, 0, UI_W, UI_H };
+
+static struct UiClipRect sClipStack[UI_CLIP_DEPTH];
+static u8 sClipDepth;
+static u8 sClipLost;   // pushes past the depth, not stored
+
+void UiClipPush(int x, int y, int w, int h)
+{
+    int x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+
+    if (sClipDepth < UI_CLIP_DEPTH)
+        sClipStack[sClipDepth++] = gUiClip;
+    else
+        sClipLost++;
+
+    if (x0 < gUiClip.x0) x0 = gUiClip.x0;
+    if (y0 < gUiClip.y0) y0 = gUiClip.y0;
+    if (x1 > gUiClip.x1) x1 = gUiClip.x1;
+    if (y1 > gUiClip.y1) y1 = gUiClip.y1;
+
+    // An empty rect stays empty rather than inverting: every test below then
+    // fails, and nothing draws.
+    if (x1 < x0) x1 = x0;
+    if (y1 < y0) y1 = y0;
+
+    gUiClip.x0 = (s16)x0;
+    gUiClip.y0 = (s16)y0;
+    gUiClip.x1 = (s16)x1;
+    gUiClip.y1 = (s16)y1;
+}
+
+void UiClipPop(void)
+{
+    if (sClipLost > 0)
+    {
+        sClipLost--;
+        gUiClip.x0 = 0;
+        gUiClip.y0 = 0;
+        gUiClip.x1 = UI_W;
+        gUiClip.y1 = UI_H;
+        return;
+    }
+
+    if (sClipDepth > 0)
+        gUiClip = sClipStack[--sClipDepth];
+}
+
+void UiClipReset(void)
+{
+    sClipDepth = 0;
+    sClipLost = 0;
+    gUiClip.x0 = 0;
+    gUiClip.y0 = 0;
+    gUiClip.x1 = UI_W;
+    gUiClip.y1 = UI_H;
+}
+
 void UiSetFb(u16 *fb)
 {
     if (fb != NULL)
@@ -126,10 +190,10 @@ void UiFillRect(int x, int y, int w, int h, u16 color)
 {
     u32 pair = UI_PIX2(color);
 
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > UI_W) w = UI_W - x;
-    if (y + h > UI_H) h = UI_H - y;
+    if (x < gUiClip.x0) { w -= gUiClip.x0 - x; x = gUiClip.x0; }
+    if (y < gUiClip.y0) { h -= gUiClip.y0 - y; y = gUiClip.y0; }
+    if (x + w > gUiClip.x1) w = gUiClip.x1 - x;
+    if (y + h > gUiClip.y1) h = gUiClip.y1 - y;
     if (w <= 0 || h <= 0)
         return;
 
@@ -156,10 +220,13 @@ void UiFillRect(int x, int y, int w, int h, u16 color)
 
 // One pixel, clipped. The small glyphs below (the Poke Ball, the chevron, the
 // sparkle, the footprint) draw one pixel at a time. This clip needs only one
-// pair of branches, which is much cheaper than a call to UiFillRect.
+// pair of branches, which is much cheaper than a call to UiFillRect. The
+// unsigned compare tests both edges at once: a pixel left of x0 wraps to a
+// large value.
 static inline void UiPixel(int x, int y, u16 color)
 {
-    if ((unsigned)x < (unsigned)UI_W && (unsigned)y < (unsigned)UI_H)
+    if ((unsigned)(x - gUiClip.x0) < (unsigned)(gUiClip.x1 - gUiClip.x0)
+     && (unsigned)(y - gUiClip.y0) < (unsigned)(gUiClip.y1 - gUiClip.y0))
     {
         UiTouchRows(y, 1);
         sFb[y * UI_STRIDE + x] = color;
@@ -180,14 +247,15 @@ void UiRect(int x, int y, int w, int h, u16 color)
 // and type badge uses it, and a party grid repaint blits about a thousand
 // tiles.
 //
-// Thus the clip is outside the pixel loop. A tile that is fully on the screen
-// (nearly all tiles) takes the fast path, with only the transparency test per
-// pixel. Only a tile that crosses an edge takes the slow path.
+// Thus the clip is outside the pixel loop. A tile that is fully inside the
+// clip (nearly all tiles) takes the fast path, with only the transparency test
+// per pixel. Only a tile that crosses an edge takes the slow path.
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparent0)
 {
     UiTouchRows(y, 8);
 
-    if (x >= 0 && y >= 0 && x + 8 <= UI_W && y + 8 <= UI_H)
+    if (x >= gUiClip.x0 && y >= gUiClip.y0
+     && x + 8 <= gUiClip.x1 && y + 8 <= gUiClip.y1)
     {
         // Two loops, because transparent0 does not change inside one and the
         // opaque case is the busiest caller here: a window frame is hundreds of
@@ -235,7 +303,7 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
     for (int row = 0; row < 8; row++)
     {
         int py = y + row;
-        if (py < 0 || py >= UI_H)
+        if (py < gUiClip.y0 || py >= gUiClip.y1)
             continue;
 
         const u8 *src = tile + row * 4;
@@ -244,7 +312,7 @@ void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
         for (int col = 0; col < 8; col++)
         {
             int px = x + col;
-            if (px < 0 || px >= UI_W)
+            if (px < gUiClip.x0 || px >= gUiClip.x1)
                 continue;
 
             u32 idx = (col & 1) ? (src[col >> 1] >> 4) : (src[col >> 1] & 0xF);
@@ -272,11 +340,11 @@ void UiBlitRow(int x, int y, const u16 *src, int w)
 {
     u16 *dst;
 
-    if (y < 0 || y >= UI_H)
+    if (y < gUiClip.y0 || y >= gUiClip.y1)
         return;
 
-    if (x < 0) { src -= x; w += x; x = 0; }
-    if (x + w > UI_W) w = UI_W - x;
+    if (x < gUiClip.x0) { src += gUiClip.x0 - x; w -= gUiClip.x0 - x; x = gUiClip.x0; }
+    if (x + w > gUiClip.x1) w = gUiClip.x1 - x;
     if (w <= 0)
         return;
 
@@ -313,7 +381,7 @@ void UiBlit4bppTileFlip(int x, int y, const u8 *tile, const u16 *pal,
         const u8 *src;
         u16 *dst;
 
-        if (py < 0 || py >= UI_H)
+        if (py < gUiClip.y0 || py >= gUiClip.y1)
             continue;
 
         src = tile + (vflip ? (7 - row) : row) * 4;
@@ -325,7 +393,7 @@ void UiBlit4bppTileFlip(int x, int y, const u8 *tile, const u16 *pal,
             int sx = hflip ? (7 - col) : col;
             u32 idx;
 
-            if (px < 0 || px >= UI_W)
+            if (px < gUiClip.x0 || px >= gUiClip.x1)
                 continue;
 
             idx = (sx & 1) ? (src[sx >> 1] >> 4) : (src[sx >> 1] & 0xF);
@@ -343,7 +411,8 @@ void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
     // and covers most of the MAP tab.
     UiTouchRows(y, 8);
 
-    if (x >= 0 && y >= 0 && x + 8 <= UI_W && y + 8 <= UI_H)
+    if (x >= gUiClip.x0 && y >= gUiClip.y0
+     && x + 8 <= gUiClip.x1 && y + 8 <= gUiClip.y1)
     {
         for (int row = 0; row < 8; row++)
         {
@@ -360,7 +429,7 @@ void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
     for (int row = 0; row < 8; row++)
     {
         int py = y + row;
-        if (py < 0 || py >= UI_H)
+        if (py < gUiClip.y0 || py >= gUiClip.y1)
             continue;
 
         const u8 *src = tile + row * 8;
@@ -369,7 +438,7 @@ void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal, int transparen
         for (int col = 0; col < 8; col++)
         {
             int px = x + col;
-            if (px < 0 || px >= UI_W)
+            if (px < gUiClip.x0 || px >= gUiClip.x1)
                 continue;
 
             if (src[col] == 0 && transparent0)

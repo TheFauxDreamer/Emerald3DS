@@ -47,6 +47,28 @@ int UiTextSmallWidth(const u8 *str);
 // Right-aligned, for HP and quantities that must line up.
 int UiTextRight(int xRight, int y, const u8 *str, u16 fg, u16 shadow);
 
+// ---- text that must fit ---------------------------------------------------
+//
+// For any text whose length the code does not control: nicknames, OT names,
+// box names, a partner's name. Every other width on this screen is measured
+// against the longest string the game has, which cannot be done for text a
+// player typed.
+//
+// Both cut at whole characters and end a cut with the game's own ellipsis
+// (CHAR_ELLIPSIS), never inside a glyph. A string that fits draws exactly as
+// UiText draws it.
+
+// One line in at most `maxW` pixels. Stops at the first newline, and a string
+// that has more after it counts as cut. Returns the advance.
+int UiTextClipped(int x, int y, int maxW, const u8 *str, u16 fg, u16 shadow);
+
+// Up to `maxLines` lines of `maxW` pixels, UI_LINE_H apart. A line breaks at the
+// last space that fits, or inside a word that is wider than a whole line. The
+// string's own newlines break too. If the text needs more lines, the last one
+// ends in the ellipsis. Returns the number of lines drawn.
+int UiTextWrapped(int x, int y, int maxW, int maxLines, const u8 *str,
+                  u16 fg, u16 shadow);
+
 int UiNum(int x, int y, s32 value, u16 fg, u16 shadow);
 int UiNumRight(int xRight, int y, s32 value, u16 fg, u16 shadow);
 

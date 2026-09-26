@@ -76,8 +76,8 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
 
     if (scale == 1)
     {
-        int col0 = (x < 0) ? -x : 0;
-        int col1 = (x + width > UI_W) ? UI_W - x : width;
+        int col0 = (x < gUiClip.x0) ? gUiClip.x0 - x : 0;
+        int col1 = (x + width > gUiClip.x1) ? gUiClip.x1 - x : width;
 
         for (int row = 0; row < font->height && col0 < col1; row++)
         {
@@ -86,7 +86,7 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
             u16 *dst;
             u32 wLo, wHi;
 
-            if (py < 0 || py >= UI_H)
+            if (py < gUiClip.y0 || py >= gUiClip.y1)
                 continue;
 
             // The glyph is four 8x8 tiles. A row's left half and right half are
@@ -119,7 +119,7 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
             int py = y + row * scale + sy;
             u16 *dst;
 
-            if (py < 0 || py >= UI_H)
+            if (py < gUiClip.y0 || py >= gUiClip.y1)
                 continue;
 
             dst = &UiFb()[py * UI_STRIDE];
@@ -138,7 +138,7 @@ static void BlitGlyph(const struct UiFont *font, int x, int y, u16 glyphId,
                 {
                     int px = x + col * scale + sx;
 
-                    if (px < 0 || px >= UI_W)
+                    if (px < gUiClip.x0 || px >= gUiClip.x1)
                         continue;
 
                     dst[px] = colour;
@@ -342,6 +342,205 @@ static int TextWidth(const struct UiFont *font, const u8 *str)
 int UiTextRight(int xRight, int y, const u8 *str, u16 fg, u16 shadow)
 {
     return UiText(xRight - UiTextWidth(str), y, str, fg, shadow);
+}
+
+// ------------------------------------------------------ text that must fit --
+//
+// A string is walked in units: one glyph byte, a two-byte CHAR_EXTRA_SYMBOL or
+// CHAR_KEYPAD_ICON, or a control code with its arguments. A cut is only ever
+// between two units, so no code or glyph is split.
+
+// The bytes in the unit at `str`, or 0 for a bad string that stops the walk.
+static int UnitLen(const u8 *str)
+{
+    if (*str == EXT_CTRL_CODE_BEGIN)
+        return Truncated(str) ? 0 : CtrlCodeSpan(str);
+    if (*str == CHAR_EXTRA_SYMBOL || *str == CHAR_KEYPAD_ICON)
+        return Truncated(str) ? 0 : 2;
+    return 1;
+}
+
+// The pen after the unit at `str`, from `w`. The same rules as TextWidth.
+static int UnitPen(const struct UiFont *font, const u8 *str, int w)
+{
+    if (*str == EXT_CTRL_CODE_BEGIN)
+    {
+        u8 arg = str[2];
+
+        switch (str[1])
+        {
+        case EXT_CTRL_CODE_CLEAR:    return w + arg;
+        case EXT_CTRL_CODE_SKIP:     return arg;
+        case EXT_CTRL_CODE_CLEAR_TO: return (arg > w) ? arg : w;
+        default:                     return w;
+        }
+    }
+
+    if (*str == CHAR_EXTRA_SYMBOL)
+        return w + font->widths[str[1] | 0x100];
+    if (*str == CHAR_KEYPAD_ICON)
+        return w;
+    return w + font->widths[*str];
+}
+
+// One line of `str`, which ends at a newline or EOS, measured against `maxW`.
+struct LineFit
+{
+    int len;        // bytes to the end of the line
+    int fit;        // bytes of the longest start that fits
+    int wrap;       // bytes before the last space that fits, or -1
+    bool8 over;     // the whole line does not fit
+};
+
+static void FitLine(const struct UiFont *font, const u8 *str, int maxW,
+                    struct LineFit *out)
+{
+    int i = 0, w = 0;
+    int guard = UI_TEXT_MAX;
+
+    out->fit = 0;
+    out->wrap = -1;
+    out->over = FALSE;
+
+    while (str[i] != EOS && str[i] != CHAR_NEWLINE && guard-- > 0)
+    {
+        int n = UnitLen(&str[i]);
+        int next;
+
+        if (n == 0)
+            break;
+
+        // A break goes before the space, and the space itself is dropped, so
+        // the text before it is what must fit.
+        if (str[i] == CHAR_SPACE && !out->over)
+            out->wrap = i;
+
+        next = UnitPen(font, &str[i], w);
+        if (next > maxW)
+            out->over = TRUE;
+        if (!out->over)
+            out->fit = i + n;
+
+        w = next;
+        i += n;
+    }
+
+    out->len = i;
+}
+
+// Draw `n` bytes of `str`, and the ellipsis after them if `ellipsis`. Trailing
+// spaces before an ellipsis go, so it reads "SEA…" and not "SEA …".
+static int DrawCut(const struct UiFont *font, int x, int y, const u8 *str,
+                   int n, bool8 ellipsis, u16 fg, u16 shadow)
+{
+    u8 buf[UI_TEXT_MAX + 2];
+
+    if (n > UI_TEXT_MAX)
+        n = UI_TEXT_MAX;
+
+    memcpy(buf, str, (size_t)n);
+
+    if (ellipsis)
+    {
+        while (n > 0 && buf[n - 1] == CHAR_SPACE)
+            n--;
+        buf[n++] = CHAR_ELLIPSIS;
+    }
+
+    buf[n] = EOS;
+    return DrawText(font, x, y, buf, fg, shadow, 1);
+}
+
+// One line with an ellipsis, in `maxW`: the start that fits beside the
+// ellipsis. If even the ellipsis does not fit, nothing draws.
+static int DrawEllipsized(const struct UiFont *font, int x, int y, int maxW,
+                          const u8 *str, u16 fg, u16 shadow)
+{
+    struct LineFit fit;
+    int room = maxW - font->widths[CHAR_ELLIPSIS];
+
+    if (room < 0)
+        return 0;
+
+    FitLine(font, str, room, &fit);
+    return DrawCut(font, x, y, str, fit.fit, TRUE, fg, shadow);
+}
+
+int UiTextClipped(int x, int y, int maxW, const u8 *str, u16 fg, u16 shadow)
+{
+    struct LineFit fit;
+
+    if (str == NULL)
+        return 0;
+
+    FitLine(&sFontNormal, str, maxW, &fit);
+
+    if (!fit.over && str[fit.len] == EOS)
+        return UiText(x, y, str, fg, shadow);
+
+    return DrawEllipsized(&sFontNormal, x, y, maxW, str, fg, shadow);
+}
+
+int UiTextWrapped(int x, int y, int maxW, int maxLines, const u8 *str,
+                  u16 fg, u16 shadow)
+{
+    int lines = 0;
+    int guard = UI_TEXT_MAX;
+
+    if (str == NULL)
+        return 0;
+
+    while (*str != EOS && lines < maxLines && guard-- > 0)
+    {
+        struct LineFit fit;
+        bool8 last = (lines == maxLines - 1);
+        int n;
+
+        FitLine(&sFontNormal, str, maxW, &fit);
+
+        if (!fit.over)
+        {
+            const u8 *rest = str + fit.len;
+
+            if (*rest == CHAR_NEWLINE)
+                rest++;
+
+            // The last line, with text still to come: say so.
+            if (last && *rest != EOS)
+            {
+                DrawEllipsized(&sFontNormal, x, y, maxW, str, fg, shadow);
+                return lines + 1;
+            }
+
+            DrawCut(&sFontNormal, x, y, str, fit.len, FALSE, fg, shadow);
+            str = rest;
+        }
+        else if (last)
+        {
+            DrawEllipsized(&sFontNormal, x, y, maxW, str, fg, shadow);
+            return lines + 1;
+        }
+        else
+        {
+            // At the last space that fits, or inside the word when one word is
+            // wider than the line. At least one unit, so the walk always moves.
+            n = (fit.wrap > 0) ? fit.wrap : fit.fit;
+            if (n == 0)
+                n = UnitLen(str) ? UnitLen(str) : 1;
+
+            DrawCut(&sFontNormal, x, y, str, n, FALSE, fg, shadow);
+            str += n;
+
+            // The space that the break replaced, and any after it.
+            while (*str == CHAR_SPACE)
+                str++;
+        }
+
+        y += UI_LINE_H;
+        lines++;
+    }
+
+    return lines;
 }
 
 static void NumToStr(u8 *dst, s32 value)

@@ -18,7 +18,8 @@ reimplemented. It paints into a `320x240` RGB565 area of a buffer that the host
 owns (`sFb`, [ui_draw.c:33](ui/ui_draw.c#L33), set by `UiSetFb`), and the host
 uploads the changed rows of that buffer to a
 PICA200 texture only when the UI says it changed. There is no heap, no view
-stack, no widget library, and no text clipping. Everything is a static in a
+stack and no widget library. There is a clip rect and text that cuts itself to
+fit (sections 8 and 9), but nothing uses them yet. Everything is a static in a
 file, drawn with rectangles and blits at hand-measured coordinates.
 
 ---
@@ -38,7 +39,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)                                      FULL rate, divider or not
      sample_touch(&touch)            3ds/host/main.c:99
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:870   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:875   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        AchTick()          achievement checks
                                        toast / strip / tab-bar tap  OR  UiXTouch(touch)
@@ -150,10 +151,10 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1095 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1100 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
 | [ui/ui_shell.h](ui/ui_shell.h) | 243 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1295 / 258 | Framebuffer pointer and dirty band, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 442 / 60 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/tab_party.c](ui/tab_party.c) | 1222 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel (and its multiplier in battle), per-move matchup arrows, and the IV/EV spread, HP, mon-icon and status-badge animation |
 | [ui/tab_bag.c](ui/tab_bag.c) | 670 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
 | [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
@@ -391,7 +392,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:870](ui/bottom_screen.c#L870)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:875](ui/bottom_screen.c#L875)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -426,7 +427,7 @@ Two things follow, and both are load bearing:
 Acting on release rather than press means a touch that slides off a control does
 not fire it. Keep that convention.
 
-Hit testing is one helper, [ui_draw.c:1250](ui/ui_draw.c#L1250):
+Hit testing is one helper, [ui_draw.c:1319](ui/ui_draw.c#L1319):
 
 ```c
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
@@ -441,7 +442,7 @@ as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L2
 
 ### Press and hold
 
-`UiHoldRepeat` ([ui_draw.c:1261](ui/ui_draw.c#L1261)) is the one exception to the
+`UiHoldRepeat` ([ui_draw.c:1330](ui/ui_draw.c#L1330)) is the one exception to the
 `justReleased` guard, and it is why the guard moved down a few lines in the
 three list tabs. The scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)),
 BAG ([tab_bag.c:606](ui/tab_bag.c#L606)) and TROPHY
@@ -876,8 +877,19 @@ Corollaries worth keeping:
 ## 8. Drawing API
 
 All coordinates are pixels unless the name says tiles. Everything clamps against
-`0..UI_W/UI_H` only; **there is no clip rectangle**, so a wide string paints over
-its neighbours (section 9).
+**the clip rect**, `gUiClip`, which is the full screen unless someone pushed a
+smaller one:
+
+```c
+void UiClipPush(int x, int y, int w, int h);  // intersects with the current rect
+void UiClipPop(void);                         // pop each push in the same function
+void UiClipReset(void);                       // the shell, before every paint
+```
+
+Push around anything whose size you do not control: a list row, a grid cell, a
+panel with player text. The stack is `UI_CLIP_DEPTH` (4) deep. `UiClear` and
+`UiRestoreRect` ignore the clip on purpose. A new primitive must clamp against
+`gUiClip`, not against `UI_W` / `UI_H`, or it draws through every clip.
 
 **Every primitive that writes a pixel must call `UiTouchRows(y, h)`.** That is
 how the dirty band (section 2) learns which rows to upload. A new blitter that
@@ -1046,21 +1058,31 @@ invisible text. Do not "simplify" `ui_text.c` back onto it.
 
 ### The text trap
 
-**There is no clipping, wrapping, ellipsis or truncation.** Every panel width in
-the tree is hand-measured against the longest known game string. For example
-BAG's list panel is 24 tiles because that leaves exactly 108px, the width of the
-widest item description line in the game ([tab_bag.c:41](ui/tab_bag.c#L41)).
+Every panel width in the tree that existed before the clip is hand-measured
+against the longest known game string. For example BAG's list panel is 24 tiles
+because that leaves exactly 108px, the width of the widest item description
+line in the game ([tab_bag.c:41](ui/tab_bag.c#L41)).
 
-That does not survive player-authored text: nicknames, OT names, box names. If
-you add a view showing any of those, either measure and truncate yourself or
-implement `UiClipPush/Pop` first (step 1 of `SECOND_SCREEN_PLAN.md`). The
-blitters already clamp against the screen edges, so a clip means each clamp
-tests the clip rect instead, at no extra per-pixel cost. `BlitGlyph` at scale 1
-clamps a glyph's column span once, not each pixel, so the clip goes there too.
+That does not survive player-authored text: nicknames, OT names, box names. For
+any of those, use the two calls that fit text to a width:
 
-The pattern to copy until then is `DrawNameClipped` in
-[ui_card.c](ui/ui_card.c): copy the name, then drop characters from the end
-until `UiTextWidth` fits the limit. That is how LINK shows a partner's name.
+```c
+int UiTextClipped(int x, int y, int maxW, const u8 *str, u16 fg, u16 shadow);
+int UiTextWrapped(int x, int y, int maxW, int maxLines, const u8 *str,
+                  u16 fg, u16 shadow);   // returns lines drawn
+```
+
+Both cut between whole characters (never inside a glyph or a control code) and
+end a cut with the game's ellipsis, `CHAR_ELLIPSIS`, which `UiAscii` cannot
+produce. A string that fits draws exactly as `UiText` would. `UiTextWrapped`
+breaks at the last space that fits, or inside a word wider than the line, and
+puts the ellipsis on its last line when text is left over. Normal font only.
+
+The clip rect (section 8) is the backstop, not the tool: it cuts a glyph in
+half. Use it around a row so a mistake cannot reach the next one, and use
+these two for the text itself. `DrawNameClipped` in [ui_card.c](ui/ui_card.c)
+predates them and still drops characters with no ellipsis, so the LINK card's
+names stay as they shipped.
 
 ---
 
@@ -1124,7 +1146,7 @@ in its own input, so an overrun lands in the neighbouring statics.
 that decompresses to 8192 bytes while `gMonFrontPicTable` reports the size of
 one frame, and the 6KB overrun repainted the cached window-frame palette. The
 symptom was every other tab's border changing colour. See
-[ui_draw.c:618](ui/ui_draw.c#L618) and [tab_map.c:140](ui/tab_map.c#L140).
+[ui_draw.c:686](ui/ui_draw.c#L686) and [tab_map.c:140](ui/tab_map.c#L140).
 
 ---
 
@@ -1459,7 +1481,7 @@ appears.
 | Data abort with **FAR exactly 00000000**, Read | A null pointer dereferenced at offset 0. On a GBA this is free -- no MMU, address 0 is the BIOS, the read returns junk nobody looks at -- so vanilla code does it in places and gets away with it. On the ARM11 it is fatal. `FreeResetData_ReturnToOvOrDoEvolutions` (`src/battle_main.c`) was one: it freed the battle sprite data on every frame of the end-of-battle fade while those sprites were still animating, and `SpriteCB_EnemyShadow` read `gBattleSpritesDataPtr->battlerData` (first member, so offset 0) straight through the NULL. It presented as "running from a wild battle sometimes crashes" -- only outcomes that leave the opponent standing, and only the 61 species with a non-zero `gEnemyMonElevation`. `Cmd_playanimation` and `Cmd_playanimation_var` (`src/battle_script_commands.c`) were another: most `playanimation` scripts give no argument, and both read the NULL argument pointer. With Battle Scene off, only a broken Substitute or Snatch got there. With it on, so did weather, berries and Leftovers. They are fixed under `UBFIX`. |
 | Every tab's border changes colour after viewing a dex entry | Decompress overrun into neighbouring statics. Size-check first. |
 | Invisible text | Using the game's `DecompressGlyphTile()` instead of `ui_text.c`'s own decoder. |
-| Text overruns into the next panel | No clipping exists. Measure, or add `UiClipPush`. |
+| Text overruns into the next panel | Draw it with `UiTextClipped` or `UiTextWrapped`, and push a clip around the panel so nothing else can overrun it. |
 | A panel stops updating | Two state-key contributions cancelling in one hash slot. |
 | A readout goes stale until you switch tabs | State changes without a touch and has no state key. |
 | Every tap lands at (0,0) | Reading touch coordinates without the latch, or dropping the `justReleased` guard. |

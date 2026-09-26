@@ -731,6 +731,10 @@ static void Redraw(void)
     // coarse for the paint. See 3ds/bridge.h.
     unsigned long long tp = CtrTicksNow();
 
+    // Every paint starts with the full screen as the clip, so a view that
+    // pushes and does not pop spoils one paint, not all of them.
+    UiClipReset();
+
     // Before the game starts, show only the title's TOUCH TO START, in the lit
     // half of its blink. While it is up, also show the build id in the corner.
     if (!sInGame)
@@ -849,6 +853,7 @@ static void RedrawAnimated(void)
 {
     unsigned long long tp = CtrTicksNow();
 
+    UiClipReset();
     DrawAnimatedLayer();
     sDirty = 1;
 
