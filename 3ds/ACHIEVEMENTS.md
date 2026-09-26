@@ -6,7 +6,7 @@ this list still matches them (see
 [Keeping this list current](#keeping-this-list-current)).
 Part E of [ROADMAP.md](ROADMAP.md) has what is left to do.
 
-**83 achievements**: 65 main, 18 post-game.
+**85 achievements**: 67 main, 18 post-game.
 
 - **Two pages.** MAIN holds everything that can be done up to the Hall of Fame.
   POST-GAME holds what only opens up after it. Its rows read "Hidden
@@ -106,6 +106,8 @@ knockout, so these still unlock with the randomiser on.
 | 80 | What Do We Have Here! | Find any hidden item | Any `FLAG_HIDDEN_ITEM_*` flag, which only picking the item up sets. Route 104 alone hides five |
 | 79 | You've Got Mail! | Receive any mail | Any Mail item in the bag or the PC's item storage, or any written Mail, held by a party Pokémon or kept in the PC mailbox. Petalburg's Mart is the first to sell it, and the in-game trades' Plusle, Horsea and Meowth arrive holding a letter |
 | 81 | Mystery Communication | Enable Mystery Gift | `FLAG_SYS_MYSTERY_GIFT_ENABLE`: answer the questionnaire on any Poké Mart counter with LINK TOGETHER WITH ALL, once you have the Pokédex |
+| 83 | Where'd the Cable Go? | Trade a Pokémon with another player | `GAME_STAT_POKEMON_TRADES` reaches 1. Only a link trade raises it (`CB2_SaveAndEndTrade` and `CB2_SaveAndEndWirelessTrade`, `src/trade.c`); a trade with an NPC does not. The Cable Club runs over local wireless here, so there is no cable |
+| 84 | Your PC? No My PC. | Meet Lanette on Route 114 | `FLAG_SYS_PC_LANETTE`, set by the first talk with Lanette in her house on Route 114 (`Route114_LanettesHouse/scripts.inc`). She built the PC storage system, and after that every PC is hers |
 | 33 | Cable Car | Ride the cable car up Mt. Chimney | `GAME_STAT_RODE_CABLE_CAR` reaches 1 |
 | 34 | Hot Springs | Soak in the Lavaridge hot springs | `GAME_STAT_ENTERED_HOT_SPRINGS` reaches 1 |
 | 38 | Home Base | Set up a Secret Base | The player's own Secret Base slot is in use (`secretBases[0].secretBaseId`) |
@@ -181,6 +183,6 @@ for the store. The `achievements-list` job in
 
 - **Ids are permanent.** An achievement's id is its bit in `achievements.bin`,
   so a new one takes the next unused id and a retired one's id is never handed
-  out again. Row order is free. The next unused id is **83**.
+  out again. Row order is free. The next unused id is **85**.
 - **Text has to fit:** 212px for a title and 268px for a description, measured
   by the debug page, since the TROPHY tab does not clip.
