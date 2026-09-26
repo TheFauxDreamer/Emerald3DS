@@ -309,6 +309,17 @@ static u8 GetLevelAfterDaycareSteps(struct BoxPokemon *mon, u32 steps)
     return GetLevelFromBoxMonExp(&tempMon);
 }
 
+#if PLATFORM_3DS
+// For the DAY CARE page of the second screen: the level that the Pokemon in
+// slot `slot` has if the player takes it now. Works on a copy.
+u8 Ctr3dsDaycareLevelNow(u8 slot)
+{
+    struct DaycareMon *daycareMon = &gSaveBlock1Ptr->daycare.mons[slot];
+
+    return GetLevelAfterDaycareSteps(&daycareMon->mon, daycareMon->steps);
+}
+#endif
+
 static u8 GetNumLevelsGainedFromSteps(struct DaycareMon *daycareMon)
 {
     u8 levelBefore;
@@ -1090,6 +1101,22 @@ static u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
         }
     }
 }
+
+#if PLATFORM_3DS
+// For the DAY CARE page of the second screen: the old man's words for the two
+// Pokemon, in the order of SetDaycareCompatibilityString. It does not write
+// gSpecialVar_Result or gStringVar4, as that function does.
+const u8 *Ctr3dsDaycareCompatibilityText(void)
+{
+    switch (GetDaycareCompatibilityScore(&gSaveBlock1Ptr->daycare))
+    {
+    case PARENTS_INCOMPATIBLE:      return sCompatibilityMessages[3];
+    case PARENTS_LOW_COMPATIBILITY: return sCompatibilityMessages[2];
+    case PARENTS_MED_COMPATIBILITY: return sCompatibilityMessages[1];
+    default:                        return sCompatibilityMessages[0];
+    }
+}
+#endif
 
 static u8 GetDaycareCompatibilityScoreFromSave(void)
 {

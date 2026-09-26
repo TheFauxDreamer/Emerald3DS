@@ -33,6 +33,13 @@ void Task_UseDigEscapeRopeOnField(u8 taskId);
 bool8 CanUseDigOrEscapeRopeOnCurMap(void);
 u8 CheckIfItemIsTMHMOrEvolutionStone(u16 itemId);
 
+#if PLATFORM_3DS
+// TRUE when a hidden item that is not picked up is at (x, y). The coordinates
+// are the ones PlayerGetDestCoords gives, with MAP_OFFSET. A place in a
+// connected map is searched there, as the Itemfinder does. Reads only.
+bool8 Ctr3dsHiddenItemAt(s16 x, s16 y);
+#endif
+
 enum ItemTMHMOrEvolutionStone
 {
     ITEM_IS_OTHER,

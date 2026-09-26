@@ -31,4 +31,11 @@ bool8 NameHasGenderSymbol(const u8 *name, u8 genderRatio);
 void ShowDaycareLevelMenu(void);
 void ChooseSendDaycareMon(void);
 
+#if PLATFORM_3DS
+// For the second screen. Both read only, and both need a Pokemon in the slot.
+// The text needs two Pokemon in the Day Care.
+u8 Ctr3dsDaycareLevelNow(u8 slot);
+const u8 *Ctr3dsDaycareCompatibilityText(void);
+#endif
+
 #endif // GUARD_DAYCARE_H

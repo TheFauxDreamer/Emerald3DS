@@ -366,22 +366,20 @@ static void DrawBadges(int x, int y, const struct TrainerCard *card)
     }
 }
 
-static void DrawFront(int x, int y, int cardId, const struct TrainerCard *card)
+static void DrawFront(int x, int y, const struct TrainerCard *card, const u8 *name)
 {
     u8 buf[32];
     u16 fg = UI_COL_SHADOW;
     int lx = x + TEXT_X0 + FRONT_LABEL_X;
     int rx = x + TEXT_X0 + FRONT_VALUE_R;
 
-    // NAME/ and the trainer's own name. Read it from gLinkPlayers, which the
-    // link layer already put through ConvertInternationalString; the copy in
-    // the card did not go through it.
+    // NAME/ and the trainer's own name. The caller gives the name: see
+    // UiCardDraw.
     {
         int w = UiText(lx, y + TEXT_Y0 + FRONT_NAME_Y,
                        gText_TrainerCardName, fg, UiThemeShadow());
 
-        DrawNameClipped(lx + w, y + TEXT_Y0 + FRONT_NAME_Y,
-                        gLinkPlayers[cardId].name, rx - lx - w, fg);
+        DrawNameClipped(lx + w, y + TEXT_Y0 + FRONT_NAME_Y, name, rx - lx - w, fg);
     }
 
     // IDNo., five digits with leading zeros, centred over the right column.
@@ -440,7 +438,7 @@ static void BackRow(int x, int y, int row, const char *label, s32 value, int kno
                     UiAscii(buf, "---", sizeof(buf)), UI_COL_DIM, UiThemeShadow());
 }
 
-static void DrawBack(int x, int y, int cardId, const struct TrainerCard *card)
+static void DrawBack(int x, int y, const struct TrainerCard *card, const u8 *name)
 {
     u16 fg = UI_COL_SHADOW;
     // Ruby and Sapphire stop at 0x38, so everything past playTime is theirs
@@ -448,7 +446,7 @@ static void DrawBack(int x, int y, int cardId, const struct TrainerCard *card)
     int full = (card->version != VERSION_RUBY && card->version != VERSION_SAPPHIRE);
 
     DrawNameClipped(x + TEXT_X0 + BACK_LABEL_X, y + TEXT_Y0 + BACK_NAME_Y,
-                    gLinkPlayers[cardId].name, 200, fg);
+                    name, 200, fg);
 
     BackRow(x, y, 0, "POKEMON TRADES", card->pokemonTrades, full);
     BackRow(x, y, 1, "LINK BATTLES WON", card->linkBattleWins, full);
@@ -465,13 +463,22 @@ static void DrawBack(int x, int y, int cardId, const struct TrainerCard *card)
 
 void UiCardDraw(int x, int y, int cardId, int back)
 {
-    const struct TrainerCard *card;
-    int stars;
-
-    if (cardId < 0 || cardId >= (int)ARRAY_COUNT(gTrainerCards) || !LoadGfx())
+    if (cardId < 0 || cardId >= (int)ARRAY_COUNT(gTrainerCards))
         return;
 
-    card = &gTrainerCards[cardId];
+    // The name from gLinkPlayers, which the link layer already put through
+    // ConvertInternationalString. The copy in the card did not go through it.
+    UiCardDrawCard(x, y, &gTrainerCards[cardId], gLinkPlayers[cardId].name, back);
+}
+
+void UiCardDrawCard(int x, int y, const struct TrainerCard *card, const u8 *name,
+                    int back)
+{
+    int stars;
+
+    if (!LoadGfx())
+        return;
+
     stars = CardStars(card);
     LoadPals(stars, card->gender);
 
@@ -492,11 +499,11 @@ void UiCardDraw(int x, int y, int cardId, int back)
 
         UiTrainerPic(x + PIC_X, y + PIC_Y, CardTrainerPic(card));
 
-        DrawFront(x, y, cardId, card);
+        DrawFront(x, y, card, name);
     }
     else
     {
-        DrawBack(x, y, cardId, card);
+        DrawBack(x, y, card, name);
     }
 }
 

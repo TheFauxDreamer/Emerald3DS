@@ -7,7 +7,10 @@
 // with the page as the arg, so a tab switch closes it. Empty cells stay empty,
 // so every tile keeps its place when a new one is added.
 //
-// The pages:
+// The pages, in launcher order:
+// - TRAINER, CLOCK, DOWSING, BERRIES and DAY CARE show game data, as the
+//   Poketch apps of the DS games do. Each has its own view_*.c (view_home.h).
+//   They only read, and they open only when a save is loaded.
 // - SETTINGS is host side only: fast-forward, top-screen scale and button
 //   binds. It does not change how the game plays.
 // - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
@@ -30,6 +33,7 @@
 #include "ui_shell.h"
 #include "ui_link.h"
 #include "ui_view.h"
+#include "view_home.h"
 
 // Ctr3dsCurrentLevelCap(), for the live "cap NN" value on page 2.
 #include "../tweaks.h"
@@ -149,16 +153,21 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define PGR_H         17
 #define PGR_Y         TOP_LINE_Y
 
-// The pages, in launcher order. EXTRAS exists because GAMEPLAY has no
-// vertical space left. LINK is a page because the tab bar is full at six tabs.
-// See ui_link.h.
+// The pages, in launcher order: the ones for the player first, the port's
+// settings after them. EXTRAS exists because GAMEPLAY has no vertical space
+// left. LINK is a page because the tab bar is full at six tabs. See ui_link.h.
 enum
 {
+    PAGE_TRAINER,
+    PAGE_CLOCK,
+    PAGE_DOWSING,
+    PAGE_BERRIES,
+    PAGE_DAYCARE,
+    PAGE_LINK,
     PAGE_SETTINGS,
     PAGE_GAMEPLAY,
     PAGE_EXTRAS,
     PAGE_FOLLOWER,
-    PAGE_LINK,
 #if CTR_DEBUG_MENU
     PAGE_DEBUG,
 #endif
@@ -166,13 +175,34 @@ enum
 };
 
 static const char *const sPageTitle[] = {
-    "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "LINK", "DEBUG",
+    "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "LINK",
+    "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "DEBUG",
 };
 
 // A tile's second line, in the small font: what is behind it.
 static const char *const sPageHint[] = {
-    "speed, scale", "cheats", "comfort", "follower", "cable club", "test build",
+    "your card", "time, eggs", "itemfinder", "berry trees", "route 117",
+    "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
 };
+
+// The pages that read save data. Before a save loads, their tiles are dim and
+// do not open.
+static bool8 PageNeedsSave(u32 page)
+{
+    return page <= PAGE_DAYCARE;
+}
+
+static bool8 SaveLive(void)
+{
+    return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
+}
+
+// A page that draws the whole content area with no frame or title line, and
+// has its own way back.
+static bool8 PageFullBleed(u8 page)
+{
+    return page == PAGE_TRAINER || (page == PAGE_LINK && UiLinkPageFullBleed());
+}
 
 // The page's title sits where the debug page always put its name. BACK is
 // right-aligned to the interior edge, 46px wide like the MAP buttons.
@@ -707,14 +737,20 @@ static void DrawLauncher(void)
     for (u32 i = 0; i < PAGE_COUNT; i++)
     {
         int x = TILE_X(i), y = TILE_Y(i);
+        bool8 live = !PageNeedsSave(i) || SaveLive();
+        const char *hint = sPageHint[i];
 
         UiWindowFrame(x / 8, y / 8, TILE_TW, TILE_TH);
 
         UiAscii(label, sPageTitle[i], sizeof(label));
         UiText(x + (TILE_W - UiTextWidth(label)) / 2, y + TILE_TITLE_DY,
-               label, UiThemeText(), UiThemeShadow());
+               label, live ? UiThemeText() : UI_COL_DIM, UiThemeShadow());
 
-        UiAscii(label, sPageHint[i], sizeof(label));
+        // As in the game, dowsing needs the Itemfinder in the bag.
+        if (i == PAGE_DOWSING && live && !UiDowsingAvailable())
+            hint = "no itemfinder";
+
+        UiAscii(label, hint, sizeof(label));
         UiTextSmall(x + (TILE_W - UiTextSmallWidth(label)) / 2, y + TILE_HINT_DY,
                     label, UI_COL_DIM, UiThemeShadow());
     }
@@ -732,18 +768,30 @@ void UiExtraDraw(void)
 
     page = CurrentPage();
 
-    // A page can ask for the whole content area. LINK does while its trainer
-    // card view is up: a card is a whole GBA screen and does not fit inside the
-    // frame with the title line above it. The view then draws its own way back.
-    if (page == PAGE_LINK && UiLinkPageFullBleed())
+    // A page can ask for the whole content area. TRAINER always does, and LINK
+    // does while its trainer card view is up: a card is a whole GBA screen and
+    // does not fit inside the frame with the title line above it. The view
+    // then draws its own way back.
+    if (PageFullBleed(page))
     {
-        UiLinkPageDraw();
+        if (page == PAGE_TRAINER)
+            UiTrainerPageDraw();
+        else
+            UiLinkPageDraw();
         return;
     }
 
     UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
 
-    if (page == PAGE_SETTINGS)
+    if (page == PAGE_CLOCK)
+        UiClockPageDraw();
+    else if (page == PAGE_DOWSING)
+        UiDowsingPageDraw();
+    else if (page == PAGE_BERRIES)
+        UiBerriesPageDraw();
+    else if (page == PAGE_DAYCARE)
+        UiDaycarePageDraw();
+    else if (page == PAGE_SETTINGS)
         DrawPage1();
     else if (page == PAGE_GAMEPLAY)
         DrawPage2();
@@ -777,12 +825,36 @@ u32 UiTweakStateKey(void)
          | ((u32)Ctr3dsGetBagSort() << 12);
 }
 
+// The key of an open game data page, spread over all 32 bits. The shell asks
+// only while a save is loaded, which those pages need.
+static u32 GamePageKey(void)
+{
+    u32 key;
+
+    if (!PageOpen())
+        return 0;
+
+    switch (CurrentPage())
+    {
+    case PAGE_TRAINER: key = UiTrainerPageKey(); break;
+    case PAGE_CLOCK:   key = UiClockPageKey();   break;
+    case PAGE_DOWSING: key = UiDowsingPageKey(); break;
+    case PAGE_BERRIES: key = UiBerriesPageKey(); break;
+    case PAGE_DAYCARE: key = UiDaycarePageKey(); break;
+    default:           return 0;
+    }
+
+    return key * 0x9E3779B1u;
+}
+
 u32 UiExtraStateKey(void)
 {
-    // The page uses bits 0-2 (0 for the launcher, the page + 1 otherwise) and
-    // the tweaks use bits 4-17. Bit 3 is for MUSIC FAST. Only its button changes it, but fold it in anyway: a setting
-    // on the screen must not go stale. The audio switches use bits 24-27, and
-    // the LINK page uses bits 19-23 and 28-31.
+    // The tweaks use bits 4-17. Bit 3 is for MUSIC FAST. Only its button
+    // changes it, but fold it in anyway: a setting on the screen must not go
+    // stale. The audio switches use bits 24-27, and the LINK page uses bits
+    // 19-23 and 28-31. The page (0 for the launcher, the page + 1 otherwise)
+    // and the key of a game data page are too many bits for the rest, so they
+    // are hashed over the whole value.
     u32 audio = 0;
 
     for (u32 i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
@@ -790,8 +862,8 @@ u32 UiExtraStateKey(void)
 
     u32 page = PageOpen() ? (u32)CurrentPage() + 1 : 0;
 
-    return page
-         | ((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 3)
+    return ((page * 0x2545F491u) ^ GamePageKey())
+         ^ (((u32)(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST) << 3)
          | (UiTweakStateKey() << 4)
          // This switch can change without a touch: 3ds/tweaks.c clears it when
          // the armed encounter starts, which can occur while this tab is on the
@@ -800,7 +872,7 @@ u32 UiExtraStateKey(void)
          | (audio << 24)
          // Only on its own page. The wireless state changes with no touch, and
          // reading it costs nothing, but no other page has a reason to poll it.
-         | (PageOpen() && CurrentPage() == PAGE_LINK ? UiLinkPageStateKey() : 0);
+         | (PageOpen() && CurrentPage() == PAGE_LINK ? UiLinkPageStateKey() : 0));
 }
 
 static void TouchPage1(const CtrTouchState *t)
@@ -967,6 +1039,13 @@ void UiExtraTouch(const CtrTouchState *t)
             if (!UiHit(t, TILE_X(i), TILE_Y(i), TILE_W, TILE_H))
                 continue;
 
+            if (PageNeedsSave(i) && !SaveLive())
+                return;
+            if (i == PAGE_TRAINER)
+                UiTrainerPageOpen();
+            else if (i == PAGE_BERRIES)
+                UiBerriesPageOpen();
+
 #if CTR_DEBUG_MENU
             // Opening a page disarms RESYNC, so it is never armed when the
             // debug page comes back.
@@ -982,9 +1061,12 @@ void UiExtraTouch(const CtrTouchState *t)
 
     // Not while a page has the whole screen: the title line is not drawn then,
     // and a control under where BACK would be must not be shadowed by it.
-    if (page == PAGE_LINK && UiLinkPageFullBleed())
+    if (PageFullBleed(page))
     {
-        UiLinkPageTouch(t);
+        if (page == PAGE_TRAINER)
+            UiTrainerPageTouch(t);
+        else
+            UiLinkPageTouch(t);
         return;
     }
 
@@ -996,7 +1078,9 @@ void UiExtraTouch(const CtrTouchState *t)
         return;
     }
 
-    if (page == PAGE_SETTINGS)
+    if (page == PAGE_BERRIES)
+        UiBerriesPageTouch(t);
+    else if (page == PAGE_SETTINGS)
         TouchPage1(t);
     else if (page == PAGE_GAMEPLAY)
         TouchPage2(t);

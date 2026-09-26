@@ -34,4 +34,9 @@ struct BerryCrushBerryData {
 
 extern const struct BerryCrushBerryData gBerryCrush_BerryData[];
 
+#if PLATFORM_3DS
+// The number of growth stages in which tree `id` got water, 0 to 4.
+u8 Ctr3dsBerryTreeStagesWatered(u8 id);
+#endif
+
 #endif // GUARD_BERRY_H
