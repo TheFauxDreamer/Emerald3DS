@@ -85,13 +85,15 @@ caption when they apply:
   than a spoiler for it. It follows the randomiser when that is on, and it
   follows you from room to room inside a cave.
 
-**TROPHY.** 83 achievements, earned by playing, from choosing your starter and
+**TROPHY.** 85 achievements, earned by playing, from choosing your starter and
 getting the Bike through the eight badges, the HMs, the Master Ball and the
 Champion, plus the legends, the Regi puzzles, Pokédex milestones, contests and
 a few odder ones (use Splash, hit a jackpot, catch a shiny, find a hidden item,
-play the White or Black Flute, walk into Shoal Cave at low tide). One, An
-Impossible Task, asks for the complete National Pokédex, which needs trading
-and so cannot be earned yet. `3ds/ACHIEVEMENTS.md` lists them all.
+play the White or Black Flute, walk into Shoal Cave at low tide, trade with
+another player, meet the woman who built the PC system). One, An Impossible
+Task, asks for the complete National Pokédex, which needs species that only
+FireRed, LeafGreen or Colosseum can give, so it cannot be earned.
+`3ds/ACHIEVEMENTS.md` lists them all.
 Seasoned Traveller asks for every route and town in Hoenn, and once three or
 fewer are left it names them. A save from an earlier build already counts the
 routes where it found an item or beat a trainer. The event islands count too: after the Hall of

@@ -173,7 +173,7 @@ static const u16 sEventItems[] =
 // table below lists them MAIN first. Each page shows its color blocks in that
 // order.
 //
-// Ids are permanent. A new achievement takes the next unused id (83 now). A
+// Ids are permanent. A new achievement takes the next unused id (85 now). A
 // removed one leaves its id unused forever. Rows can move between groups,
 // because only the id is stored. C cannot check the ids at compile time, so the
 // debug page counts duplicate or out-of-range ids.
@@ -185,7 +185,7 @@ static const u16 sEventItems[] =
 // The player can earn everything here in this port, with one exception: An
 // Impossible Task, as its title says. Thus there is no row for the complete
 // Hoenn Pokedex or for more than about 200 in the National one. Both need trade
-// evolutions, and trading needs the Cable Club (the local-wireless branch).
+// evolutions, so both need a second console and a partner.
 //
 // The file 3ds/ACHIEVEMENTS.md also lists every row, in the same order.
 
@@ -287,6 +287,16 @@ static const struct AchDef sMainExtras[] =
     // The questionnaire on any Mart's counter, after the player has a Pokedex
     // (data/scripts/questionnaire.inc).
     FLAG(81, "Mystery Communication", "Enable Mystery Gift",          FLAG_SYS_MYSTERY_GIFT_ENABLE),
+    // Only a link trade counts. The two paths that raise the stat are
+    // CB2_SaveAndEndTrade and CB2_SaveAndEndWirelessTrade (src/trade.c), and a
+    // trade with an NPC uses neither. Here the Cable Club goes over local
+    // wireless, so there is no cable.
+    STAT(83, "Where'd the Cable Go?", "Trade a " POKEMON " with another player",
+         GAME_STAT_POKEMON_TRADES, 1),
+    // Lanette made the PC storage system. Her house is on Route 114, and the
+    // first talk with her sets the flag (Route114_LanettesHouse/scripts.inc).
+    // After that, every PC in the game is hers.
+    FLAG(84, "Your PC? No My PC.", "Meet Lanette on Route 114",       FLAG_SYS_PC_LANETTE),
     STAT(33, "Cable Car",          "Ride the cable car up Mt. Chimney", GAME_STAT_RODE_CABLE_CAR, 1),
     STAT(34, "Hot Springs",        "Soak in the Lavaridge hot springs", GAME_STAT_ENTERED_HOT_SPRINGS, 1),
     SECRET_BASE(38, "Home Base",   "Set up a Secret Base"),
@@ -356,11 +366,11 @@ static const struct AchDef sPostLegends[] =
     FLAG(18, "Odd Tree",           "Deal with the tree by the Frontier", FLAG_DEFEATED_SUDOWOODO),
 };
 
-// The one row that the player cannot earn yet, as its title says. "Complete" is
+// The one row that the player cannot earn, as its title says. "Complete" is
 // the game's own test, which the Pokedex diploma uses: every species except
 // Mew, Lugia, Ho-Oh, Celebi, Jirachi and Deoxys (HasAllMons, src/pokedex.c).
-// The rest includes the Kanto and Johto starters and legends, which only a
-// trade can give.
+// The rest includes the Kanto and Johto starters and legends. No Emerald holds
+// them, and this port links only to another copy of itself.
 static const struct AchDef sPostPokemon[] =
 {
     DEX_COMPLETE(82, "An Impossible Task", "Complete the National " POKEDEX),
