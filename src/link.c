@@ -129,6 +129,19 @@ static EWRAM_DATA void *sLinkErrorBgTilemapBuffer = NULL;
 // from the send queue. Read by Ctr3dsLinkPump() when that frame is accepted.
 // See the pop in that function for why the answer cannot be asked for later.
 static EWRAM_DATA bool8 sCtrCmdFromQueue = FALSE;
+
+// TRUE when the transport landed a frame that no command has answered yet.
+// Ctr3dsLinkPump() sets it, LinkMain2() consumes it. See the note there.
+static EWRAM_DATA bool8 sCtrFrameDelivered = FALSE;
+
+// Consecutive frames a link callback has waited on a transport that delivered
+// nothing, and how many of them are worth a line. 120 is about two seconds at
+// 60 fps, which is far longer than any stall a healthy link takes and far
+// shorter than the lag tolerance. It counts up to the report and stops there,
+// so one starved link cannot fill a log and the count cannot wrap back onto it.
+#define CTR_CALLBACK_HELD_REPORT 120
+
+static EWRAM_DATA u16 sCtrCallbackHeld = 0;
 #endif
 
 static void InitLocalLinkPlayer(void);
@@ -388,6 +401,8 @@ void OpenLink(void)
         // belong to one link. See Ctr3dsLinkNewSession (3ds/host/link.c).
         Ctr3dsLinkNewSession("open");
         sCtrCmdFromQueue = FALSE;
+        sCtrFrameDelivered = FALSE;
+        sCtrCallbackHeld = 0;
 #endif
         ResetSerial();
         InitLink();
@@ -438,6 +453,8 @@ void CloseLink(void)
     // frames again. Several callers close the link on one side only.
     Ctr3dsLinkNewSession("close");
     sCtrCmdFromQueue = FALSE;
+    sCtrFrameDelivered = FALSE;
+    sCtrCallbackHeld = 0;
 #endif
 }
 
@@ -553,17 +570,38 @@ u16 LinkMain2(const u16 *heldKeys)
         // QUEUE_CAPACITY about ten seconds into a link. Both consoles then show
         // Emerald's communication error.
         //
-        // So do not make a command for a frame that carried nothing. The block
-        // transfer waits instead, which is what it would do on a cable.
-        //
         // The alternative was to slow this console until it matched its peer, by
         // waiting longer in the transport. That is not available: CtrAudioFrame
         // (3ds/host/audio.c) makes exactly one buffer of 224 samples for each
         // game frame against a fixed 13401 Hz drain, and a shortfall of 0.29% is
         // already audible.
         //
+        // The test is what the transport DELIVERED. It must not be
+        // LINK_STAT_RECEIVED_NOTHING, which is what an earlier build used, and
+        // the difference is a deadlock rather than a detail.
+        //
+        // An idle link carries empty commands. Ctr3dsLinkPump queues a received
+        // set only when it is non-zero, matching DoRecv on hardware, so a quiet
+        // link leaves the receive queue empty and DequeueRecvCmds raises
+        // receivedNothing on every frame. Gating on that bit makes the only
+        // writer of commands wait on the commands it is the only writer of, and
+        // an idle link can then never speak again. Two callbacks are built to
+        // run on exactly that link: LinkCB_ReadyCloseLink and LinkCB_Standby
+        // both act only when gLastRecvQueueCount is 0, so neither could run at
+        // all. Both consoles froze on a black screen at the last step of a
+        // trade, where CB_WaitToStartTrade (src/trade.c) installs
+        // LinkCB_ReadyCloseLink after a fade with no traffic in it. The link
+        // stayed healthy throughout, which is why nothing in a log said so.
+        //
+        // Delivery cannot deadlock, because it does not depend on the game: the
+        // pump sends a zero-filled command when the queue is empty, so a frame
+        // lands whether or not either console had anything to say.
+        //
+        // The flag is consumed even when there is no callback, because it means
+        // this delivered frame's command slot and not "a callback is owed".
+        //
         // ProcessRecvCmds above still runs, and must: it skips any player whose
-        // command is 0, which is all of them on this path, and it clears
+        // command is 0, which is all of them on a quiet link, and it clears
         // gLinkPartnersHeldKeys. TrySetLinkErrorBuffer below still runs too,
         // because every link error passes through it.
         //
@@ -571,10 +609,23 @@ u16 LinkMain2(const u16 *heldKeys)
         // hang off this guard. An `if` whose body sits past the #endif compiles
         // both ways today and silently captures the next statement anyone adds
         // after it, in one configuration only.
-        if (!(gLinkStatus & LINK_STAT_RECEIVED_NOTHING))
+        if (sCtrFrameDelivered)
         {
+            sCtrFrameDelivered = FALSE;
+            sCtrCallbackHeld = 0;
             if (gLinkCallback != NULL)
                 gLinkCallback();
+        }
+        else if (gLinkCallback != NULL
+              && sCtrCallbackHeld < CTR_CALLBACK_HELD_REPORT)
+        {
+            // A callback that is waiting on a transport that has stopped
+            // delivering. Say so once, because no other line can: the transport
+            // reports a healthy link right up to the moment the game stops, and
+            // the freeze above wrote nothing at all to a log. The count is
+            // consecutive frames, so a stall that ends is never reported.
+            if (++sCtrCallbackHeld == CTR_CALLBACK_HELD_REPORT)
+                Ctr3dsLinkLogFault("link callback starved");
         }
 #else
         if (gLinkCallback != NULL)
@@ -2371,6 +2422,12 @@ static void Ctr3dsLinkPump(void)
 
     gLink.lag = 0;
     Ctr3dsLinkNoteOk();
+
+    // The frame landed, so the game may make one command for it. Before the
+    // QUEUE_FULL_RECV return below, because that return is about where the
+    // received set goes and this is about the frame having arrived at all. See
+    // the note in LinkMain2.
+    sCtrFrameDelivered = TRUE;
 
     // Pop what actually went out, which is not always what this call offered.
     //

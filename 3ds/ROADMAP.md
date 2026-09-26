@@ -36,17 +36,40 @@ The large pieces:
   transport both run on hardware. Three faults are confirmed fixed on hardware:
   the transport lost and repeated commands, the link went live at pairing time
   instead of at the host's confirm, and a console that closed a link told its peer
-  nothing. One is fixed and waiting on a console test, and it is the one that
-  ended every link within about ten seconds: the game made a command for each of
-  its own frames while the transport carried one for each frame that landed, and
-  the send queue took the difference until it overflowed.
+  nothing. A fourth ended every link within about ten seconds: the game made a
+  command for each of its own frames while the transport carried one for each
+  frame that landed, and the send queue took the difference until it overflowed.
+
+  That fourth fix was tested on hardware and it froze both consoles at the last
+  step of a trade, so it took a second pass. The cap itself is right; the signal
+  it read was not. It made a command only when `LINK_STAT_RECEIVED_NOTHING` was
+  clear, and that bit is set on every frame of an IDLE link, because the pump
+  queues a received set only when it is non-zero. `gLinkCallback` is the only
+  writer of commands, so gating it on commands arriving makes a quiet link
+  permanently mute. `LinkCB_ReadyCloseLink` and `LinkCB_Standby` are the two
+  callbacks built to run on a quiet link, and neither could run at all;
+  `CB_WaitToStartTrade` installs the first of them after a fade with no traffic
+  in it, so both consoles sat on a black screen while the transport kept
+  reporting a healthy link. Nothing in either log named it.
+
+  The signal is now what the transport DELIVERED: `sCtrFrameDelivered`, set by
+  `Ctr3dsLinkPump` when a frame lands and consumed by `LinkMain2`. Delivery does
+  not depend on the game, because the pump sends a zero-filled command when the
+  queue is empty, so a frame lands whether or not either console had anything to
+  say, and the cap cannot deadlock. `LinkMain2` also counts consecutive frames a
+  callback has waited on nothing and writes `link callback starved` once at 120,
+  which is the line this class of fault had no way to produce.
 
   The next run must show `sendq` near zero on every period line, which is the
   whole test, with `lost 0` and `short 0` beside it, `local` and `sio` agreeing in
-  the `link ids` line, and no `link error` through a trade entered and exited.
-  Then stay linked two or three minutes, which is the test the first runs never
-  reached, because ten seconds was enough to kill a link. Run it with the Old 3DS
-  hosting, which is the configuration that failed.
+  the `link ids` line, no `link callback starved` anywhere, and no `link error`
+  through a trade entered, confirmed, completed and exited. A confirmed trade must
+  log `link session reset (close)` on both consoles, which is the line whose
+  absence proved the freeze. Cancel one at the confirm prompt too, because
+  `CB_InitExitCanceledTrade` takes the same close path. Then stay linked two or
+  three minutes, which is the test the first runs never reached, because ten
+  seconds was enough to kill a link. Run it with the Old 3DS hosting, which is the
+  configuration that failed.
 - **Trainer cards before the link-up.** The LINK page can only show a card once
   the Cable Club link-up has delivered one, because that is what fills
   `gTrainerCards` (`Task_LinkupAwaitTrainerCardData`, `src/cable_club.c`). The
