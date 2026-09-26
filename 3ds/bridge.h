@@ -72,8 +72,9 @@ void CtrBottomUpdate(const CtrTouchState *touch);
 int  CtrBottomIsDirty(void);
 void CtrBottomClearDirty(void);
 
-// The framebuffer is 320x240 RGB565, in row order. The pointer does not change.
-// Valid after CtrBottomInit().
+// The framebuffer is 320x240 RGB565, in row order, with a row pitch of
+// CTR_BOTTOM_STRIDE pixels. The pointer does not change. Valid after
+// CtrBottomInit().
 const uint16_t *CtrBottomFramebuffer(void);
 
 // Which rows have been drawn into since the last CtrBottomClearDirty. Only
