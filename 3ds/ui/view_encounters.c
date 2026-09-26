@@ -15,6 +15,11 @@
 // - With the randomizer on, the species in the table is not the species that
 //   the player meets: CreateWildMon maps it. Apply the mapping before the
 //   merge, because two table entries can map to one mon.
+//
+// Two Pokemon are not in the table: the roamer and the TV's mass outbreak.
+// When either is at the place (ui_marks.h), it goes at the top of its methods
+// with a tag. The roamer comes on land and on water, the outbreak only on
+// land, as in src/wild_encounter.c.
 
 #include "global.h"
 #include "pokemon.h"
@@ -37,6 +42,7 @@
 #include "ui_text.h"
 #include "ui_shell.h"
 #include "ui_view.h"
+#include "ui_marks.h"
 #include "view_encounters.h"
 
 // ---------------------------------------------------------------- layout ---
@@ -96,6 +102,12 @@
 #define BACK_X       (CTR_BOTTOM_WIDTH - 50)
 #define BACK_W       42
 
+// What a tagged cell's frame color means, on the controls row between the page
+// buttons and BACK.
+#define TAG_KEY_X    132
+#define TAG_KEY_W    64
+#define TAG_DOT      6
+
 // ---------------------------------------------------------------- methods ---
 //
 // How the player meets a mon. The game has four tables per map, and fishing is
@@ -136,12 +148,20 @@ static const u8 sFishRate[FISH_WILD_COUNT]  = { 70, 30, 60, 20, 20, 40, 40, 15, 
 // full method has six pages, so the page counter is one digit.
 #define UI_ENC_MAX   32
 
+enum
+{
+    ENC_TAG_NONE,
+    ENC_TAG_ROAMER,
+    ENC_TAG_OUTBREAK,
+};
+
 struct EncEntry
 {
     u16 species;
     u8  minLevel;
     u8  maxLevel;
     u16 rate;       // percent; more than 100 only when maps are merged
+    u8  tag;        // ENC_TAG_*: not from the table
 };
 
 static struct EncEntry sList[ENC_METHOD_COUNT][UI_ENC_MAX];
@@ -158,6 +178,7 @@ static bool8 sBuilt;
 static u8    sBuiltSrc;
 static u8    sBuiltGroup, sBuiltNum;
 static mapsec_u16_t sBuiltMapSec;
+static u32   sBuiltMarks;
 
 // The mapsec whose name is the title of the panel. In PLAYER mode, it is the
 // current map's own mapsec, not the one the panel opened with. Thus a cave
@@ -243,7 +264,29 @@ static void AddSlot(u8 method, const struct WildPokemon *mon, u8 rate)
     list[sCount[method]].minLevel = mon->minLevel;
     list[sCount[method]].maxLevel = mon->maxLevel;
     list[sCount[method]].rate     = rate;
+    list[sCount[method]].tag      = ENC_TAG_NONE;
     sCount[method]++;
+}
+
+// A Pokemon from outside the table, at the top of a method that the place has.
+static void AddTagged(u8 method, u16 species, u8 level, u16 rate, u8 tag)
+{
+    struct EncEntry *list = sList[method];
+
+    if (sHeaders[method] == 0 || species == SPECIES_NONE || species >= NUM_SPECIES)
+        return;
+
+    if (sCount[method] < UI_ENC_MAX)
+        sCount[method]++;
+
+    for (u32 i = sCount[method] - 1; i > 0; i--)
+        list[i] = list[i - 1];
+
+    list[0].species  = species;
+    list[0].minLevel = level;
+    list[0].maxLevel = level;
+    list[0].rate     = rate;
+    list[0].tag      = tag;
 }
 
 // Slots [first, first + n) of one table into one method.
@@ -333,6 +376,8 @@ static bool8 IsDeadAlteringCaveTable(u32 i, u8 mapGroup, u8 mapNum)
 static void Ensure(u8 source, mapsec_u16_t mapSecId)
 {
     u8 group = 0, num = 0;
+    u32 marks;
+    bool8 roamer = FALSE, outbreak = FALSE;
 
     // VarGet and the location below read the save block. Every entry point into
     // this file checks that a save block exists (sInGame for draw and touch,
@@ -351,11 +396,15 @@ static void Ensure(u8 source, mapsec_u16_t mapSecId)
         num   = gSaveBlock1Ptr->location.mapNum;
     }
 
+    // The roamer moves and the outbreak ends with no change of place.
+    marks = UiMarksKey();
+
     if (sBuilt
      && sBuiltSrc == source
      && sBuiltGroup == group
      && sBuiltNum == num
-     && sBuiltMapSec == mapSecId)
+     && sBuiltMapSec == mapSecId
+     && sBuiltMarks == marks)
         return;
 
     for (u32 m = 0; m < ENC_METHOD_COUNT; m++)
@@ -368,6 +417,7 @@ static void Ensure(u8 source, mapsec_u16_t mapSecId)
     sBuiltGroup = group;
     sBuiltNum = num;
     sBuiltMapSec = mapSecId;
+    sBuiltMarks = marks;
 
     if (source == UI_ENC_SRC_PLAYER)
     {
@@ -408,10 +458,32 @@ static void Ensure(u8 source, mapsec_u16_t mapSecId)
             continue;
 
         AddHeader(header);
+
+        if (UiRoamerAt(header->mapGroup, header->mapNum))
+            roamer = TRUE;
+        if (UiOutbreakAt(header->mapGroup, header->mapNum))
+            outbreak = TRUE;
     }
 
     for (u32 m = 0; m < ENC_METHOD_COUNT; m++)
         SortByRate((u8)m);
+
+    // The roamer has no chance to show: it is one in four of the encounters of
+    // its map, and the table's chances are of the rest. The outbreak shows
+    // the chance the news gave. SetUpMassOutbreakEncounter makes it through
+    // CreateWildMon, so the randomizer maps it as it does the table.
+    if (outbreak)
+        AddTagged(ENC_LAND, Ctr3dsMapSpecies(gSaveBlock1Ptr->outbreakPokemonSpecies),
+                  gSaveBlock1Ptr->outbreakPokemonLevel,
+                  gSaveBlock1Ptr->outbreakPokemonProbability, ENC_TAG_OUTBREAK);
+
+    if (roamer)
+    {
+        AddTagged(ENC_LAND, gSaveBlock1Ptr->roamer.species, gSaveBlock1Ptr->roamer.level,
+                  0, ENC_TAG_ROAMER);
+        AddTagged(ENC_SURF, gSaveBlock1Ptr->roamer.species, gSaveBlock1Ptr->roamer.level,
+                  0, ENC_TAG_ROAMER);
+    }
 }
 
 // ---------------------------------------------------------------- drawing ---
@@ -512,6 +584,12 @@ static void DrawChips(void)
     }
 }
 
+// The frame color of a tagged cell, the same as the MAP tab's dot for it.
+static u16 TagColor(u8 tag)
+{
+    return tag == ENC_TAG_ROAMER ? UI_COL_MARK_ROAMER : UI_COL_MARK_OUTBREAK;
+}
+
 static void DrawCell(int cx, int ry, const struct EncEntry *e, bool8 showRate)
 {
     u8 label[16];
@@ -520,6 +598,14 @@ static void DrawCell(int cx, int ry, const struct EncEntry *e, bool8 showRate)
     u16 species = e->species;
     u32 state = DexState(species);
     int levelW, nameW;
+
+    // A tagged cell has a frame in its color. The roamer has no chance to
+    // show, and the outbreak's is its own, not a sum of maps.
+    if (e->tag != ENC_TAG_NONE)
+    {
+        UiRect(cx - 1, ry - 2, COL_W - 4, ROW_H - 1, TagColor(e->tag));
+        showRate = (e->tag == ENC_TAG_OUTBREAK);
+    }
 
     // The level: "Lv12-15", or "Lv5" when the table fixes it.
     p = ascii;
@@ -641,6 +727,30 @@ static void DrawControls(void)
         UiRect(PAGE_DN_X, BTN_Y, PAGE_W, BTN_H, UI_COL_DIM);
         UiArrow(PAGE_DN_X + (PAGE_W - UI_ARROW_W) / 2,
                 BTN_Y + (BTN_H - UI_ARROW_H) / 2, FALSE, UI_COL_ACCENT);
+    }
+
+    // The key for the tagged frames on this page.
+    {
+        static const char *const names[] = { NULL, "ROAMING", "OUTBREAK" };
+        u8 tags = 0;
+        int x = TAG_KEY_X;
+        u32 first = (u32)sPage * UI_ENC_PER_PAGE;
+        u8 name[12];
+
+        if (sMethod < ENC_METHOD_COUNT)
+            for (u32 i = first; i < first + UI_ENC_PER_PAGE && i < sCount[sMethod]; i++)
+                tags |= 1u << sList[sMethod][i].tag;
+
+        for (u8 tag = ENC_TAG_ROAMER; tag <= ENC_TAG_OUTBREAK; tag++)
+        {
+            if (!(tags & (1u << tag)))
+                continue;
+
+            UiFillRect(x, BTN_Y + (BTN_H - TAG_DOT) / 2, TAG_DOT, TAG_DOT, TagColor(tag));
+            UiTextSmall(x + TAG_DOT + 3, BTN_Y + (BTN_H - UI_GLYPH_SMALL_H) / 2,
+                        UiAscii(name, names[tag], sizeof(name)), UiThemeText(), UiThemeShadow());
+            x += TAG_KEY_W;
+        }
     }
 
     UiRect(BACK_X, BTN_Y, BACK_W, BTN_H, UI_COL_DIM);
@@ -830,7 +940,8 @@ u32 UiEncountersStateKey(void)
         u16 species = sList[sMethod][first + i].species;
         u32 v = (u32)species
               | (DexState(species) << 16)
-              | ((u32)i << 18);
+              | ((u32)i << 18)
+              | ((u32)sList[sMethod][first + i].tag << 21);
 
         key ^= v * 2654435761u;
     }
