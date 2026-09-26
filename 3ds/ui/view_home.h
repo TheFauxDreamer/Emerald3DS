@@ -7,6 +7,9 @@
 // - DOWSING (view_dowsing.c): the Itemfinder's range as a radar.
 // - BERRIES (view_berries.c): every planted berry tree.
 // - DAY CARE (view_daycare.c): the Day Care's Pokemon and the old man's words.
+// - FRIENDSHIP (view_friendship.c): each Pokemon's friendship, as hearts.
+// - DAILY (view_daily.c): the tide, the lottery, Mirage Island and the Battle
+//   Frontier.
 //
 // All of them only read. Each reads save data, so the launcher opens them only
 // when a save is loaded. Each key is for the shell's repaint hash, and changes
@@ -44,5 +47,17 @@ u32  UiBerriesPageKey(void);
 
 void UiDaycarePageDraw(void);
 u32  UiDaycarePageKey(void);
+
+void UiFriendshipPageDraw(void);
+u32  UiFriendshipPageKey(void);
+
+void UiDailyPageDraw(void);
+u32  UiDailyPageKey(void);
+
+// The game's local time: the clock chip, less the offset the player set at the
+// wall clock. It goes into `out`, so gLocalTime does not change. In
+// view_clock.c.
+struct Time;
+void UiGameTime(struct Time *out);
 
 #endif // CTR_VIEW_HOME_H

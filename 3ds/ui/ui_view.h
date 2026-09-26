@@ -55,7 +55,8 @@ bool8 UiViewIsOpen(u8 id);
 // The view on top, or UI_VIEW_NONE.
 u8    UiViewTop(void);
 
-// The arg that `id` was pushed with, or 0 if it is not open.
+// The arg that `id` was pushed with, or 0 if it is not open. With two entries
+// of one id, the newest.
 u16   UiViewArg(u8 id);
 
 // The whole stack as one value, for the shell's repaint hash. Push and pop mark

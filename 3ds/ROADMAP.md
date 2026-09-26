@@ -44,6 +44,11 @@ The large pieces:
   - A trainer who calls for a rematch gets a MAP mark. The Latias or Latios
     mark moves after each map change. A TV outbreak marks its route and shows
     in its WILD list.
+  - FRIENDSHIP agrees with the Verdanturf rater for the lead Pokemon, marks
+    220 for Golbat or Azurill, and gives Return 10 * friendship / 25. DAILY's
+    tide agrees with Shoal Cave, its lottery line changes after a ticket, and
+    Mirage Island agrees with the man on Route 130. BP and symbols agree with
+    the Frontier Pass. DEBUG opens from SETTINGS, and BACK returns there.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can

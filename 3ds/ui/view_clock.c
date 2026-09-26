@@ -30,7 +30,7 @@
 #define EGG_Y0       (ROW_Y0 + 3 * ROW_H + 4)
 #define EGG_COL_W    144
 
-static void GameTime(struct Time *out)
+void UiGameTime(struct Time *out)
 {
     struct SiiRtcInfo rtc;
 
@@ -131,7 +131,7 @@ void UiClockPageDraw(void)
     int x, y;
     u16 repel = VarGet(VAR_REPEL_STEP_COUNT);
 
-    GameTime(&now);
+    UiGameTime(&now);
 
     // The time at double size, centered.
     x = (CTR_BOTTOM_WIDTH - (2 * UiTextBigWidth(UiAscii(label, "00", sizeof(label)))
@@ -170,7 +170,7 @@ u32 UiClockPageKey(void)
     struct Time now;
     u32 key;
 
-    GameTime(&now);
+    UiGameTime(&now);
 
     key = (u32)now.hours * 60 + now.minutes;
     key ^= (u32)gSaveBlock2Ptr->playTimeMinutes << 11;

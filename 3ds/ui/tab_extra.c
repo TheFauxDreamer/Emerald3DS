@@ -8,9 +8,9 @@
 // so every tile keeps its place when a new one is added.
 //
 // The pages, in launcher order:
-// - TRAINER, CLOCK, DOWSING, BERRIES and DAY CARE show game data, as the
-//   Poketch apps of the DS games do. Each has its own view_*.c (view_home.h).
-//   They only read, and they open only when a save is loaded.
+// - TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP and DAILY show game
+//   data, as the Poketch apps of the DS games do. Each has its own view_*.c
+//   (view_home.h). They only read, and they open only when a save is loaded.
 // - SETTINGS is host side only: fast-forward, top-screen scale and button
 //   binds. It does not change how the game plays.
 // - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
@@ -18,7 +18,7 @@
 //   draws the toggles.
 // - EXTRAS is quality of life. FOLLOWER is the follower and its options. LINK
 //   pairs for the Cable Club (ui_link.c). DEBUG is the debug menu, if the build
-//   has it.
+//   has it. It has no tile: a button on SETTINGS opens it.
 //
 // A page's top line (y 8..25) holds its title on the left and BACK on the
 // right, where the numbered pager was. SETTINGS and GAMEPLAY use the same
@@ -163,33 +163,37 @@ enum
     PAGE_DOWSING,
     PAGE_BERRIES,
     PAGE_DAYCARE,
+    PAGE_FRIENDSHIP,
+    PAGE_DAILY,
     PAGE_LINK,
     PAGE_SETTINGS,
     PAGE_GAMEPLAY,
     PAGE_EXTRAS,
     PAGE_FOLLOWER,
+    // The launcher has a tile for each page before this one: 12, a full 4x3
+    // grid. DEBUG opens from a button on SETTINGS.
+    PAGE_TILES,
 #if CTR_DEBUG_MENU
-    PAGE_DEBUG,
+    PAGE_DEBUG = PAGE_TILES,
 #endif
-    PAGE_COUNT,
 };
 
 static const char *const sPageTitle[] = {
-    "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "LINK",
-    "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "DEBUG",
+    "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "FRIENDSHIP", "DAILY",
+    "LINK", "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "DEBUG",
 };
 
 // A tile's second line, in the small font: what is behind it.
 static const char *const sPageHint[] = {
     "your card", "time, eggs", "itemfinder", "berry trees", "route 117",
-    "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
+    "hearts", "tide, frontier", "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
 };
 
 // The pages that read save data. Before a save loads, their tiles are dim and
 // do not open.
 static bool8 PageNeedsSave(u32 page)
 {
-    return page <= PAGE_DAYCARE;
+    return page <= PAGE_DAILY;
 }
 
 static bool8 SaveLive(void)
@@ -209,6 +213,10 @@ static bool8 PageFullBleed(u8 page)
 #define TITLE_X       16
 #define TITLE_BACK_W  46
 #define TITLE_BACK_X  (CTR_BOTTOM_WIDTH - 8 - TITLE_BACK_W)
+
+// DEBUG, on the SETTINGS title line left of BACK. The debug page has no tile.
+#define DEBUG_BTN_W   54
+#define DEBUG_BTN_X   (TITLE_BACK_X - 6 - DEBUG_BTN_W)
 
 // The launcher: 4x3 tiles of 80x64, which fill the 320x192 content area
 // exactly on whole 8px tiles, as UiWindowFrame needs. The title is centred on
@@ -728,13 +736,19 @@ static void DrawPageTitle(u8 page)
            UiThemeText(), UiThemeShadow());
     DrawButtonH(TITLE_BACK_X, PGR_Y, TITLE_BACK_W, PGR_H,
                 UiAscii(label, "BACK", sizeof(label)), FALSE);
+
+#if CTR_DEBUG_MENU
+    if (page == PAGE_SETTINGS)
+        DrawButtonH(DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H,
+                    UiAscii(label, "DEBUG", sizeof(label)), FALSE);
+#endif
 }
 
 static void DrawLauncher(void)
 {
     u8 label[16];
 
-    for (u32 i = 0; i < PAGE_COUNT; i++)
+    for (u32 i = 0; i < PAGE_TILES; i++)
     {
         int x = TILE_X(i), y = TILE_Y(i);
         bool8 live = !PageNeedsSave(i) || SaveLive();
@@ -791,6 +805,10 @@ void UiExtraDraw(void)
         UiBerriesPageDraw();
     else if (page == PAGE_DAYCARE)
         UiDaycarePageDraw();
+    else if (page == PAGE_FRIENDSHIP)
+        UiFriendshipPageDraw();
+    else if (page == PAGE_DAILY)
+        UiDailyPageDraw();
     else if (page == PAGE_SETTINGS)
         DrawPage1();
     else if (page == PAGE_GAMEPLAY)
@@ -841,6 +859,8 @@ static u32 GamePageKey(void)
     case PAGE_DOWSING: key = UiDowsingPageKey(); break;
     case PAGE_BERRIES: key = UiBerriesPageKey(); break;
     case PAGE_DAYCARE: key = UiDaycarePageKey(); break;
+    case PAGE_FRIENDSHIP: key = UiFriendshipPageKey(); break;
+    case PAGE_DAILY:   key = UiDailyPageKey();   break;
     default:           return 0;
     }
 
@@ -1034,7 +1054,7 @@ void UiExtraTouch(const CtrTouchState *t)
 
     if (!PageOpen())
     {
-        for (u32 i = 0; i < PAGE_COUNT; i++)
+        for (u32 i = 0; i < PAGE_TILES; i++)
         {
             if (!UiHit(t, TILE_X(i), TILE_Y(i), TILE_W, TILE_H))
                 continue;
@@ -1077,6 +1097,16 @@ void UiExtraTouch(const CtrTouchState *t)
         UiViewPop();
         return;
     }
+
+#if CTR_DEBUG_MENU
+    // A second page view over SETTINGS, so its BACK returns there.
+    if (page == PAGE_SETTINGS && UiHit(t, DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H))
+    {
+        sAchResyncArmed = FALSE;
+        UiViewPush(UI_VIEW_HOME_PAGE, PAGE_DEBUG);
+        return;
+    }
+#endif
 
     if (page == PAGE_BERRIES)
         UiBerriesPageTouch(t);

@@ -5634,6 +5634,33 @@ u16 GetEvolutionTargetSpecies(struct Pokemon *mon, u8 mode, u16 evolutionItem)
     return targetSpecies;
 }
 
+#if PLATFORM_3DS
+// For the FRIENDSHIP page of the second screen. The friendship method of a
+// species, or 0 when none of its evolutions uses friendship, and the value it
+// needs. GetEvolutionTargetSpecies is not called: for the day and night
+// methods it calls RtcCalcLocalTime, which writes gLocalTime.
+u8 Ctr3dsFriendshipEvolution(u16 species, u8 *threshold)
+{
+    int i;
+
+    *threshold = FRIENDSHIP_EVO_THRESHOLD;
+
+    if (species == SPECIES_NONE || species >= NUM_SPECIES)
+        return 0;
+
+    for (i = 0; i < EVOS_PER_MON; i++)
+    {
+        u16 method = gEvolutionTable[species][i].method;
+
+        if (method == EVO_FRIENDSHIP || method == EVO_FRIENDSHIP_DAY
+         || method == EVO_FRIENDSHIP_NIGHT)
+            return method;
+    }
+
+    return 0;
+}
+#endif
+
 u16 HoennPokedexNumToSpecies(u16 hoennNum)
 {
     u16 species;

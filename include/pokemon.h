@@ -544,4 +544,10 @@ struct MonSpritesGfxManager *CreateMonSpritesGfxManager(u8 managerId, u8 mode);
 void DestroyMonSpritesGfxManager(u8 managerId);
 u8 *MonSpritesGfxManager_GetSpritePtr(u8 managerId, u8 spriteNum);
 
+#if PLATFORM_3DS
+// EVO_FRIENDSHIP, EVO_FRIENDSHIP_DAY, EVO_FRIENDSHIP_NIGHT or 0 for `species`.
+// `threshold` gets the friendship that evolution needs. Reads only.
+u8 Ctr3dsFriendshipEvolution(u16 species, u8 *threshold);
+#endif
+
 #endif // GUARD_POKEMON_H
