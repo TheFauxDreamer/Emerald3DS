@@ -5,6 +5,7 @@ anything under `3ds/ui/`. Companion documents: the root `README-TECHNICAL.md` (w
 the port is built this way), `3ds/SECOND_SCREEN_PLAN.md` (a proposed refactor and feature
 catalogue, **not implemented**), `3ds/UI_SKIN_PLAN.md` (a proposed reskin and
 re-layout, **not implemented**). This file describes the code as it actually is.
+Checked against `a036990` on 2026-09-26.
 
 ---
 
@@ -13,8 +14,9 @@ re-layout, **not implemented**). This file describes the code as it actually is.
 The bottom screen is **game-side C**. It is compiled with Emerald's own headers
 into `libpokeemerald.a`, so `gPlayerParty`, `GetMonData`, `gItems`, the fonts
 and the mon icons are ordinary symbols. Nothing scrapes RAM and nothing is
-reimplemented. It paints into one static `320x240` RGB565 buffer
-(`sFb`, [ui_draw.c:23](ui/ui_draw.c#L23)), and the host uploads that buffer to a
+reimplemented. It paints into a `320x240` RGB565 area of a buffer that the host
+owns (`sFb`, [ui_draw.c:33](ui/ui_draw.c#L33), set by `UiSetFb`), and the host
+uploads the changed rows of that buffer to a
 PICA200 texture only when the UI says it changed. There is no heap, no view
 stack, no widget library, and no text clipping. Everything is a static in a
 file, drawn with rectangles and blits at hand-measured coordinates.
@@ -28,31 +30,39 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
   if (sSubFrame == 0)                                      once per DISPLAYED frame
      hidScanInput(), set_speed()
   presenting = (sSubFrame + 1 >= sSpeed)                   decided once
-  if (presenting)
+  rendering  = presenting, but FALSE on every second      the 30 Hz divider
+               frame while the divider is on               (sDivide, not in turbo)
+  aptSetSleepAllowed(!Ctr3dsLinkNoSleep())                 only on a change
+  if (rendering)
      CtrVideoRenderBegin()           3ds/host/video.c     snapshot video state,
                                                            start rasteriser on core 2/1
-  if (sSubFrame == 0)
-     sample_touch(&touch)            3ds/host/main.c:96
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:810   OVERLAPS the rasteriser
+  if (sSubFrame == 0)                                      FULL rate, divider or not
+     sample_touch(&touch)            3ds/host/main.c:99
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:870   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
-                                       tab-bar tap  OR  UiXTouch(touch)
-                                       UiPartyTick()      HP bar animation
+                                       AchTick()          achievement checks
+                                       toast / strip / tab-bar tap  OR  UiXTouch(touch)
+                                       UiStatusTagsTick(), UiPartyTick(), other ticks
                                        UiStateHash()      poll for change
-                                       Redraw() if needed -> paints sFb
-  if (presenting)
+                                       Redraw() if needed -> paints sFb, widens the
+                                                             dirty band
+  if (rendering)
      CtrVideoPresent()               3ds/host/video.c
         if (second core && CtrBottomIsDirty())             still OVERLAPS it
-           upload(bottom); CtrBottomClearDirty()           WHOLE, 320x240
+           begin_bottom_run()                              take the dirty band
+           upload_bottom_rows(CTR_BOTTOM_HEIGHT)           the WHOLE band, 1 transfer
         wait for the rasteriser                           `ppu.wait`
         upload(top)                                       WHOLE, every frame
         if (inline)                                        single-core path only
            if (idle && CtrBottomIsDirty())
-              snapshot_bottom(); CtrBottomClearDirty()     320x240 -> stage
+              begin_bottom_run()                           take the dirty band
            if (mid-run)
-              upload_bottom_slice()                        48 ROWS, 5 frames
+              upload_bottom_rows(BOT_CHUNK_ROWS)           48 ROWS a frame
      CtrSaveFlush(0)                 3ds/host/save.c      the save image
      CtrSettingsFlush(0)             3ds/host/settings.c  hands settings.bin to
                                                            the I/O thread
+     CtrAchFlush(0)                  3ds/host/achievements.c  the same, for the
+                                                           achievement bits
 ```
 
 The rasteriser runs on core 2 of a New 3DS while `CtrBottomUpdate` paints,
@@ -97,9 +107,9 @@ those frames. The next run carries the band left behind, so it converges. The
 band is taken only when the run is idle, which is what stops a screen that
 repaints every frame from restarting the run for ever and never finishing one.
 
-The two flushes are at the bottom for a reason: this is after the frame has been
-presented. The save flush still writes there. The settings flush only hands a
-snapshot to the I/O thread (`3ds/host/io_thread.c`), which does the card write
+The three flushes are at the bottom for a reason: this is after the frame has
+been presented. The save flush still writes there. The settings and
+achievement flushes only hand a snapshot to the I/O thread (`3ds/host/io_thread.c`), which does the card write
 while the main thread waits, and the log does the same. Nothing on the touch
 path may write to the card itself -- see section 13.
 
@@ -107,10 +117,15 @@ Key consequences:
 
 - `CtrBottomUpdate` runs **once per displayed frame**, not per game frame. Under
   fast-forward the UI still updates 60 times a second while the game runs faster.
+- The **display divider** (`sDivide`, [host/main.c](host/main.c)) halves the
+  render and present to 30 Hz when the console cannot hold 60. It does not
+  change `sSubFrame`, so `CtrBottomUpdate` and the input scan keep the full
+  rate. A repaint on a frame with no render waits for the next present to reach
+  the panel. The divider is off during fast-forward.
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:919](host/main.c#L919),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:1170](host/main.c#L1170),
   after audio init and before `AgbMain()`.
 
 ---
@@ -135,22 +150,25 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1198 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 247 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
-| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1033 / 221 | Framebuffer, blitters, window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
-| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 409 / 63 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
-| [ui/tab_party.c](ui/tab_party.c) | 1256 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
-| [ui/tab_bag.c](ui/tab_bag.c) | 697 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
-| [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 209 / 44 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
-| [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 67 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
-| [ui/tab_map.c](ui/tab_map.c) | 699 | Region map decode and cache, player tracking, fly-from-map |
-| [ui/tab_dex.c](ui/tab_dex.c) | 528 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 912 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
-| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 230 / 59 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
-| [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 352 / 68 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
-| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 158 / 39 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1095 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 243 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1295 / 258 | Framebuffer pointer and dirty band, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
+| [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 442 / 60 | Emerald font rendering at 1x and 2x, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
+| [ui/tab_party.c](ui/tab_party.c) | 1125 | 2x3 party grid, cheat tag strip (which also keys a battle partner's colour), per-mon detail view with the move panel and the IV/EV spread, HP, mon-icon and status-badge animation |
+| [ui/tab_bag.c](ui/tab_bag.c) | 670 | Pockets, item list, details, USE button, party target picker. **The only tab that writes game state** |
+| [ui/status_tags.c](ui/status_tags.c) / [.h](ui/status_tags.h) | 203 / 39 | Which badges a party mon carries (its main status, plus CNF while confused in battle) and which one is showing. A mon with both alternates once a second; every badge on the screen comes from `UiStatusTag` |
+| [ui/ui_team.c](ui/ui_team.c) / [.h](ui/ui_team.h) | 117 / 64 | Whose Pokemon each party slot holds: `UiPartyMon`, the party in field order even while the game's party menu has it shuffled, and a battle partner's slots (`UiAllySlot`) with the colour, ground and name tag that mark them. Every view that lists the party reads it through here (section 10) |
+| [ui/tab_map.c](ui/tab_map.c) | 778 | Region map decode and cache, player tracking, fly-from-map, and the caption band that opens the encounters view |
+| [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 552 / 51 | The wild encounter list for the place the MAP caption names: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
+| [ui/tab_dex.c](ui/tab_dex.c) | 514 | Dex list with cursor and scroll, entry screen |
+| [ui/tab_extra.c](ui/tab_extra.c) | 944 | Page 1 port settings, page 2 gameplay tweaks, page 3 quality of life, page 4 the follower and its options, page 5 LINK (drawn by `ui_link.c`), page 6 the debug menu (compiled out by `CTR_DEBUG_MENU`) |
+| [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 475 / 39 | The LINK page: HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
+| [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 524 / 42 | A trainer card from `gTrainerCards`, drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
+| [ui/matchup.c](ui/matchup.c) / [.h](ui/matchup.h) | 299 / 56 | Reads about the opposing mon: type effectiveness for the party badges, `UiCatchableOpponent`, and `UiShinyOpponent` behind the notice |
+| [ui/ui_quickball.c](ui/ui_quickball.c) / [.h](ui/ui_quickball.h) | 341 / 62 | The quick-throw strip: which ball to offer, the panel, and the throw. **The second thing here that writes game state** |
+| [ui/ui_title.c](ui/ui_title.c) / [.h](ui/ui_title.h) | 203 / 50 | TOUCH TO START on the title screen: the art, drawn in the PRESS START banner's lettering, its blink (on the banner's clock at half the rate, `TITLE_BLINK_FRAMES`), and the tap that counts as START. Also the build id (`Ctr3dsBuildId`, the git description `3ds/Makefile` passes as `CTR_BUILD_ID`, prefixed with the branch name on any branch but main) in small dim text in the bottom-right corner, in both halves of the blink. That corner is the only place the build id appears. The only thing here that is drawn or touchable before the game starts |
 | [ui/tab_trophy.c](ui/tab_trophy.c) | 555 | The TROPHY tab: MAIN and POST-GAME page buttons with their counts, the achievements list in category colours (`UiAchCategoryRamp` lives here), hidden rows, its NEW tags (which last the visit they are seen on) and paging. Reads everything through `AchActive()` |
-| [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 193 / 56 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
+| [ui/ui_achtoast.c](ui/ui_achtoast.c) / [.h](ui/ui_achtoast.h) | 187 / 52 | The achievement toast: the third overlay, y 0..40, in the unlocked achievement's category colours (gold for a batch), with a VIEW button into the TROPHY tab |
 
 Game side outside `ui/`: [achievements.c](achievements.c) /
 [.h](achievements.h) hold what each achievement is, when it unlocks, and the
@@ -164,9 +182,11 @@ the tables (CI checks).
 Host side that matters to the UI: [host/main.c](host/main.c) (touch sampling,
 every `Ctr3dsGet*`/`Ctr3dsSet*` toggle), [host/video.c](host/video.c) (upload,
 and the rasteriser's worker thread that runs alongside the paint),
-[host/settings.c](host/settings.c) (persistence), and
+[host/settings.c](host/settings.c) (persistence),
 [host/achievements.c](host/achievements.c) (the per-playthrough achievement
-and place bits, written the way settings are).
+and place bits, written the way settings are), and [host/link.c](host/link.c)
+(the local wireless transport that the LINK page drives through the
+`Ctr3dsLink*` calls in [bridge.h](bridge.h)).
 
 ---
 
@@ -192,16 +212,16 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:129](ui/bottom_screen.c#L129)) is the
+- The **shiny notice** ([bottom_screen.c:132](ui/bottom_screen.c#L132)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
   overlay paint order.
 - The **quick-throw strip** ([ui_quickball.c](ui/ui_quickball.c)) is a 320x40
   band along the bottom of the content area, offering back the ball the player
-  last threw. It lives in its OWN file and the shell calls four functions --
-  `Active` / `Draw` / `Touch` / `StateKey` -- which is the shape to copy for a
-  third overlay. Its geometry starts at y 152 for one reason: the notice ends
+  last threw. It lives in its OWN file and the shell calls five functions:
+  `Active`, `Draw`, `Touch`, `StateKey` and `Tick`. That is the shape to copy
+  for a new overlay. Its geometry starts at y 152 for one reason: the notice ends
   there, so the two abut exactly and neither has to paint over the other's
   border in the case where both are up, which is a catchable shiny.
 - The **achievement toast** ([ui_achtoast.c](ui/ui_achtoast.c)) is that
@@ -225,7 +245,7 @@ that is an argument against the overlay, not for a bigger one.
 
 It is an overlay rather than a band the tabs make room for because every tab's
 layout is hand-fitted to a 192px content area. Reserving space would mean
-re-fitting five tabs for a state that occurs once in 8192 encounters. `UiWindowFrame`'s centre tiles are opaque, so a
+re-fitting six tabs for a state that occurs once in 8192 encounters. `UiWindowFrame`'s centre tiles are opaque, so a
 panel genuinely covers what is behind it rather than floating over readable
 content.
 
@@ -329,8 +349,10 @@ view instead:
 - **A page of EXTRA**, which is the cheap one and needs no refactor. Raise
   `PAGE_COUNT` in `ui/tab_extra.c` (both arms of the `CTR_DEBUG_MENU` guard),
   add a `#define` for the page index, and dispatch it in `UiExtraDraw`,
-  `UiExtraTouch` and `UiExtraStateKey`. `PGR_X(i)` is written in terms of
-  `PAGE_COUNT`, so the pager reflows on its own. LINK took this route
+  `UiExtraTouch` and `UiExtraStateKey`. The debug page is the final `else`
+  of each of those chains, not a numbered page, so put the new page before it,
+  next to `PAGE_LINK`. `PGR_X(i)` is written in terms of `PAGE_COUNT`, so the
+  pager reflows on its own. LINK took this route
   (`ui/ui_link.c`, `ROADMAP.md` C.3).
 - **A tile of the HOME launcher** that `SECOND_SCREEN_PLAN.md` proposes, once
   that lands.
@@ -342,12 +364,12 @@ The steps below are for a tab, and are kept for the record.
 
 1. Add to `enum UiTab` in [ui_shell.h:24](ui/ui_shell.h#L24), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:58](ui/bottom_screen.c#L58):
+3. Add a row to `sTabs[]` at [bottom_screen.c:61](ui/bottom_screen.c#L61):
    `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:825](ui/bottom_screen.c#L729))
-   and to the one in `CtrBottomUpdate()` ([:998](ui/bottom_screen.c#L901)).
+4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L776))
+   and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L968)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
-   glob in [build_objs.sh:116](build_objs.sh#L116). **See the naming hazard in
+   glob in [build_objs.sh:114](build_objs.sh#L114). **See the naming hazard in
    section 12.**
 
 Tab visibility mirrors `BuildNormalStartMenu()` (`src/start_menu.c`): a tab
@@ -358,7 +380,7 @@ gated on a progress flag must not appear before the player has it.
 
 ## 6. Touch
 
-`CtrTouchState` ([bridge.h:47](bridge.h#L47)):
+`CtrTouchState` ([bridge.h:60](bridge.h#L60)):
 
 ```c
 typedef struct {
@@ -369,7 +391,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:851](ui/bottom_screen.c#L851)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:870](ui/bottom_screen.c#L870)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -391,7 +413,7 @@ in order:
 
 Two things follow, and both are load bearing:
 
-1. **`sample_touch` latches the last contact point** ([host/main.c:111](host/main.c#L111)).
+1. **`sample_touch` latches the last contact point** ([host/main.c:114](host/main.c#L114)).
    `hidTouchRead` returns `(0,0)` on the release frame, so the coordinates are
    held. That also means `t->x`/`t->y` keep the last tap's position forever
    after release.
@@ -404,14 +426,14 @@ Two things follow, and both are load bearing:
 Acting on release rather than press means a touch that slides off a control does
 not fire it. Keep that convention.
 
-Hit testing is one helper, [ui_draw.c:988](ui/ui_draw.c#L988):
+Hit testing is one helper, [ui_draw.c:1250](ui/ui_draw.c#L1250):
 
 ```c
 int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:878](ui/tab_extra.c#L878), which tests the
+(see `UiExtraTouch` at [tab_extra.c:900](ui/tab_extra.c#L900), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -419,10 +441,11 @@ as a "jump by 5" modifier. See `CursorStep()` at [tab_dex.c:237](ui/tab_dex.c#L2
 
 ### Press and hold
 
-`UiHoldRepeat` ([ui_draw.c:999](ui/ui_draw.c#L999)) is the one exception to the
-`justReleased` guard, and it is why the guard moved down a few lines in the two
-list tabs. Both scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)) and
-BAG ([tab_bag.c:579](ui/tab_bag.c#L579)) run through it:
+`UiHoldRepeat` ([ui_draw.c:1261](ui/ui_draw.c#L1261)) is the one exception to the
+`justReleased` guard, and it is why the guard moved down a few lines in the
+three list tabs. The scroll controls in DEX ([tab_dex.c:472](ui/tab_dex.c#L472)),
+BAG ([tab_bag.c:606](ui/tab_bag.c#L606)) and TROPHY
+([tab_trophy.c:411](ui/tab_trophy.c#L411)) run through it:
 
 ```c
 static UiHold sHoldUp, sHoldDn;   // one counter per control, beside its state
@@ -465,7 +488,7 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   list beside it survives all three. Two rules make that legible: the transient
   tenant (the move panel, opened by a tap on a specific row) is tested first in
   `DrawDetail`, and the persistent one has a button that reports its own state
-  ([:612](ui/tab_party.c#L851), dim frame off, doubled accent outline on). A
+  ([:851](ui/tab_party.c#L851), dim frame off, doubled accent outline on). A
   mode with no on-screen state is a mode the player cannot tell they left on.
 - **A control that is not drawn must not be tappable.** The IV/EV button is not
   drawn for an empty party slot, so its hit test carries the same species check
@@ -475,9 +498,11 @@ if (UiHoldRepeat(&sHoldUp, t, PAGE_UP_X, PAGE_Y, PAGE_W, PAGE_H))
   [tab_party.c:97](ui/tab_party.c#L97) (38x22),
   [tab_dex.c:91](ui/tab_dex.c#L91) (42x22),
   [tab_bag.c:98](ui/tab_bag.c#L98) (56x20 cancel).
-- **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`) are file
-  statics that survive a tab switch, so leaving a detail view by tapping another
-  tab and coming back re-enters it. Fixing this is step 0 of
+- **Known bug:** modal flags (`sDetailOpen`, `sEntryOpen`, `sView`, the
+  encounters view's `sOpen` and LINK's `sCardOpen`) are file statics that
+  survive a tab switch, so leaving a detail view by tapping another tab and
+  coming back re-enters it. `sCardOpen` also closes itself when the cards go
+  away. Fixing this is step 0 of
   `SECOND_SCREEN_PLAN.md`. If you add a modal, you inherit the same bug.
 
 ---
@@ -501,7 +526,10 @@ drawn into, so a step that writes no pixels uploads nothing.
   when `AnimatedLayerActive()` says something will read it; the same predicate
   gates the cheap step path, so the two cannot drift.
 - The title's blink repaints its own 232x14 rect
-  (`UiTitleDrawPrompt`, [ui_title.c](ui/ui_title.c)), not the screen. It used to
+  (`UiTitleDrawPrompt`, [ui_title.c](ui/ui_title.c)), not the screen. It does
+  this only when `sTitlePainted && UiTitleBlinkOnly()`: the prompt is drawn
+  over black, so the screen must still hold a title paint. `sTitlePainted`
+  clears the moment a tab paints. `UiTitlePromptRect()` gives the rect. It used to
   go through this policy and clear all 76,800 pixels to change 2,488, once every
   32 frames, which cost an Old 3DS a frame roughly twice a second.
 
@@ -510,7 +538,7 @@ Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:541](ui/bottom_screen.c#L541)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:544](ui/bottom_screen.c#L544)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -556,7 +584,7 @@ MAP's fly row is the one other thing that depends on the party, and
   awkward case the party hash misses: they move after a battle without
   necessarily moving level, HP or status with them, so a full-health mon that
   lands the last hit would leave the panel stale. Six reads is the right price
-  for a panel that is up; it is the wrong price on the four tabs that cannot
+  for a panel that is up; it is the wrong price on the five tabs that cannot
   show it.
 - **`GetMonData` decrypts in place** (`src/pokemon.c:3746`). Hashing many mons
   through it costs a decrypt round trip each. `MON_DATA_PERSONALITY`,
@@ -619,7 +647,7 @@ anyone is looking. Off screen it returns immediately, and adopts the party's
 real HP on the frame the tab comes back rather than sliding on arrival for
 damage taken while it was hidden. It resyncs on the ARRIVAL, not on every
 hidden frame -- `GetMonData` decrypts in place, so a per-frame resync across
-the other four tabs would cost more than the repaints the gate saves.
+the other five tabs would cost more than the repaints the gate saves.
 
 ### What an animation actually costs
 
@@ -657,7 +685,8 @@ leaves the **paint** (`Redraw()`), and that is now instrumented too. Profile
 before optimising, and be suspicious of a model that only fits.
 
 The stages are finer now. `Redraw()` reports `paint.clear`, `paint.tab`,
-`paint.bar` and `paint.snap`, and `CtrBottomUpdate` reports `bottom.tick`, which
+`paint.bar` and `paint.snap`, or `paint.blank` in place of all four on the
+title path. `RedrawAnimated()` reports `paint.anim`. And `CtrBottomUpdate` reports `bottom.tick`, which
 is everything that is not the paint: the touch handlers, seven ticks and
 `UiStateHash`, all of which run on every displayed frame whether anything
 repaints or not. A console that feels slow with the screen merely open could not
@@ -694,7 +723,10 @@ Read these instead of `framebegin` alone:
 | `ppu.snap` | the ~99 KB copy of the video state the rasteriser reads |
 | `frame` | the displayed frame's period, sync point to sync point. The worst over 20 ms means a dropped frame |
 
-Every 600 frames the log also says how many frames missed VBlank, if any did.
+Every 600 frames the log also says "N of the last M frames late (K at 30
+Hz)", if any were. A late frame is one that took more VBlanks than it should,
+and with the 30 Hz divider on it should take two, so the divider is not
+counted as a fault. No line means no frame was late.
 
 #### Measured after the move
 
@@ -750,6 +782,15 @@ where the copy alone averages about 1 ms (2.1 ms worst). Azahar at 300% shows
 that upload as 0.28 ms, about a sixth of the console's cost, so read it on the
 console.
 
+**Those numbers are from before `040609a`, and two costs in them are gone.**
+The UI now paints into the stage the GPU reads, so there is no copy (it was
+2.0 ms on an Old 3DS, 1.4 ms on a New one). The upload now carries only the
+dirty row band, in one flush and one transfer on the second-core path, so an
+animation step uploads a few strips and not the whole screen. `af5780b` also
+stopped `UiSnapshot` on every tab but PARTY (and under the shiny notice), and
+`4051578` made the window-frame fill, the tile blit and the glyph loop cheaper.
+Measure again on the console before you rely on any figure in this section.
+
 The rules below are the **single-core path's**, and that path is still live:
 the port falls back to it when no second core is available, and
 `make -C 3ds CTR_PPU_THREAD=0` builds it deliberately, so the formula above
@@ -795,7 +836,9 @@ steps resume.
   `UiClear` is **0.93x**, because one long store loop is something the compiler
   already emits well. Both were "obviously" faster.
 - **On the single-core path, keep the step period longer than a slice run.**
-  Five frames to upload, so a step every twelve leaves seven idle. With a
+  A full repaint takes five frames to upload, so a step every twelve leaves
+  seven idle. A step on its own now uploads only its band, usually in one
+  frame. With a
   second core the upload is whole and lands on the frame it was painted, so
   there is no run to stay clear of, and the step is six frames.
 
@@ -835,6 +878,12 @@ All coordinates are pixels unless the name says tiles. Everything clamps against
 `0..UI_W/UI_H` only; **there is no clip rectangle**, so a wide string paints over
 its neighbours (section 9).
 
+**Every primitive that writes a pixel must call `UiTouchRows(y, h)`.** That is
+how the dirty band (section 2) learns which rows to upload. A new blitter that
+forgets it draws pixels that never reach the panel, or reach it only when
+something else repaints those rows. Address a row as `y * UI_STRIDE`, never
+`y * UI_W`: the stride is 512.
+
 ### Geometry ([ui_draw.h](ui/ui_draw.h))
 
 ```c
@@ -863,7 +912,10 @@ u16  UiThemeShadow(void);
 ```
 
 `UiWindowFrame` draws the player's chosen border out of Emerald's 20 option-menu
-frames, as a 3x3 nine-slice. Because those run from near-white to near-dark,
+frames, as a 3x3 nine-slice. The centre is a rect fill, not 836 tile blits,
+when the frame's centre tile is one flat colour, which is true of every frame
+the game ships. That answer is checked, not assumed, and cached beside the
+palette, since both depend only on the frame id. Because those run from near-white to near-dark,
 **text drawn on a frame must use `UiThemeText()` / `UiThemeShadow()`**, never a
 fixed colour. `UI_COL_*` is for the port's own chrome (the tab bar), which is
 not on a frame.
@@ -888,8 +940,12 @@ It also returns 0 when `gSaveBlock2Ptr` is NULL. Fold it into any redraw trigger
 ```c
 void UiMonIcon(int x, int y, u16 species, u32 personality);   // 32x32, frame 0
 void UiMonIconFrame(int x, int y, u16 species, u32 personality, u8 frame);
+void UiMonIconSilhouette(int x, int y, u16 species, u32 personality, u16 color);
+                                                              // unseen mon, flat
 void UiItemIcon(int x, int y, u16 itemId);                    // 32x32
 void UiMonPic(int x, int y, u16 species);                     // 64x64, cached
+void UiTrainerPic(int x, int y, u16 picId);                   // 64x64, TRAINER_PIC_*,
+                                                              // cached on the id
 void UiPokeball(int x, int y);                                // 7x7, generic
 void UiBallIcon(int x, int y, u16 itemId);                    // 16x16, cached
 void UiFootprint(int x, int y, u16 species, u16 color);       // 16x16
@@ -898,7 +954,17 @@ void UiStatusIcon(int x, int y, u8 ailment);                  // 32x8, AILMENT_*
 void UiArrow(int x, int y, bool8 up, u16 fill);               // 11x7
 void UiChevron(int x, int y);                                 // 6x10, menu cursor
 void UiHpBar(int x, int y, int w, u32 hp, u32 maxHp);         // 8px tall
+void UiSparkle(int cx, int cy, u8 size);                      // gold, centred
+void UiSparkleRamp(int cx, int cy, u8 size, u16 pale, u16 body, u16 edge);
 ```
+
+`UiMonIconSilhouette` is how the encounters view shows a mon the player has not
+seen: the shape and nothing else. On a window frame, pass `UiThemeShadow()`.
+
+`UiCardDraw` / `UiCardThumb` ([ui_card.h](ui/ui_card.h)) are not in
+`ui_draw.h`, but they are game art too: a whole trainer card from
+`gTrainerCards`, at 1:1 (240x160) or 1:4. The card is fixed GBA art and must be
+drawn at an integer scale.
 
 `UiHpBar` takes `hp` explicitly rather than reading the mon, because the party
 tab animates it while the BAG picker shows the true value. It colours itself
@@ -911,9 +977,22 @@ points the battle bar does.
 u16  UiBgr555ToRgb565(u16 bgr555);
 void UiLoadPal(u16 *dst565, const u16 *srcGbaPal, int count);
 void UiBlit4bppTile(int x, int y, const u8 *tile, const u16 *pal565, int transparent0);
+void UiBlit4bppTileFlip(int x, int y, const u8 *tile, const u16 *pal565,
+                        int transparent0, int hflip, int vflip);  // tilemap flips
 void UiBlit8bppTile(int x, int y, const u8 *tile, const u16 *pal565, int transparent0);
-u16 *UiFb(void);
+void UiBlitRow(int x, int y, const u16 *src, int w);        // RGB565, clipped
+u16 *UiFb(void);                     // row stride is UI_STRIDE, not UI_W
+void UiSetFb(u16 *fb);               // host only, once, before any paint
+void UiTouchRows(int y, int h);      // widen the dirty band; every writer calls it
+void UiDirtyRows(int *top, int *bot);  // the band; empty when top >= bot
+void UiClearDirtyRows(void);
 ```
+
+`UiBlit4bppTile` has separate loops for opaque and keyed tiles, because
+`transparent0` cannot change inside a tile. `UiBlit4bppTileFlip` with no flip
+calls the plain blit, so it costs nothing extra. A GBA tilemap flips tiles
+rather than storing four copies, so anything drawn from a real tilemap (the
+trainer card) needs it.
 
 GBA graphics are 4bpp tiles with BGR555 palettes. Convert the palette **once**
 with `UiLoadPal`, then per-pixel work is a table lookup. 8bpp tiles index the
@@ -926,15 +1005,15 @@ whole 256-entry BG palette, not a 16-colour bank.
 **Everything that is read uses one font at one size.** `gFontNormalLatinGlyphs`
 at `UI_GLYPH_H` 15. There is no larger Latin font in the ROM, so for a headline
 that must be read rather than looked for, `UiTextBig` scales those same glyphs
-2x nearest-neighbour ([ui_text.h:32](ui/ui_text.h#L32)); it costs four times the
+2x nearest-neighbour ([ui_text.h:35](ui/ui_text.h#L35)); it costs four times the
 fill per glyph, so it is not a general-purpose call. Pair it with
 `UiTextBigWidth` for centring, and `UI_GLYPH_BIG_H` (30) for row pitch.
 
 There IS a smaller one: the game's `FONT_SMALL` (`gFontSmallLatinGlyphs`), 7px
 letters on a 5px advance against the normal font's 9 on 6, in the same glyph
 format. `UiTextSmall` / `UiTextSmallWidth` draw with it, at `UI_GLYPH_SMALL_H`
-13. It is for incidental text that must not compete with the screen, and its
-one user is the title screen's build id. Anything a player has to read during
+13. It is for incidental text that must not compete with the screen. Its users
+are the title screen's build id and the labels under LINK's card thumbnails. Anything a player has to read during
 play stays in `UiText`.
 
 **Strings are game-encoded (`charmap.txt`), EOS-terminated, not ASCII.**
@@ -973,9 +1052,14 @@ widest item description line in the game ([tab_bag.c:41](ui/tab_bag.c#L41)).
 
 That does not survive player-authored text: nicknames, OT names, box names. If
 you add a view showing any of those, either measure and truncate yourself or
-implement `UiClipPush/Pop` first (step 1 of `SECOND_SCREEN_PLAN.md`; the
-blitters already do per-pixel bounds tests, so it is roughly four one-line edits
-and zero extra per-pixel cost).
+implement `UiClipPush/Pop` first (step 1 of `SECOND_SCREEN_PLAN.md`). The
+blitters already clamp against the screen edges, so a clip means each clamp
+tests the clip rect instead, at no extra per-pixel cost. `BlitGlyph` at scale 1
+clamps a glyph's column span once, not each pixel, so the clip goes there too.
+
+The pattern to copy until then is `DrawNameClipped` in
+[ui_card.c](ui/ui_card.c): copy the name, then drop characters from the end
+until `UiTextWidth` fits the limit. That is how LINK shows a partner's name.
 
 ---
 
@@ -987,14 +1071,14 @@ and zero extra per-pixel cost).
 the accessors are not optional. Reading a raw field means the UI can disagree
 with the game's own screens.
 
-**`gSaveBlock1Ptr` and `gSaveBlock2Ptr` start NULL** (`src/load_save.c:41-42`)
+**`gSaveBlock1Ptr` and `gSaveBlock2Ptr` start NULL** (`src/load_save.c:44-45`)
 and are only assigned once a file is loaded. Every `FlagGet` goes through
 `gSaveBlock1Ptr`, so before that point it is a null dereference plus a field
 offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:79
+static bool8 SaveDataLive(void);   // bottom_screen.c:82
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -1039,7 +1123,7 @@ in its own input, so an overrun lands in the neighbouring statics.
 that decompresses to 8192 bytes while `gMonFrontPicTable` reports the size of
 one frame, and the 6KB overrun repainted the cached window-frame palette. The
 symptom was every other tab's border changing colour. See
-[ui_draw.c:376](ui/ui_draw.c#L376) and [tab_map.c:131](ui/tab_map.c#L131).
+[ui_draw.c:618](ui/ui_draw.c#L618) and [tab_map.c:131](ui/tab_map.c#L131).
 
 ---
 
@@ -1172,7 +1256,7 @@ CTR_BOOT_DIAG=1 3ds/build_objs.sh && make -C 3ds CTR_BOOT_DIAG=1
 
 ### Object-name collision hazard
 
-[build_objs.sh:116](build_objs.sh#L116) globs `3ds/ui/*.c` non-recursively and
+[build_objs.sh:114](build_objs.sh#L114) globs `3ds/ui/*.c` non-recursively and
 writes `$OBJ/$(basename).o` into the **same** object directory as all of
 `src/*.c`, with `3ds/ui` globbed last. A file named `3ds/ui/pokedex.c` would
 silently overwrite `src/pokedex.o` and delete the game's Pokedex from the
@@ -1225,7 +1309,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:708](ui/tab_extra.c#L708)) in a bit range nothing else
+   `UiExtraStateKey()` ([:726](ui/tab_extra.c#L726)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1283,12 +1367,12 @@ store.
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:339](host/main.c#L339)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:491](host/main.c#L491)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
 - **A setting behind `CTR_DEBUG_MENU` must be neutralised, not just hidden**
-  ([bridge.h:207](bridge.h#L207)). Hiding the control leaves the value, and two
+  ([bridge.h:216](bridge.h#L216)). Hiding the control leaves the value, and two
   of the debug settings persist, so a shipping build could inherit "show every
   tab" or a muted PSG channel from a debug session with no control to undo it.
   Guard in **`Apply`**, not in `Get`: `CtrSettingsLoad()` calls `Apply`
@@ -1316,10 +1400,12 @@ CTR_BOTTOM_HEIGHT  240
 UI_TABBAR_H        48         // ui_shell.h, the bar along the bottom
 UI_CONTENT_H       192        // 24 tiles, everything above the bar
 UI_W / UI_H        320 / 240  // ui_draw.h
+UI_STRIDE          512        // ui_draw.h, row pitch of the framebuffer
 ```
 
-`UI_TABBAR_H` and `UI_CONTENT_H` are load bearing: the five tabs, the
-encounters view and both overlays below are all fitted to them.
+`UI_TABBAR_H` and `UI_CONTENT_H` are load bearing: the six tabs, the
+encounters view, the LINK card view and the three overlays below are all fitted
+to them.
 `UI_SKIN_PLAN.md` moves them only while re-fitting every one of those against
 wireframes. Do not change them casually.
 
@@ -1389,7 +1475,7 @@ appears.
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
-| The frame rate drops while something on the bottom screen is animating | First check the boot log says `rasteriser on core 2` (or core 1). On the single-core path it is expected and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). With the rasteriser on its own core a repaint should cost nothing, so read `ppu.wait` and `frame`. Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.copy/flush/xfer` the host's three upload stages, and `framebegin` is the VBlank wait, so a `framebegin` near zero means the frame had no slack left. |
+| The frame rate drops while something on the bottom screen is animating | First check the boot log says `rasteriser on core 2` (or core 1). On the single-core path it is expected and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). With the rasteriser on its own core a repaint should cost nothing, so read `ppu.wait` and `frame`. Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.flush/xfer` the host's two upload stages (the copy is gone), and `framebegin` is the VBlank wait, so a `framebegin` near zero means the frame had no slack left. |
 | Profiler numbers that make no sense, or a crash inside `CtrProfile` | Called from a thread other than the main one. `CtrProfile` and `CtrLogSlow` keep unlocked static tables. The rasteriser's worker and the I/O thread measure themselves and let the main thread report. |
 | The top screen shows garbage or a torn picture for a frame | Something made the rasteriser read live memory while the game or the paint was writing it. In threaded mode `ppu_set_memory()` must point at the snapshot `CtrVideoRenderBegin()` fills, never at `gGbaMem` ([host/video.c](host/video.c)). |
 | The last lines before a crash are missing from `log.txt` | Expected now, within about a frame: lines are queued for the I/O thread rather than flushed on the spot. Boot is still written synchronously. |
@@ -1430,4 +1516,4 @@ appears.
 - On hardware, not only in an emulator (`AGENTS.md`). The boot log and the frame
   600 audio health report stay clean. On the single-core path repaint frequency
   has not visibly risen; on the second-core path `ppu.wait` stays well above
-  zero on most frames and no "missed VBlank" line appears.
+  zero on most frames and no "frames late" line appears.
