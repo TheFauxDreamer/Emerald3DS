@@ -753,6 +753,13 @@ u8 GetFactoryMonFixedIV(u8 challengeNum, bool8 isLastBattle)
     else
         ivSet = challengeNum;
 
+#if (WASM || RP2350) && !defined(BUGFIX)
+    // The port gives the GBA's result, random IVs, and does not read past the
+    // table. On the port the data after it is not the same.
+    if (ivSet >= ARRAY_COUNT(sFixedIVTable))
+        return USE_RANDOM_IVS;
+#endif
+
     return sFixedIVTable[ivSet][useHigherIV];
 }
 

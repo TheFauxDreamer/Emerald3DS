@@ -265,7 +265,17 @@ Collected gotchas, most of which cost hours.
   the copy read unrelated rodata as trainer data. The first Trainer Hill battle
   smashed the stack and crashed. `src/trainer_hill.c` now names the floors
   (`sFloorData`, under `#if WASM || RP2350`) and copies the two parts
-  separately. A search for this pattern finds no other case.
+  separately. A search for this pattern finds no other case: of the 202
+  `static const` tables that nothing names, the rest are dead upstream
+  leftovers.
+- **`BUGFIX`-only reads and writes past a table survive on the GBA by
+  layout.** `MODERN=1` turns on `UBFIX`, but `BUGFIX` stays off, so these run
+  as on the GBA, where the neighbour is fixed ROM or a harmless stack slot. The
+  port takes the fix (`#if defined(BUGFIX) || WASM || RP2350`) where one
+  touches memory: the Battle Tower ribbon array (a fourth write on the stack
+  after a Doubles streak), Static and Magnet Pull while surfing (12 entries of
+  a 5-entry table), and the Pokedex area screen's fishing count. The Battle
+  Factory's round 9 IV read gets the GBA's result, random IVs, with no read.
 - **`arm-none-eabi-ar`, never the system `ar`.** macOS BSD `ar` silently
   truncates the GNU archive to 96 bytes.
 - **`bash`, not `zsh`,** for the build scripts — zsh mishandles `$CFLAGS`

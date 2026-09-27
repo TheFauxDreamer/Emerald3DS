@@ -57,6 +57,9 @@ The large pieces:
     settings.bin loads with the default bar.
   - A Trainer Hill battle starts on every floor, a double one too, and the
     trainers have their real teams (the floors were missing from the build).
+  - A Battle Tower Doubles streak over 55 gives its ribbons with no crash. A
+    Static lead while surfing on Route 110 meets only water Pokemon. A Battle
+    Factory round 9 draft has random IVs.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
