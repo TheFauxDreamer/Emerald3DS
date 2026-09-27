@@ -2770,7 +2770,8 @@ static void AwardBattleTowerRibbons(void)
 {
     s32 i;
     u32 partyIndex;
-#ifdef BUGFIX
+// The port takes the fix: the fourth write lands past the array on the stack.
+#if defined(BUGFIX) || WASM || RP2350
     struct RibbonCounter ribbons[MAX_FRONTIER_PARTY_SIZE];
 #else
     struct RibbonCounter ribbons[3]; // BUG: 4 Pokémon can receive ribbons in a double battle mode.
