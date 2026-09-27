@@ -351,9 +351,10 @@ make -C 3ds                              # -> 3ds/emerald3ds.{cia,3ds}
 
 ## Limitations
 
-- **Audio needs a DSP firmware dump**, as above. It is also the one failure the
-  port cannot report: a shipping build writes no log file, and no build can ship
-  a DSP dump.
+- **Audio needs a DSP firmware dump**, as above. No build can ship one. When it
+  is missing, every build, a shipping one too, writes one line about it to
+  `sdmc:/3ds/emerald3ds/log.txt`. A shipping build writes that file only when
+  something fails, so a healthy session leaves no file.
 - **No trading or link battles yet.** The Cable Club over 3DS local wireless is
   written but unbuilt on the `local-wireless` branch. The Union Room and Mystery
   Gift use a separate wireless stack that is still stubbed.

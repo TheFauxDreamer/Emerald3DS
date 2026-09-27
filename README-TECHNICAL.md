@@ -269,9 +269,13 @@ and writes a line only when it overran, so the log names the call rather than
 the symptom. The stage profiler measures the frame loop itself; see below.
 
 `CTR_DEBUG_MENU` in `3ds/bridge.h` gates all of it at the file level. A release
-build keeps the timing but never creates `sdmc:/3ds/emerald3ds/log.txt`, because
-a build handed to someone else should not write to their SD card, and everything
-in that file is written for whoever is developing the port.
+build keeps the timing but writes only warnings to
+`sdmc:/3ds/emerald3ds/log.txt`, because a build handed to someone else should
+not write to their SD card in a normal session. A warning (`CtrLogWarn`) is a
+fault the player must be able to report: a missing DSP firmware dump, a failed
+settings or save-side write, a link failure, a NULL-pointer trace. The file is
+made at the first warning, after the boot line that names the build. A healthy
+session makes no file, and each boot removes the file of the last one.
 `svcOutputDebugString` survives either way, so an emulator still shows the same
 lines.
 

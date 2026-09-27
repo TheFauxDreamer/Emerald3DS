@@ -60,6 +60,10 @@ The large pieces:
   - A Battle Tower Doubles streak over 55 gives its ribbons with no crash. A
     Static lead while surfing on Route 110 meets only water Pokemon. A Battle
     Factory round 9 draft has random IVs.
+- **The release warnings log: test on hardware.** Build with `CTR_DEBUG_MENU`
+  0. With `sdmc:/3ds/dspfirm.cdc` renamed, `log.txt` holds the boot line and
+  the ndspInit line only. With the file back, the next boot leaves no
+  `log.txt`.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
