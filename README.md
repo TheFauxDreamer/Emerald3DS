@@ -181,7 +181,8 @@ knows one. **FRONTIER** stays grey until you reach the Battle Frontier; then it
 shows your BP and each facility's silver and gold symbols and best record.
 
 Then one tile for each page of port settings: SETTINGS, GAMEPLAY, EXTRAS and
-FOLLOWER, plus LINK for the Cable Club. Tap a tile to open its page and BACK to
+FOLLOWER, plus LINK for the Cable Club. SETTINGS is always the bottom right
+tile. Tap a tile to open its page and BACK to
 return; switching tab closes it, so HOME always opens on the grid. A setting
 that is only on or off is a checkbox: tap the box or its name. A debug build
 opens its DEBUG page from a button on SETTINGS.

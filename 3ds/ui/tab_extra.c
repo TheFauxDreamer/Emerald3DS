@@ -191,15 +191,19 @@ static const char *const sPageHint[] = {
     "follower", "", "test build",
 };
 
-// The launcher's cells, in order. CELL_SPARE is the tab that is not on the nav
-// bar (UiNavSpareTab): it opens that tab, not a page.
+// The launcher's cells, in order, all 16 of the 4x4 grid. CELL_SPARE is the
+// tab that is not on the nav bar (UiNavSpareTab): it opens that tab, not a
+// page. CELL_EMPTY draws nothing. SETTINGS is always the last cell, bottom
+// right, so the player finds it in the same place: a new tile goes in an empty
+// cell before it.
 #define CELL_SPARE 0xFF
+#define CELL_EMPTY 0xFE
 
-static const u8 sCells[] = {
+static const u8 sCells[16] = {
     PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING, PAGE_BERRIES,
     PAGE_DAYCARE, PAGE_FRIENDSHIP, PAGE_FRONTIER, CELL_SPARE,
-    PAGE_LINK, PAGE_SETTINGS, PAGE_GAMEPLAY, PAGE_EXTRAS,
-    PAGE_FOLLOWER,
+    PAGE_LINK, PAGE_GAMEPLAY, PAGE_EXTRAS, PAGE_FOLLOWER,
+    CELL_EMPTY, CELL_EMPTY, CELL_EMPTY, PAGE_SETTINGS,
 };
 
 // The spare tab's tile hint, for each tab that can be spare.
@@ -948,6 +952,9 @@ static void DrawLauncher(void)
         bool8 live;
         const char *title, *hint;
 
+        if (i == CELL_EMPTY)
+            continue;
+
         if (i == CELL_SPARE)
         {
             u8 spare = UiNavSpareTab();
@@ -1272,7 +1279,7 @@ void UiExtraTouch(const CtrTouchState *t)
         {
             u32 i = sCells[c];
 
-            if (!UiHit(t, TILE_X(c), TILE_Y(c), TILE_W, TILE_H))
+            if (i == CELL_EMPTY || !UiHit(t, TILE_X(c), TILE_Y(c), TILE_W, TILE_H))
                 continue;
 
             // The tab that is not on the bar. UiSetTab refuses it while it is
