@@ -155,12 +155,14 @@ playthrough, keyed on your trainer ID, so a new game starts a fresh list, and
 loading a save that already has badges unlocks them straight away. Nothing
 syncs to RetroAchievements; Part E of `3ds/ROADMAP.md` says why.
 
-**HOME.** A grid of tiles, like the DS games' Pokétch. The first five read your
+**HOME.** A grid of tiles, like the DS games' Pokétch. The first seven read your
 game: **TRAINER** is your own trainer card, the game's own art, tap to flip,
 with RECORDS for the counters the game keeps and never shows (steps, battles,
-catches, eggs hatched, trades, shopping trips). **CLOCK** has the game's time,
-your play time and steps, the Repel steps left, and about how many steps each
-egg in your party needs to hatch. **DOWSING** is the Itemfinder as a radar, once
+catches, eggs hatched, trades, shopping trips). **CLOCK** puts the whole day on
+one page: the game's time, your play time, how long until the next day, the
+Shoal Cave tide and when it turns, whether you drew the lottery today, whether
+Mirage Island shows today, your steps, the Repel steps left, and about how many
+steps each egg in your party needs to hatch. **DOWSING** is the Itemfinder as a radar, once
 you have one: the same range it searches, with a dot for every hidden item
 still there. **BERRIES** lists every tree you planted, where it is, how far it
 has grown, when it grows next and how often you watered it. **DAY CARE** shows
@@ -169,10 +171,8 @@ man's words for how they get along. **FRIENDSHIP** is the Pokétch's Friendship
 Checker: hearts for each Pokémon on the same scale as the friendship raters in
 Verdanturf and Pacifidlog, the exact value, when it is enough for an evolution
 such as Golbat's or Azurill's, and the power of Return or Frustration if it
-knows one. **DAILY** has the Shoal Cave tide and when it turns, whether you
-drew the lottery today, whether Mirage Island shows today and how long until
-the next day, and after you reach the Battle Frontier, your BP and each
-facility's symbols and best record.
+knows one. **FRONTIER** stays grey until you reach the Battle Frontier; then it
+shows your BP and each facility's silver and gold symbols and best record.
 
 Then one tile for each page of port settings: SETTINGS, GAMEPLAY, EXTRAS and
 FOLLOWER, plus LINK for the Cable Club. Tap a tile to open its page and BACK to
