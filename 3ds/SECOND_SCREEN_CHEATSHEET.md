@@ -367,9 +367,10 @@ to add a view instead:
   every touch while it is up and must draw its own way back.
 - **A tile of HOME.** Add an entry to the page enum in `ui/tab_extra.c`,
   before `PAGE_NAVBAR` (the pages after it have no tile), plus its title and
-  hint in `sPageTitle` / `sPageHint`, its cell in `sCells`, and dispatch it in
-  `UiExtraDraw`, `UiExtraTouch` and `UiExtraStateKey`. The launcher is 4x4
-  tiles of 80x48 and has 13 in use, so there are three free cells. LINK is a
+  hint in `sPageTitle` / `sPageHint`, its cell in `sCells` (a `CELL_EMPTY`, never the last cell: SETTINGS stays
+  bottom right), and dispatch it in `UiExtraDraw`, `UiExtraTouch` and
+  `UiExtraStateKey`. The launcher is 4x4 tiles of 80x48 and has 13 in use, so
+  there are three free cells. LINK is a
   tile this way (`ui/ui_link.c`, `ROADMAP.md` C.3).
 - **A page with no tile**, opened from a button on another page's title line,
   as NAV BAR and DEBUG are from SETTINGS. It is a second `UI_VIEW_HOME_PAGE`
@@ -452,7 +453,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:1262](ui/tab_extra.c#L1262), which tests the
+(see `UiExtraTouch` at [tab_extra.c:1269](ui/tab_extra.c#L1269), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -1396,7 +1397,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L1084)) in a bit range nothing else
+   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L1091)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
