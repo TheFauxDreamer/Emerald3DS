@@ -8,9 +8,10 @@
 // so every tile keeps its place when a new one is added.
 //
 // The pages, in launcher order:
-// - TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP and DAILY show game
-//   data, as the Poketch apps of the DS games do. Each has its own view_*.c
-//   (view_home.h). They only read, and they open only when a save is loaded.
+// - TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP and FRONTIER show
+//   game data, as the Poketch apps of the DS games do. Each has its own
+//   view_*.c (view_home.h). They only read, and they open only when a save is loaded.
+//   FRONTIER opens only after the player reaches the Battle Frontier.
 // - SETTINGS is host side only: fast-forward, top-screen scale and button
 //   binds. It does not change how the game plays.
 // - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
@@ -164,7 +165,7 @@ enum
     PAGE_BERRIES,
     PAGE_DAYCARE,
     PAGE_FRIENDSHIP,
-    PAGE_DAILY,
+    PAGE_FRONTIER,
     PAGE_LINK,
     PAGE_SETTINGS,
     PAGE_GAMEPLAY,
@@ -179,26 +180,38 @@ enum
 };
 
 static const char *const sPageTitle[] = {
-    "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "FRIENDSHIP", "DAILY",
+    "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "FRIENDSHIP", "FRONTIER",
     "LINK", "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "DEBUG",
 };
 
 // A tile's second line, in the small font: what is behind it.
 static const char *const sPageHint[] = {
-    "your card", "time, eggs", "itemfinder", "berry trees", "route 117",
-    "hearts", "tide, frontier", "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
+    "your card", "time, tide, eggs", "itemfinder", "berry trees", "route 117",
+    "hearts", "BP, symbols", "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
 };
 
 // The pages that read save data. Before a save loads, their tiles are dim and
 // do not open.
 static bool8 PageNeedsSave(u32 page)
 {
-    return page <= PAGE_DAILY;
+    return page <= PAGE_FRONTIER;
 }
 
 static bool8 SaveLive(void)
 {
     return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
+}
+
+// TRUE when a tile opens: a game page needs a save, and FRONTIER needs the
+// player to have reached the Battle Frontier. A tile that does not open is dim.
+static bool8 PageLive(u32 page)
+{
+    if (!PageNeedsSave(page))
+        return TRUE;
+    if (!SaveLive())
+        return FALSE;
+
+    return page != PAGE_FRONTIER || UiFrontierReached();
 }
 
 // A page that draws the whole content area with no frame or title line, and
@@ -751,7 +764,7 @@ static void DrawLauncher(void)
     for (u32 i = 0; i < PAGE_TILES; i++)
     {
         int x = TILE_X(i), y = TILE_Y(i);
-        bool8 live = !PageNeedsSave(i) || SaveLive();
+        bool8 live = PageLive(i);
         const char *hint = sPageHint[i];
 
         UiWindowFrame(x / 8, y / 8, TILE_TW, TILE_TH);
@@ -763,6 +776,9 @@ static void DrawLauncher(void)
         // As in the game, dowsing needs the Itemfinder in the bag.
         if (i == PAGE_DOWSING && live && !UiDowsingAvailable())
             hint = "no itemfinder";
+        // Before the player gets there, the tile says nothing about it.
+        if (i == PAGE_FRONTIER && !live)
+            hint = "not yet";
 
         UiAscii(label, hint, sizeof(label));
         UiTextSmall(x + (TILE_W - UiTextSmallWidth(label)) / 2, y + TILE_HINT_DY,
@@ -807,8 +823,8 @@ void UiExtraDraw(void)
         UiDaycarePageDraw();
     else if (page == PAGE_FRIENDSHIP)
         UiFriendshipPageDraw();
-    else if (page == PAGE_DAILY)
-        UiDailyPageDraw();
+    else if (page == PAGE_FRONTIER)
+        UiFrontierPageDraw();
     else if (page == PAGE_SETTINGS)
         DrawPage1();
     else if (page == PAGE_GAMEPLAY)
@@ -860,7 +876,7 @@ static u32 GamePageKey(void)
     case PAGE_BERRIES: key = UiBerriesPageKey(); break;
     case PAGE_DAYCARE: key = UiDaycarePageKey(); break;
     case PAGE_FRIENDSHIP: key = UiFriendshipPageKey(); break;
-    case PAGE_DAILY:   key = UiDailyPageKey();   break;
+    case PAGE_FRONTIER: key = UiFrontierPageKey(); break;
     default:           return 0;
     }
 
@@ -1059,7 +1075,7 @@ void UiExtraTouch(const CtrTouchState *t)
             if (!UiHit(t, TILE_X(i), TILE_Y(i), TILE_W, TILE_H))
                 continue;
 
-            if (PageNeedsSave(i) && !SaveLive())
+            if (!PageLive(i))
                 return;
             if (i == PAGE_TRAINER)
                 UiTrainerPageOpen();

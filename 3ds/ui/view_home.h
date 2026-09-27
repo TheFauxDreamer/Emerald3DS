@@ -3,13 +3,14 @@
 // its own file:
 //
 // - TRAINER (view_trainer.c): the player's trainer card and records.
-// - CLOCK (view_clock.c): the game's clock, play time, steps, Repel and eggs.
+// - CLOCK (view_clock.c): the game's clock, play time, the daily events (the
+//   Shoal Cave tide, the lottery, Mirage Island), steps, Repel and eggs.
 // - DOWSING (view_dowsing.c): the Itemfinder's range as a radar.
 // - BERRIES (view_berries.c): every planted berry tree.
 // - DAY CARE (view_daycare.c): the Day Care's Pokemon and the old man's words.
 // - FRIENDSHIP (view_friendship.c): each Pokemon's friendship, as hearts.
-// - DAILY (view_daily.c): the tide, the lottery, Mirage Island and the Battle
-//   Frontier.
+// - FRONTIER (view_frontier.c): the Battle Points, and each facility's
+//   symbols and best record.
 //
 // All of them only read. Each reads save data, so the launcher opens them only
 // when a save is loaded. Each key is for the shell's repaint hash, and changes
@@ -51,8 +52,11 @@ u32  UiDaycarePageKey(void);
 void UiFriendshipPageDraw(void);
 u32  UiFriendshipPageKey(void);
 
-void UiDailyPageDraw(void);
-u32  UiDailyPageKey(void);
+// FALSE until the player reaches the Battle Frontier. The tile is dim and does
+// not open until then.
+bool8 UiFrontierReached(void);
+void  UiFrontierPageDraw(void);
+u32   UiFrontierPageKey(void);
 
 // The game's local time: the clock chip, less the offset the player set at the
 // wall clock. It goes into `out`, so gLocalTime does not change. In
