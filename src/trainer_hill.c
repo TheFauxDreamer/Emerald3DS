@@ -208,6 +208,26 @@ static const struct TrainerHillChallenge *const sChallengeData[NUM_TRAINER_HILL_
     [HILL_MODE_EXPERT]  = &sChallenge_Expert,
 };
 
+#if WASM || RP2350
+// The floors of each challenge. The copy in SetUpDataStruct reads them past
+// the end of the challenge header, and nothing else names them. This
+// compiler removes data that nothing names, and does not keep the order of
+// the rest. Thus the port names them here and copies them from here.
+static const struct TrainerHillFloor *const sFloorData[NUM_TRAINER_HILL_MODES] =
+{
+    [HILL_MODE_NORMAL]  = sFloors_Normal,
+    [HILL_MODE_VARIETY] = sFloors_Variety,
+    [HILL_MODE_UNIQUE]  = sFloors_Unique,
+    [HILL_MODE_EXPERT]  = sFloors_Expert,
+};
+
+// The copy takes NUM_TRAINER_HILL_FLOORS floors from each.
+STATIC_ASSERT(ARRAY_COUNT(sFloors_Normal) == NUM_TRAINER_HILL_FLOORS, sFloorCount_Normal)
+STATIC_ASSERT(ARRAY_COUNT(sFloors_Variety) == NUM_TRAINER_HILL_FLOORS, sFloorCount_Variety)
+STATIC_ASSERT(ARRAY_COUNT(sFloors_Unique) == NUM_TRAINER_HILL_FLOORS, sFloorCount_Unique)
+STATIC_ASSERT(ARRAY_COUNT(sFloors_Expert) == NUM_TRAINER_HILL_FLOORS, sFloorCount_Expert)
+#endif
+
 // Unused.
 static const u8 *const sFloorStrings[] =
 {
@@ -356,7 +376,13 @@ static void SetUpDataStruct(void)
         // after the field 'challenge'.
         // e.g. for HILL_MODE_NORMAL, it will copy sChallenge_Normal to sHillData->challenge and
         // it will copy sFloors_Normal to sHillData->floors
+#if WASM || RP2350
+        // The header and the floors in two copies. See sFloorData.
+        sHillData->challenge = *sChallengeData[gSaveBlock1Ptr->trainerHill.mode];
+        CpuCopy32(sFloorData[gSaveBlock1Ptr->trainerHill.mode], sHillData->floors, sizeof(sHillData->floors));
+#else
         CpuCopy32(sChallengeData[gSaveBlock1Ptr->trainerHill.mode], &sHillData->challenge, sizeof(sHillData->challenge) + sizeof(sHillData->floors));
+#endif
         TrainerHillDummy();
     }
 }
