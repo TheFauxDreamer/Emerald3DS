@@ -55,6 +55,8 @@ The large pieces:
     swaps slots and keeps them after a relaunch; LABELS off centers the
     icons; the battle panel's BAG works when BAG is not on the bar; a v14
     settings.bin loads with the default bar.
+  - A Trainer Hill battle starts on every floor, a double one too, and the
+    trainers have their real teams (the floors were missing from the build).
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can

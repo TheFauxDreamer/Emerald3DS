@@ -258,6 +258,14 @@ wrong but because **`m4aSoundInit` was never called** on the RP2350 boot path.
 
 Collected gotchas, most of which cost hours.
 
+- **Data that the game reaches only by reading past its neighbour is gone.**
+  The Trainer Hill copied `sizeof(header) + sizeof(floors)` from
+  `&sChallenge_<Mode>`, because on the GBA `sFloors_<Mode>` came right after
+  it. Nothing named the floor arrays, so the port's compiler dropped them, and
+  the copy read unrelated rodata as trainer data. The first Trainer Hill battle
+  smashed the stack and crashed. `src/trainer_hill.c` now names the floors
+  (`sFloorData`, under `#if WASM || RP2350`) and copies the two parts
+  separately. A search for this pattern finds no other case.
 - **`arm-none-eabi-ar`, never the system `ar`.** macOS BSD `ar` silently
   truncates the GNU archive to 96 bytes.
 - **`bash`, not `zsh`,** for the build scripts — zsh mishandles `$CFLAGS`
