@@ -139,6 +139,11 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
 
+# Room in rp2350/ppu.c for the wide field's margins (CTR_WIDE_MARGIN in
+# 3ds/bridge.h). ppu.o and video.o must agree on it, so it is here, in the flags
+# of both. host/video.c checks it at compile time.
+CFLAGS   += -DPPU_MAX_MARGIN=16
+
 # rp2350/ppu.c guards its timers on PPU_PROFILE, which the rp2350 build uses
 # too, so the 3DS knob maps onto that name rather than renaming the guard.
 ifeq ($(CTR_PPU_PROFILE),1)

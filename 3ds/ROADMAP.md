@@ -64,6 +64,13 @@ The large pieces:
   0. With `sdmc:/3ds/dspfirm.cdc` renamed, `log.txt` holds the boot line and
   the ndspInit line only. With the file back, the next boot leaves no
   `log.txt`.
+- **The WIDE scale: test on hardware.** Select WIDE on SETTINGS. Walk in all
+  four directions, at a map seam, and on the bike; the margins must never show
+  a stale or a wrong column. Open a door and cut a tree near the screen edge.
+  Talk to someone: the text box stays 240 wide with the field beside it. Open
+  the start menu. Start a battle: the transition and the battle are 240 wide
+  with black margins. Check the rain on Route 119 and a dark cave. Compare
+  `ppu` and `upload.top.xfer` in `log.txt` against 1.5x, on the Old 3DS too.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can

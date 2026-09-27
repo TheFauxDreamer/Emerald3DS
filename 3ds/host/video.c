@@ -14,6 +14,11 @@
 // The EXTRA tab selects the scale (see kTopScales). The default 1.5x gives
 // 360x240, which fills the screen height with 20px on each side. The texture
 // filter follows the scale (see apply_top_filter).
+//
+// WIDE is 1.5x too, but in the field the rasterizer also draws CTR_WIDE_MARGIN
+// pixels on each side (3ds/bridge.h). Such a frame is 272 wide and needs a
+// texture 512 wide, so it has a texture of its own. Every other frame keeps
+// the 256-wide texture and its upload cost.
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -27,6 +32,19 @@ void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
 
 #define TOP_TEX_W  256
 #define TOP_TEX_H  256
+#define TOP_WIDE_TEX_W 512
+#define TOP_WIDE_W     (CTR_GBA_WIDTH + 2 * CTR_WIDE_MARGIN)
+
+// The column of GBA x = 0 in each row of the stage, in both layouts. A wide
+// frame's left margin fills the columns before it. A 240-wide frame leaves them
+// unused, and then ends exactly at TOP_TEX_W.
+#define TOP_STAGE_X CTR_WIDE_MARGIN
+
+_Static_assert(CTR_WIDE_MARGIN <= PPU_MAX_MARGIN,
+               "3ds/Makefile must build ppu.c with room for the wide margin");
+_Static_assert(TOP_STAGE_X + CTR_GBA_WIDTH <= TOP_TEX_W,
+               "a 240-wide frame must fit the 256-wide texture");
+_Static_assert(TOP_WIDE_W <= TOP_WIDE_TEX_W, "a wide frame must fit its texture");
 #define BOT_TEX_W  512
 #define BOT_TEX_H  256
 
@@ -40,6 +58,7 @@ static const struct { float sx, sy; } kTopScales[CTR_TOP_SCALE_COUNT] = {
     [CTR_TOP_SCALE_1_5X] = { 1.5f, 1.5f },
     [CTR_TOP_SCALE_FILL] = { TOP_SCREEN_W / CTR_GBA_WIDTH,
                              TOP_SCREEN_H / CTR_GBA_HEIGHT },
+    [CTR_TOP_SCALE_WIDE] = { 1.5f, 1.5f },
 };
 
 static int sTopScale = CTR_TOP_SCALE_DEFAULT;
@@ -87,11 +106,17 @@ void Ctr3dsSetTopScale(int mode)
 
 static C3D_RenderTarget *sTopTarget, *sBotTarget;
 
-static C3D_Tex             sTopTex, sBotTex;
-static Tex3DS_SubTexture   sTopSub, sBotSub;
-static C2D_Image           sTopImage, sBotImage;
+static C3D_Tex             sTopTex, sTopWideTex, sBotTex;
+static Tex3DS_SubTexture   sTopSub, sTopWideSub, sBotSub;
+static C2D_Image           sTopImage, sTopWideImage, sBotImage;
 
-static uint16_t *sTopStage;   // TOP_TEX_W x CTR_GBA_HEIGHT, linear
+// TOP_WIDE_TEX_W x CTR_GBA_HEIGHT, linear. A 240-wide frame uses it at a row
+// stride of TOP_TEX_W, a wide frame at TOP_WIDE_TEX_W.
+static uint16_t *sTopStage;
+
+// Main thread only: the frame that CtrVideoPresent shows is a wide one. Set
+// where its render starts, so the upload and the draw match the picture.
+static int sShownWide;
 // BOT_TEX_W x CTR_BOTTOM_HEIGHT, linear. This IS the UI's framebuffer: the UI
 // paints into it directly, the way the rasterizer composes into sTopStage. It
 // used to paint into a 320-wide array of its own and this file copied 153,600
@@ -112,7 +137,7 @@ static uint16_t *sBotStage;
 // main thread reads them only after it collects the render. They keep state
 // between frames (masked pixels keep their old colour, and the blend reads the
 // old layer byte), so neither is ever double-buffered.
-static uint8_t  sGbaLayer[CTR_GBA_WIDTH * CTR_GBA_HEIGHT];
+static uint8_t  sGbaLayer[PPU_LAYER_BYTES];
 
 static int sReady;
 
@@ -160,6 +185,22 @@ static uint8_t sSnapReg[SNAP_REG_SIZE]   __attribute__((aligned(32)));
 static uint8_t sSnapPal[SNAP_PAL_SIZE]   __attribute__((aligned(32)));
 static uint8_t sSnapVram[SNAP_VRAM_SIZE] __attribute__((aligned(32)));
 static uint8_t sSnapOam[SNAP_OAM_SIZE]   __attribute__((aligned(32)));
+
+// The wide field's side maps and its state, for the frame in the snapshot. The
+// worker reads them as it reads the regions above.
+#define SNAP_SIDE_SIZE  (64 * 32)
+static uint16_t sSnapSide[4][SNAP_SIDE_SIZE] __attribute__((aligned(32)));
+static const uint16_t *sSnapSidePtr[4];
+static int      sSnapWide;
+static unsigned sSnapDelta;
+
+// Draw one top frame into the stage: 240 wide, or with the wide margins.
+static void render_top(int wide, const uint16_t *const side[4], unsigned delta)
+{
+    ppu_set_wide(wide ? CTR_WIDE_MARGIN : 0, side, delta);
+    ppu_render_rgb565_direct(sTopStage + TOP_STAGE_X,
+                             wide ? TOP_WIDE_TEX_W : TOP_TEX_W, sGbaLayer);
+}
 
 // The live regions in gGbaMem: the source of the copy when threaded, and the
 // rasterizer's own input when inline.
@@ -210,7 +251,7 @@ static void ppu_worker(void *arg)
         __dmb();
 
         t = svcGetSystemTick();
-        ppu_render_rgb565_direct(sTopStage, TOP_TEX_W, sGbaLayer);
+        render_top(sSnapWide, sSnapSidePtr, sSnapDelta);
         sPpuTicks = svcGetSystemTick() - t;
 
         // The picture must be visible to the main thread before the signal.
@@ -372,6 +413,23 @@ void CtrVideoRenderBegin(void)
     memcpy(sSnapVram, sLiveVram, SNAP_VRAM_SIZE);
     memcpy(sSnapOam,  sLiveOam,  SNAP_OAM_SIZE);
 
+    // 12 KB more, only on a wide frame.
+    {
+        CtrWideField w;
+
+        CtrWideFieldGet(&w);
+        sSnapWide = w.active;
+        sSnapDelta = w.sideDelta;
+        for (int bg = 0; bg < 4; bg++) {
+            sSnapSidePtr[bg] = NULL;
+            if (w.active && w.sideMap[bg] != NULL) {
+                memcpy(sSnapSide[bg], w.sideMap[bg], sizeof(sSnapSide[bg]));
+                sSnapSidePtr[bg] = sSnapSide[bg];
+            }
+        }
+        sShownWide = w.active;
+    }
+
     CtrProfile("ppu.snap", t);
 
     sPpuPending = 1;
@@ -404,6 +462,7 @@ static void apply_top_filter(void)
         return;   // CtrVideoInit() applies it when the texture exists
 
     C3D_TexSetFilter(&sTopTex, f, f);
+    C3D_TexSetFilter(&sTopWideTex, f, f);
 }
 
 // Kept so that the diagnostics below can read the registers. The
@@ -521,13 +580,15 @@ static void log_slow_scene(unsigned long long ticks)
            read16(r, 0x52), read16(r, 0x54), affine);
 }
 
-static void init_subtex(Tex3DS_SubTexture *sub, int w, int h, int texW, int texH)
+// A w x h image whose left column is column x of the texture.
+static void init_subtex(Tex3DS_SubTexture *sub, int x, int w, int h,
+                        int texW, int texH)
 {
     sub->width  = (u16)w;
     sub->height = (u16)h;
-    sub->left   = 0.0f;
+    sub->left   = (float)x / (float)texW;
     sub->top    = 1.0f;
-    sub->right  = (float)w / (float)texW;
+    sub->right  = (float)(x + w) / (float)texW;
     sub->bottom = 1.0f - (float)h / (float)texH;
 }
 
@@ -544,6 +605,7 @@ int CtrVideoInit(void)
         return 0;
 
     if (!C3D_TexInit(&sTopTex, TOP_TEX_W, TOP_TEX_H, GPU_RGB565) ||
+        !C3D_TexInit(&sTopWideTex, TOP_WIDE_TEX_W, TOP_TEX_H, GPU_RGB565) ||
         !C3D_TexInit(&sBotTex, BOT_TEX_W, BOT_TEX_H, GPU_RGB565))
         return 0;
 
@@ -553,17 +615,22 @@ int CtrVideoInit(void)
     // sReady, so the early call from CtrSettingsLoad() is safe.
     C3D_TexSetFilter(&sBotTex, GPU_NEAREST, GPU_NEAREST);
 
-    init_subtex(&sTopSub, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, TOP_TEX_W, TOP_TEX_H);
-    init_subtex(&sBotSub, CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, BOT_TEX_W, BOT_TEX_H);
+    init_subtex(&sTopSub, TOP_STAGE_X, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
+                TOP_TEX_W, TOP_TEX_H);
+    init_subtex(&sTopWideSub, TOP_STAGE_X - CTR_WIDE_MARGIN, TOP_WIDE_W,
+                CTR_GBA_HEIGHT, TOP_WIDE_TEX_W, TOP_TEX_H);
+    init_subtex(&sBotSub, 0, CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT,
+                BOT_TEX_W, BOT_TEX_H);
     sTopImage = (C2D_Image){ &sTopTex, &sTopSub };
+    sTopWideImage = (C2D_Image){ &sTopWideTex, &sTopWideSub };
     sBotImage = (C2D_Image){ &sBotTex, &sBotSub };
 
-    sTopStage = linearAlloc(TOP_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
+    sTopStage = linearAlloc(TOP_WIDE_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
     sBotStage = linearAlloc(BOT_TEX_W * CTR_BOTTOM_HEIGHT * sizeof(uint16_t));
     if (sTopStage == NULL || sBotStage == NULL)
         return 0;
 
-    memset(sTopStage, 0, TOP_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
+    memset(sTopStage, 0, TOP_WIDE_TEX_W * CTR_GBA_HEIGHT * sizeof(uint16_t));
     memset(sBotStage, 0, BOT_TEX_W * CTR_BOTTOM_HEIGHT * sizeof(uint16_t));
 
     // Hand the UI its framebuffer before anything paints into it. CtrBottomInit
@@ -613,6 +680,7 @@ void CtrVideoExit(void)
     linearFree(sTopStage);
     linearFree(sBotStage);
     C3D_TexDelete(&sTopTex);
+    C3D_TexDelete(&sTopWideTex);
     C3D_TexDelete(&sBotTex);
     C2D_Fini();
     C3D_Fini();
@@ -911,7 +979,13 @@ void CtrVideoPresent(void)
         CtrProfile("ppu", CtrTicksNow() - ppuTicks);
     } else {
         unsigned long long tp = CtrTicksNow();
-        ppu_render_rgb565_direct(sTopStage, TOP_TEX_W, sGbaLayer);
+        CtrWideField w;
+
+        // Inline, the rasterizer reads the live regions, and the live side
+        // maps with them.
+        CtrWideFieldGet(&w);
+        sShownWide = w.active;
+        render_top(w.active, w.sideMap, w.sideDelta);
         ppuTicks = CtrTicksNow() - tp;
         CtrProfile("ppu", tp);
     }
@@ -935,7 +1009,8 @@ void CtrVideoPresent(void)
             unsigned nonblack = 0;
             for (int y = 0; y < CTR_GBA_HEIGHT; y++)
                 for (int x = 0; x < CTR_GBA_WIDTH; x++)
-                    if (sTopStage[y * TOP_TEX_W + x]) nonblack++;
+                    if (sTopStage[y * (sShownWide ? TOP_WIDE_TEX_W : TOP_TEX_W)
+                                  + TOP_STAGE_X + x]) nonblack++;
             CtrTrace("emerald3ds: frame %u DISPCNT=%04x nonblack=%u/%u\n",
                      frame, dispcnt, nonblack,
                      (unsigned)(CTR_GBA_WIDTH * CTR_GBA_HEIGHT));
@@ -943,8 +1018,13 @@ void CtrVideoPresent(void)
     }
 #endif
     t0 = CtrTimeNowMs();
-    upload(sTopStage, TOP_TEX_W, NULL, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
-           &sTopTex, kProfTop);
+    // A wide frame moves twice the bytes, because its texture is twice as wide.
+    if (sShownWide)
+        upload(sTopStage, TOP_WIDE_TEX_W, NULL, TOP_WIDE_W, CTR_GBA_HEIGHT,
+               &sTopWideTex, kProfTop);
+    else
+        upload(sTopStage, TOP_TEX_W, NULL, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
+               &sTopTex, kProfTop);
     CtrLogSlow("upload.top", t0);
 
     // The inline path's bottom upload. The bottom screen is mostly static, so
@@ -1001,12 +1081,18 @@ void CtrVideoPresent(void)
     {
         // Calculated, not in a table: the offset always centers the scaled
         // image, so the two always agree.
+        //
+        // A wide frame is 272 wide, so at 1.5x its x is -4: two screen pixels
+        // of each margin go past the edges, and the GBA picture stays where
+        // 1.5X puts it.
+        int   w  = sShownWide ? TOP_WIDE_W : CTR_GBA_WIDTH;
         float sx = kTopScales[sTopScale].sx;
         float sy = kTopScales[sTopScale].sy;
-        float x  = (TOP_SCREEN_W - CTR_GBA_WIDTH  * sx) / 2.0f;
+        float x  = (TOP_SCREEN_W - w * sx) / 2.0f;
         float y  = (TOP_SCREEN_H - CTR_GBA_HEIGHT * sy) / 2.0f;
 
-        C2D_DrawImageAt(sTopImage, x, y, 0.0f, NULL, sx, sy);
+        C2D_DrawImageAt(sShownWide ? sTopWideImage : sTopImage, x, y, 0.0f,
+                        NULL, sx, sy);
     }
 
     C2D_TargetClear(sBotTarget, C2D_Color32(0, 0, 0, 0xFF));

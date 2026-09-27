@@ -53,9 +53,9 @@ static const u8 sSpeeds[] = { 1, 2, 4, 8 };
 // An index for each button. The modes are an enum, not a sequence, so do not
 // calculate a mode from the index.
 static const u8 sScales[] = {
-    CTR_TOP_SCALE_1X, CTR_TOP_SCALE_1_5X, CTR_TOP_SCALE_FILL
+    CTR_TOP_SCALE_1X, CTR_TOP_SCALE_1_5X, CTR_TOP_SCALE_FILL, CTR_TOP_SCALE_WIDE
 };
-static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
+static const char *const sScaleNames[] = { "1x", "1.5x", "FILL", "WIDE" };
 #define SCALE_COUNT   ARRAY_COUNT(sScales)
 
 // The values that a button can bind to, in tap order. MOD is in the same cycle
@@ -122,7 +122,7 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define SPD_Y         P1_BTN_Y(0)
 #define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
 
-#define SCL_W         84
+#define SCL_W         SPD_W   // four buttons, as in the speed row
 #define SCL_Y         P1_BTN_Y(1)
 #define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
 
