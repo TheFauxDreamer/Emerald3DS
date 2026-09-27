@@ -208,11 +208,36 @@ int  Ctr3dsUiModifierHeld(void);
 #define CTR_TOP_SCALE_1X     0   // 240x160, pixel-perfect, wide borders
 #define CTR_TOP_SCALE_1_5X   1   // 360x240, fills the height, 20px bars
 #define CTR_TOP_SCALE_FILL   2   // 400x240, no borders, 11% wider
-#define CTR_TOP_SCALE_COUNT  3
+#define CTR_TOP_SCALE_WIDE   3   // 1.5x, and the field shows 16px more each side
+#define CTR_TOP_SCALE_COUNT  4
 #define CTR_TOP_SCALE_DEFAULT CTR_TOP_SCALE_1_5X
 
 void Ctr3dsSetTopScale(int mode);
 int  Ctr3dsGetTopScale(void);
+
+// ---- the wide overworld (CTR_TOP_SCALE_WIDE) --------------------------------
+//
+// At WIDE, the top screen shows the GBA picture at 1.5x, as 1.5X does. In the
+// field it also shows CTR_WIDE_MARGIN more GBA pixels on each side: 272x160 at
+// 1.5x is 408x240, so 4 screen pixels go past each edge. Menus, battles and
+// every other screen stay 240 wide, and the margins are then black, exactly as
+// at 1.5X. The 240 pixels in the middle are always the GBA's own.
+//
+// Where the margins come from: the side maps of src/field_camera.c for BG1-3,
+// sprites as they are placed, and window edges extended (ppu_set_wide in
+// rp2350/ppu.h). Text boxes and menus on BG0 stop at the edges of the 240.
+#define CTR_WIDE_MARGIN 16
+
+typedef struct {
+    const uint16_t *sideMap[4];   // for each BG: a 64x32 map, or NULL
+    uint16_t sideDelta;           // see ppu_set_wide
+    uint8_t  active;              // this frame is the field, at WIDE
+} CtrWideField;
+
+// Game side (src/field_camera.c). The state of the frame the game just made.
+// The side maps stay valid for the process, but their contents change with the
+// next frame, so the host copies them.
+void CtrWideFieldGet(CtrWideField *out);
 
 // ---- the debug menu -------------------------------------------------------
 //
