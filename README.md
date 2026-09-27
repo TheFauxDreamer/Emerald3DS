@@ -37,14 +37,20 @@ what the game believes.
   ┌──────────────────────────────┐         bottom: game-side code, reading the
   │ [icon] SPARKY  /\  Lv12      │         game's own structures directly
   │ [PSN ] ####------  24/38     │
-  │  PARTY  BAG  MAP  DEX  HOME  │
+  │ PARTY  BAG  [HOME]  MAP  TROPHY │
   └──────────────────────────────┘
 ```
 
 ## The bottom screen
 
-Tabs appear only once the game has given you the thing they show, the same way
-the start menu works: no Pokédex tab before you own a Pokédex.
+The nav bar along the bottom has five buttons, each an icon with its name
+under it. HOME is in the centre and a little larger. You choose the other
+four from PARTY, BAG, MAP, DEX and TROPHY on SETTINGS' NAV BAR page; by
+default they are PARTY, BAG, MAP and TROPHY, and the one left over (DEX by
+default) is a tile on HOME. The same page turns the names under the icons
+off. A tab opens only once the game has given you the thing it shows, the
+same way the start menu works: until then its button is grey and does
+nothing, so the bar never changes shape.
 
 **PARTY.** Your team as a 2x3 grid of cards: animated mon icon, nickname, level,
 and an HP bar that slides the way the battle bar does instead of jumping. Status

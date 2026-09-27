@@ -476,6 +476,7 @@ static uint8_t sFollowerWho;        // CTR_FOLLOWER_*
 static uint8_t sFollowerBobOff;
 static uint8_t sFollowerPokeBall;
 static uint8_t sDayCareYard;
+static uint16_t sNavConfig;
 
 // The last ball thrown, as a raw item id. There is no range check here: the
 // valid range is a game constant that this side cannot include.
@@ -682,6 +683,26 @@ void Ctr3dsSetDayCareYard(int on)
 int Ctr3dsGetDayCareYard(void)
 {
     return sDayCareYard;
+}
+
+void Ctr3dsApplyNavConfig(int config)
+{
+    sNavConfig = (uint16_t)config;
+}
+
+void Ctr3dsSetNavConfig(int config)
+{
+    int before = sNavConfig;
+
+    Ctr3dsApplyNavConfig(config);
+
+    if (sNavConfig != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetNavConfig(void)
+{
+    return sNavConfig;
 }
 
 void Ctr3dsApplyQuickBallOff(int on)

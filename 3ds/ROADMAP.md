@@ -50,6 +50,11 @@ The large pieces:
     Mirage Island agrees with the man on Route 130. FRONTIER is grey before the
     Battle Frontier, and after it BP and symbols agree with the Frontier Pass.
     DEBUG opens from SETTINGS, and BACK returns there.
+  - The nav bar: PARTY BAG [HOME] MAP TROPHY by default; MAP is grey and dead
+    before the PokeNav; DEX opens from its HOME tile, with HOME lit; NAV BAR
+    swaps slots and keeps them after a relaunch; LABELS off centers the
+    icons; the battle panel's BAG works when BAG is not on the bar; a v14
+    settings.bin loads with the default bar.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can
@@ -1034,7 +1039,7 @@ link code from the archive with no error (cheatsheet section 12).
 draw, touch and the state key on `PAGE_LINK`. `PGR_X(i)` is written in terms of
 `PAGE_COUNT`, so the pager needed no layout change.
 
-**The state key is not optional.** `UiStateHash` (`3ds/ui/bottom_screen.c:577`)
+**The state key is not optional.** `UiStateHash` (`3ds/ui/bottom_screen.c:551`)
 drives every repaint, and a peer joining or dropping changes the panel with no
 touch. `UiLinkPageStateKey()` supplies bits 19-23 and 28-31 of
 `UiExtraStateKey()`, and `UiExtraStateKey` calls it only on the LINK page, so no

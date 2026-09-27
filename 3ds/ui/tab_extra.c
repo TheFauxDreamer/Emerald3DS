@@ -35,6 +35,7 @@
 #include "ui_link.h"
 #include "ui_view.h"
 #include "view_home.h"
+#include "ui_navbar.h"
 
 // Ctr3dsCurrentLevelCap(), for the live "cap NN" value on page 2.
 #include "../tweaks.h"
@@ -171,23 +172,44 @@ enum
     PAGE_GAMEPLAY,
     PAGE_EXTRAS,
     PAGE_FOLLOWER,
-    // The launcher has a tile for each page before this one: 12, a full 4x3
-    // grid. DEBUG opens from a button on SETTINGS.
-    PAGE_TILES,
+    // These two have no tile. Buttons on SETTINGS open them.
+    PAGE_NAVBAR,
 #if CTR_DEBUG_MENU
-    PAGE_DEBUG = PAGE_TILES,
+    PAGE_DEBUG,
 #endif
 };
 
 static const char *const sPageTitle[] = {
     "TRAINER", "CLOCK", "DOWSING", "BERRIES", "DAY CARE", "FRIENDSHIP", "FRONTIER",
-    "LINK", "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "DEBUG",
+    "LINK", "SETTINGS", "GAMEPLAY", "EXTRAS", "FOLLOWER", "NAV BAR", "DEBUG",
 };
 
 // A tile's second line, in the small font: what is behind it.
 static const char *const sPageHint[] = {
     "your card", "time, tide, eggs", "itemfinder", "berry trees", "route 117",
-    "hearts", "BP, symbols", "cable club", "speed, scale", "cheats", "comfort", "follower", "test build",
+    "hearts", "BP, symbols", "cable club", "speed, scale", "cheats", "comfort",
+    "follower", "", "test build",
+};
+
+// The launcher's cells, in order. CELL_SPARE is the tab that is not on the nav
+// bar (UiNavSpareTab): it opens that tab, not a page.
+#define CELL_SPARE 0xFF
+
+static const u8 sCells[] = {
+    PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING, PAGE_BERRIES,
+    PAGE_DAYCARE, PAGE_FRIENDSHIP, PAGE_FRONTIER, CELL_SPARE,
+    PAGE_LINK, PAGE_SETTINGS, PAGE_GAMEPLAY, PAGE_EXTRAS,
+    PAGE_FOLLOWER,
+};
+
+// The spare tab's tile hint, for each tab that can be spare.
+static const char *const sSpareHint[UI_TAB_COUNT] = {
+    [UI_TAB_PARTY]  = "your team",
+    [UI_TAB_BAG]    = "items",
+    [UI_TAB_MAP]    = "region map",
+    [UI_TAB_DEX]    = "pokedex",
+    [UI_TAB_TROPHY] = "achievements",
+    [UI_TAB_EXTRA]  = "",
 };
 
 // The pages that read save data. Before a save loads, their tiles are dim and
@@ -227,22 +249,43 @@ static bool8 PageFullBleed(u8 page)
 #define TITLE_BACK_W  46
 #define TITLE_BACK_X  (CTR_BOTTOM_WIDTH - 8 - TITLE_BACK_W)
 
-// DEBUG, on the SETTINGS title line left of BACK. The debug page has no tile.
+// DEBUG and NAV BAR, on the SETTINGS title line left of BACK. Their pages have
+// no tile.
 #define DEBUG_BTN_W   54
 #define DEBUG_BTN_X   (TITLE_BACK_X - 6 - DEBUG_BTN_W)
+#define NAVBAR_BTN_W  66
+#if CTR_DEBUG_MENU
+#define NAVBAR_BTN_X  (DEBUG_BTN_X - 6 - NAVBAR_BTN_W)
+#else
+#define NAVBAR_BTN_X  (TITLE_BACK_X - 6 - NAVBAR_BTN_W)
+#endif
 
-// The launcher: 4x3 tiles of 80x64, which fill the 320x192 content area
+// The launcher: 4x4 tiles of 80x48, which fill the 320x192 content area
 // exactly on whole 8px tiles, as UiWindowFrame needs. The title is centred on
 // the tile's middle; the hint sits under it.
 #define TILE_COLS     4
 #define TILE_TW       10
-#define TILE_TH       8
+#define TILE_TH       6
 #define TILE_W        (TILE_TW * 8)
 #define TILE_H        (TILE_TH * 8)
 #define TILE_X(i)     (((i) % TILE_COLS) * TILE_W)
 #define TILE_Y(i)     (((i) / TILE_COLS) * TILE_H)
-#define TILE_TITLE_DY 18
-#define TILE_HINT_DY  36
+#define TILE_TITLE_DY 9
+#define TILE_HINT_DY  27
+
+// The NAV BAR page. A LABELS check row, then the bar as it is (its four picks
+// can be selected), then the five tabs to put in the selected pick.
+#define NAV_LABELS_Y  30
+#define NAV_BOX_H     40
+#define NAV_BAR_Y     64
+#define NAV_NOTE_Y    108
+#define NAV_TABS_Y    126
+#define NAV_BOX_W     56
+#define NAV_HOME_W    76
+#define NAV_GAP       4
+#define DEFAULT_BTN_W 66
+#define DEFAULT_BTN_X (TITLE_BACK_X - 6 - DEFAULT_BTN_W)
+#define NAV_NO_PICK   0xFF
 
 // The LEVEL CAP buttons use the columns of the SCREEN SIZE row (SCL_X and
 // SCL_W, not SCL_Y). Thus the two pages align horizontally. BAG SORT has its
@@ -750,6 +793,13 @@ static void DrawPageTitle(u8 page)
     DrawButtonH(TITLE_BACK_X, PGR_Y, TITLE_BACK_W, PGR_H,
                 UiAscii(label, "BACK", sizeof(label)), FALSE);
 
+    if (page == PAGE_SETTINGS)
+        DrawButtonH(NAVBAR_BTN_X, PGR_Y, NAVBAR_BTN_W, PGR_H,
+                    UiAscii(label, "NAV BAR", sizeof(label)), FALSE);
+    else if (page == PAGE_NAVBAR)
+        DrawButtonH(DEFAULT_BTN_X, PGR_Y, DEFAULT_BTN_W, PGR_H,
+                    UiAscii(label, "DEFAULT", sizeof(label)), FALSE);
+
 #if CTR_DEBUG_MENU
     if (page == PAGE_SETTINGS)
         DrawButtonH(DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H,
@@ -757,19 +807,165 @@ static void DrawPageTitle(u8 page)
 #endif
 }
 
+// -------------------------------------------------------------- nav bar ---
+
+static u8 sNavPick = NAV_NO_PICK;
+
+// The x and width of bar slot `slot` in the preview. It keeps the bar's
+// shape: HOME wider, in the center.
+static void NavSlotRect(u32 slot, int *x, int *w)
+{
+    int total = 4 * NAV_BOX_W + NAV_HOME_W + 4 * NAV_GAP;
+    int left = (CTR_BOTTOM_WIDTH - total) / 2;
+
+    *x = left + (int)slot * (NAV_BOX_W + NAV_GAP)
+       + (slot > UI_NAV_HOME_SLOT ? NAV_HOME_W - NAV_BOX_W : 0);
+    *w = slot == UI_NAV_HOME_SLOT ? NAV_HOME_W : NAV_BOX_W;
+}
+
+// The pick (0..3) of bar slot `slot`, or NAV_NO_PICK for HOME.
+static u8 NavPickOfSlot(u32 slot)
+{
+    if (slot == UI_NAV_HOME_SLOT)
+        return NAV_NO_PICK;
+
+    return (u8)(slot < UI_NAV_HOME_SLOT ? slot : slot - 1);
+}
+
+// The x of choice `i` of the five tabs, in the same grid as the bar's picks.
+static int NavChoiceX(u32 i)
+{
+    int total = 5 * NAV_BOX_W + 4 * NAV_GAP;
+
+    return (CTR_BOTTOM_WIDTH - total) / 2 + (int)i * (NAV_BOX_W + NAV_GAP);
+}
+
+static void DrawNavBox(int x, int y, int w, u8 tab, bool8 selected, bool8 fixed)
+{
+    u8 label[8];
+    int size = tab == UI_TAB_EXTRA ? UI_NAV_ICON_HOME : UI_NAV_ICON;
+    u16 color = selected ? UI_COL_ACCENT : fixed ? UI_COL_DIM : UiThemeText();
+
+    UiRect(x, y, w, NAV_BOX_H, UI_COL_DIM);
+    if (selected)
+    {
+        UiRect(x + 1, y + 1, w - 2, NAV_BOX_H - 2, UI_COL_ACCENT);
+        UiRect(x + 2, y + 2, w - 4, NAV_BOX_H - 4, UI_COL_ACCENT);
+    }
+
+    UiNavDrawIcon(x + (w - size) / 2, y + 4, tab, color);
+    UiAscii(label, UiNavTabName(tab), sizeof(label));
+    UiTextSmall(x + (w - UiTextSmallWidth(label)) / 2, y + NAV_BOX_H - 15,
+                label, color, UiThemeShadow());
+}
+
+static void DrawPageNavBar(void)
+{
+    u8 slots[UI_NAV_SLOTS];
+    u8 label[48];
+
+    DrawCheckRow(NAV_LABELS_Y, CHK_ROW_H, "LABELS", "names under the icons",
+                 UiNavLabels());
+
+    UiNavSlots(slots);
+    for (u32 i = 0; i < UI_NAV_SLOTS; i++)
+    {
+        int x, w;
+
+        NavSlotRect(i, &x, &w);
+        DrawNavBox(x, NAV_BAR_Y, w, slots[i],
+                   NavPickOfSlot(i) != NAV_NO_PICK && NavPickOfSlot(i) == sNavPick,
+                   i == UI_NAV_HOME_SLOT);
+    }
+
+    UiTextSmall(CHK_BOX_X, NAV_NOTE_Y,
+                UiAscii(label, sNavPick == NAV_NO_PICK
+                               ? "Tap a slot of the bar, then the tab for it."
+                               : "Tap the tab for that slot. The other one moves.",
+                        sizeof(label)),
+                UI_COL_DIM, UiThemeShadow());
+
+    for (u8 tab = 0, i = 0; tab < UI_TAB_COUNT; tab++)
+    {
+        if (tab == UI_TAB_EXTRA)
+            continue;
+
+        DrawNavBox(NavChoiceX(i), NAV_TABS_Y, NAV_BOX_W, tab, FALSE, FALSE);
+        i++;
+    }
+}
+
+static void TouchPageNavBar(const CtrTouchState *t)
+{
+    if (HitCheckRow(t, NAV_LABELS_Y, CHK_ROW_H))
+    {
+        UiNavSetLabels(!UiNavLabels());
+        UiMarkDirty();
+        return;
+    }
+
+    for (u32 i = 0; i < UI_NAV_SLOTS; i++)
+    {
+        int x, w;
+        u8 pick = NavPickOfSlot(i);
+
+        NavSlotRect(i, &x, &w);
+        if (pick == NAV_NO_PICK || !UiHit(t, x, NAV_BAR_Y, w, NAV_BOX_H))
+            continue;
+
+        // A second tap on the selected slot clears the selection.
+        sNavPick = (sNavPick == pick) ? NAV_NO_PICK : pick;
+        UiMarkDirty();
+        return;
+    }
+
+    if (sNavPick == NAV_NO_PICK)
+        return;
+
+    for (u8 tab = 0, i = 0; tab < UI_TAB_COUNT; tab++)
+    {
+        if (tab == UI_TAB_EXTRA)
+            continue;
+
+        if (UiHit(t, NavChoiceX(i), NAV_TABS_Y, NAV_BOX_W, NAV_BOX_H))
+        {
+            UiNavPut(sNavPick, tab);
+            UiMarkDirty();
+            return;
+        }
+        i++;
+    }
+}
+
 static void DrawLauncher(void)
 {
     u8 label[16];
 
-    for (u32 i = 0; i < PAGE_TILES; i++)
+    for (u32 c = 0; c < ARRAY_COUNT(sCells); c++)
     {
-        int x = TILE_X(i), y = TILE_Y(i);
-        bool8 live = PageLive(i);
-        const char *hint = sPageHint[i];
+        int x = TILE_X(c), y = TILE_Y(c);
+        u32 i = sCells[c];
+        bool8 live;
+        const char *title, *hint;
+
+        if (i == CELL_SPARE)
+        {
+            u8 spare = UiNavSpareTab();
+
+            live = UiTabUnlocked(spare);
+            title = UiNavTabName(spare);
+            hint = sSpareHint[spare];
+        }
+        else
+        {
+            live = PageLive(i);
+            title = sPageTitle[i];
+            hint = sPageHint[i];
+        }
 
         UiWindowFrame(x / 8, y / 8, TILE_TW, TILE_TH);
 
-        UiAscii(label, sPageTitle[i], sizeof(label));
+        UiAscii(label, title, sizeof(label));
         UiText(x + (TILE_W - UiTextWidth(label)) / 2, y + TILE_TITLE_DY,
                label, live ? UiThemeText() : UI_COL_DIM, UiThemeShadow());
 
@@ -825,6 +1021,8 @@ void UiExtraDraw(void)
         UiFriendshipPageDraw();
     else if (page == PAGE_FRONTIER)
         UiFrontierPageDraw();
+    else if (page == PAGE_NAVBAR)
+        DrawPageNavBar();
     else if (page == PAGE_SETTINGS)
         DrawPage1();
     else if (page == PAGE_GAMEPLAY)
@@ -1070,10 +1268,20 @@ void UiExtraTouch(const CtrTouchState *t)
 
     if (!PageOpen())
     {
-        for (u32 i = 0; i < PAGE_TILES; i++)
+        for (u32 c = 0; c < ARRAY_COUNT(sCells); c++)
         {
-            if (!UiHit(t, TILE_X(i), TILE_Y(i), TILE_W, TILE_H))
+            u32 i = sCells[c];
+
+            if (!UiHit(t, TILE_X(c), TILE_Y(c), TILE_W, TILE_H))
                 continue;
+
+            // The tab that is not on the bar. UiSetTab refuses it while it is
+            // not unlocked.
+            if (i == CELL_SPARE)
+            {
+                UiSetTab(UiNavSpareTab());
+                return;
+            }
 
             if (!PageLive(i))
                 return;
@@ -1114,8 +1322,24 @@ void UiExtraTouch(const CtrTouchState *t)
         return;
     }
 
-#if CTR_DEBUG_MENU
     // A second page view over SETTINGS, so its BACK returns there.
+    if (page == PAGE_SETTINGS && UiHit(t, NAVBAR_BTN_X, PGR_Y, NAVBAR_BTN_W, PGR_H))
+    {
+        sNavPick = NAV_NO_PICK;
+        UiViewPush(UI_VIEW_HOME_PAGE, PAGE_NAVBAR);
+        return;
+    }
+
+    if (page == PAGE_NAVBAR && UiHit(t, DEFAULT_BTN_X, PGR_Y, DEFAULT_BTN_W, PGR_H))
+    {
+        UiNavReset();
+        sNavPick = NAV_NO_PICK;
+        UiMarkDirty();
+        return;
+    }
+
+#if CTR_DEBUG_MENU
+    // The same for DEBUG.
     if (page == PAGE_SETTINGS && UiHit(t, DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H))
     {
         sAchResyncArmed = FALSE;
@@ -1126,6 +1350,8 @@ void UiExtraTouch(const CtrTouchState *t)
 
     if (page == PAGE_BERRIES)
         UiBerriesPageTouch(t);
+    else if (page == PAGE_NAVBAR)
+        TouchPageNavBar(t);
     else if (page == PAGE_SETTINGS)
         TouchPage1(t);
     else if (page == PAGE_GAMEPLAY)

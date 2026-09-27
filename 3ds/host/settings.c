@@ -61,7 +61,10 @@
 // - v14 uses three more bits of each record's follower byte for WHO, BOBBING
 //   and BALL. Same size. Versions v12 and v13 wrote only 0 or 1 there, so the
 //   new bits load as zero, the defaults.
-#define SETTINGS_VERSION 14
+// - v15 uses the two padding bytes after dayCareYard for the bottom screen's
+//   nav bar: its four slots and the label switch. Same size. Older files have
+//   zero there, which is the default bar with labels.
+#define SETTINGS_VERSION 15
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
@@ -135,7 +138,9 @@ struct CtrSettings {
     // Added in v13, in the first padding byte of v10. Zero means off: the yard
     // on Route 117 is as in the original game.
     uint8_t  dayCareYard;
-    uint8_t  pad[2];
+    // Added in v15, in the two padding bytes of v10. The game side gives the
+    // meaning of the bits (ui_navbar.c). Zero is the default bar.
+    uint16_t nav;
     // v11: the per-save table. The values of expAll, levelCap, randomizer,
     // bagSort, phoneCallsOff and lastBall are now in rec. Their bytes above
     // keep an older file's values until a save takes them. Otherwise they are
@@ -199,6 +204,8 @@ extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
 extern int  Ctr3dsGetDayCareYard(void);
 extern void Ctr3dsApplyDayCareYard(int on);
+extern int  Ctr3dsGetNavConfig(void);
+extern void Ctr3dsApplyNavConfig(int config);
 extern int  Ctr3dsGetBattleAnimOff(void);
 extern void Ctr3dsApplyBattleAnimOff(int on);
 extern int  Ctr3dsGetLastBall(void);
@@ -491,10 +498,10 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // Files v11 to v14 have the same size. Their bytes for the later values
+    // Files v11 to v15 have the same size. Their bytes for the later values
     // are zero.
-    if (s.version == SETTINGS_VERSION || s.version == 13 || s.version == 12
-        || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
+        || s.version == 12 || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -566,14 +573,18 @@ void CtrSettingsLoad(void)
     // Zero for a file older than v13, which means "off".
     Ctr3dsApplyDayCareYard(s.dayCareYard != 0);
 
+    // Zero for a file older than v15, which is the default bar. The game side
+    // checks the value before it uses it.
+    Ctr3dsApplyNavConfig(s.nav);
+
     // Zero for a file older than v6, which means "not muted" for all three.
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         Ctr3dsApplyAudioDbg(i, s.audioDbgMuted[i] == 0);
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 13 || s.version == 12
-        || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
+        || s.version == 12 || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
@@ -610,6 +621,7 @@ static void settings_build(struct CtrSettings *s)
     s->quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
     s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
     s->dayCareYard   = (uint8_t)(Ctr3dsGetDayCareYard() ? 1 : 0);
+    s->nav           = (uint16_t)Ctr3dsGetNavConfig();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
         s->audioDbgMuted[i] = (uint8_t)(Ctr3dsGetAudioDbg(i) ? 0 : 1);
