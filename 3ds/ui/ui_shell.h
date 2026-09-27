@@ -17,10 +17,8 @@
 // The tabs that show depend on what the player has unlocked. The shell
 // (bottom_screen.c) follows BuildNormalStartMenu() (src/start_menu.c).
 //
-// Six tabs is the maximum. The bar divides 320px between the visible tabs, and
-// 53px is about the minimum for a finger (SECOND_SCREEN_CHEATSHEET.md, "Adding
-// a tab"). TROPHY comes before EXTRA, so the port's settings stay at the right
-// end.
+// Six tabs is the maximum. The nav bar (ui_navbar.h) has five slots: HOME in
+// the center and four tabs the player picks. The fifth tab opens from HOME.
 enum UiTab
 {
     UI_TAB_PARTY,
@@ -149,8 +147,12 @@ bool8 UiOverlayActive(void);
 u8 UiActiveTab(void);
 
 // Switches to `tab` (enum UiTab) as a tap on the tab bar does, and closes what
-// the old tab had open. Does nothing for a tab that does not show.
+// the old tab had open. Does nothing for a tab that is not unlocked.
 void UiSetTab(u8 tab);
+
+// TRUE when the player can open `tab`: it follows BuildNormalStartMenu()
+// (src/start_menu.c). The nav bar shows a tab that is not unlocked dim.
+bool8 UiTabUnlocked(u8 tab);
 
 // The party slot that the BAG tab acts on. The party grid sets it.
 u8   UiSelectedMon(void);

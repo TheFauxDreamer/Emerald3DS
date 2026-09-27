@@ -318,6 +318,12 @@ int  Ctr3dsGetFollowerPokeBall(void);
 void Ctr3dsSetDayCareYard(int on);
 int  Ctr3dsGetDayCareYard(void);
 
+// The bottom screen's nav bar: which tab is in each slot, and whether the
+// labels show. A raw 16-bit value for the console. Its bits are defined on the
+// game side (3ds/ui/ui_navbar.c), which also checks it. Zero is the default.
+void Ctr3dsSetNavConfig(int config);
+int  Ctr3dsGetNavConfig(void);
+
 // The last Poke Ball that the player threw. The bottom screen then offers it
 // again, and the player does not need to search the bag in each encounter.
 //

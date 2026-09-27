@@ -30,6 +30,7 @@
 #include "ui_title.h"
 #include "ui_team.h"
 #include "ui_view.h"
+#include "ui_navbar.h"
 #include "view_battle.h"
 
 // Two flags. sNeedsRepaint: the framebuffer is stale. sDirty: the host has not
@@ -51,25 +52,20 @@ void UiSetSelectedMon(u8 index) { sSelectedMon = index; }
 
 // ---------------------------------------------------------------- tabs -----
 //
-// The tabs follow BuildNormalStartMenu() (src/start_menu.c). Do not show a tab
-// before the player has its item. A zero flag means "always available", as the
-// start menu does for the bag.
-struct UiTabDef
+// The tabs follow BuildNormalStartMenu() (src/start_menu.c). Do not open a tab
+// before the player has its item. The nav bar (ui_navbar.c) shows such a tab
+// dim, in its slot, and draws the names. A zero flag means "always
+// available", as the start menu does for the bag.
+static const u16 sTabFlag[UI_TAB_COUNT] =
 {
-    const char *name;
-    u16 flag;
-};
-
-static const struct UiTabDef sTabs[UI_TAB_COUNT] =
-{
-    [UI_TAB_PARTY] = { "PARTY", FLAG_SYS_POKEMON_GET },
-    [UI_TAB_BAG]   = { "BAG",   0                    },
-    [UI_TAB_MAP]   = { "MAP",   FLAG_SYS_POKENAV_GET },
-    [UI_TAB_DEX]   = { "DEX",   FLAG_SYS_POKEDEX_GET },
+    [UI_TAB_PARTY]  = FLAG_SYS_POKEMON_GET,
+    [UI_TAB_BAG]    = 0,
+    [UI_TAB_MAP]    = FLAG_SYS_POKENAV_GET,
+    [UI_TAB_DEX]    = FLAG_SYS_POKEDEX_GET,
     // Always available. The list has no start-menu entry to follow.
-    [UI_TAB_TROPHY] = { "TROPHY", 0                  },
+    [UI_TAB_TROPHY] = 0,
     // Not a game feature, so it is always available.
-    [UI_TAB_EXTRA] = { "HOME",  0                    },
+    [UI_TAB_EXTRA]  = 0,
 };
 
 // TRUE when there is save data to read.
@@ -86,7 +82,7 @@ static bool8 SaveDataLive(void)
     return gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL;
 }
 
-static bool8 TabUnlocked(u32 tab)
+bool8 UiTabUnlocked(u8 tab)
 {
     // The EXTRA tab's test override. It comes before the flag so that the
     // normal path stays the same.
@@ -95,26 +91,13 @@ static bool8 TabUnlocked(u32 tab)
 
     // The two answers that need no save data come first. The flag read occurs
     // only when a save block exists.
-    if (sTabs[tab].flag == 0)
+    if (sTabFlag[tab] == 0)
         return TRUE;
 
     if (!SaveDataLive())
         return FALSE;
 
-    return FlagGet(sTabs[tab].flag);
-}
-
-// Fill `out` with the visible tab ids and return their count. The bag has no
-// flag, so the count is never zero.
-static u32 VisibleTabs(u8 *out)
-{
-    u32 n = 0;
-
-    for (u32 i = 0; i < UI_TAB_COUNT; i++)
-        if (TabUnlocked(i))
-            out[n++] = (u8)i;
-
-    return n;
+    return FlagGet(sTabFlag[tab]);
 }
 
 // Every way the active tab changes goes through here: the tab bar, the toast's
@@ -139,27 +122,18 @@ static void LeaveTab(u8 next)
 
 void UiSetTab(u8 tab)
 {
-    u8 vis[UI_TAB_COUNT];
-    u32 n = VisibleTabs(vis);
-
-    // Only to a tab that shows, as a tap on the bar does.
-    for (u32 i = 0; i < n; i++)
-        if (vis[i] == tab)
-            LeaveTab(tab);
+    // Only to a tab that is unlocked. It does not need to be on the bar: the
+    // tab that is not there opens from HOME.
+    if (tab < UI_TAB_COUNT && UiTabUnlocked(tab))
+        LeaveTab(tab);
 }
 
-// Flags never clear, so the active tab cannot usually disappear. This guard
-// stops an index into a hidden tab.
+// Flags never clear, so the active tab cannot usually lock again. The test
+// override can, when it is turned off. Then go to HOME, which is always open.
 static void EnsureTabVisible(void)
 {
-    u8 vis[UI_TAB_COUNT];
-    u32 n = VisibleTabs(vis);
-
-    for (u32 i = 0; i < n; i++)
-        if (vis[i] == sTab)
-            return;
-
-    LeaveTab(vis[0]);
+    if (!UiTabUnlocked(sTab))
+        LeaveTab(UI_TAB_EXTRA);
 }
 
 // --------------------------------------------------------- shiny notice ----
@@ -699,38 +673,6 @@ static u32 UiStateHash(void)
     return hash;
 }
 
-static void DrawTabBar(const u8 *vis, u32 n)
-{
-    const int tabW = CTR_BOTTOM_WIDTH / (int)n;
-
-    for (u32 i = 0; i < n; i++)
-    {
-        int x = (int)i * tabW;
-        // The last tab takes the remainder, so the bar fills the width.
-        int w = (i == n - 1) ? (CTR_BOTTOM_WIDTH - x) : tabW;
-        int active = (vis[i] == sTab);
-        u8 label[12];
-
-        UiFillRect(x, UI_CONTENT_H, w, UI_TABBAR_H,
-                   active ? UI_COL_BG : UI_COL_HP_BACK);
-        UiRect(x, UI_CONTENT_H, w, UI_TABBAR_H, UI_COL_DIM);
-
-        UiAscii(label, sTabs[vis[i]].name, sizeof(label));
-        UiText(x + (w - UiTextWidth(label)) / 2,
-               UI_CONTENT_H + (UI_TABBAR_H - UI_GLYPH_H) / 2,
-               label, active ? UI_COL_ACCENT : UI_COL_DIM, UI_COL_SHADOW);
-
-        // A gold dot on the TROPHY tab when an unlock is unseen. It is what
-        // stays after a toast that nobody read, so it uses the toast's gold.
-        // Never on the active tab, which marks all rows as seen.
-        if (vis[i] == UI_TAB_TROPHY && !active && AchActive()->anyUnseen())
-        {
-            UiFillRect(x + w - 12, UI_CONTENT_H + 6, 7, 7, UI_COL_SHINY_EDGE);
-            UiFillRect(x + w - 11, UI_CONTENT_H + 7, 5, 5, UI_COL_SHINY);
-        }
-    }
-}
-
 // Defined below, next to the animation-step path.
 static void DrawAnimatedLayer(void);
 
@@ -759,8 +701,6 @@ static int AnimatedLayerActive(void)
 
 static void Redraw(void)
 {
-    u8 vis[UI_TAB_COUNT];
-    u32 n;
     unsigned long long tabTicks;
     u16 noticeSpecies = SPECIES_NONE;
     u32 noticePersonality = 0;
@@ -809,7 +749,6 @@ static void Redraw(void)
     sTitlePainted = 0;      // the screen holds a tab from here on
 
     EnsureTabVisible();
-    n = VisibleTabs(vis);
 
     {
         unsigned long long ts = CtrTicksNow();
@@ -845,7 +784,7 @@ static void Redraw(void)
 
     {
         unsigned long long ts = CtrTicksNow();
-        DrawTabBar(vis, n);
+        UiNavDraw(sTab);
         CtrProfile("paint.bar", ts);
     }
 
@@ -998,15 +937,14 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     // it.
     else if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
     {
-        u8 vis[UI_TAB_COUNT];
-        u32 n = VisibleTabs(vis);
-        u32 i = (u32)touch->x * n / CTR_BOTTOM_WIDTH;
+        u8 tab = UiNavHit(touch);
 
         // The same tab again returns it to its top, as it does in the game's
         // own menus when B backs out. Only when something is open, so a stray
-        // tap on the active tab costs no repaint.
-        if (i < n && (vis[i] != sTab || UiViewTop() != UI_VIEW_NONE))
-            LeaveTab(vis[i]);
+        // tap on the active tab costs no repaint. HOME is the way back from
+        // the tab that is not on the bar.
+        if (tab < UI_TAB_COUNT && (tab != sTab || UiViewTop() != UI_VIEW_NONE))
+            LeaveTab(tab);
     }
     else if (touch != NULL && touch->y < UI_CONTENT_H)
     {

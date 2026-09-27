@@ -39,7 +39,7 @@ Rp2350PresentFrame()                 3ds/host/main.c       (end of every game fr
                                                            start rasteriser on core 2/1
   if (sSubFrame == 0)                                      FULL rate, divider or not
      sample_touch(&touch)            3ds/host/main.c:99
-     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:917   OVERLAPS the rasteriser
+     CtrBottomUpdate(&touch)  -----> 3ds/ui/bottom_screen.c:856   OVERLAPS the rasteriser
                                        UpdateInGameLatch()
                                        AchTick()          achievement checks
                                        toast / strip / tab-bar tap  OR  UiXTouch(touch)
@@ -126,7 +126,7 @@ Key consequences:
 - It runs at the **end** of a game frame, after `CallCallbacks` and after
   `VBlankIntr` (`src/main.c`). The frame's own callback has already finished,
   which is why replacing `gMain.callback2` from here is safe (see the fly path).
-- `CtrBottomInit()` is called from `main()` at [host/main.c:1170](host/main.c#L1170),
+- `CtrBottomInit()` is called from `main()` at [host/main.c:1191](host/main.c#L1191),
   after audio init and before `AgbMain()`.
 
 ---
@@ -151,8 +151,9 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 
 | File | Lines | Owns |
 |---|---|---|
-| [ui/bottom_screen.c](ui/bottom_screen.c) | 1139 | Tab list, tab bar, dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
-| [ui/ui_shell.h](ui/ui_shell.h) | 269 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/bottom_screen.c](ui/bottom_screen.c) | 1078 | Tab unlocks (`UiTabUnlocked`), dispatch, overlays, the shiny notice and its animation, the shared animation clock, repaint policy, `CtrBottom*` entry points |
+| [ui/ui_shell.h](ui/ui_shell.h) | 271 | Layout constants, `UI_COL_*` palette, every per-tab entry point declaration |
+| [ui/ui_navbar.c](ui/ui_navbar.c) / [.h](ui/ui_navbar.h) | 395 / 59 | The nav bar: five slots with hand-drawn icons and small labels, HOME in the centre at 80px and four player-picked tabs at 60px, dim when locked. Decodes and checks the config from settings.bin (`Ctr3dsGetNavConfig`), and the edits of the NAV BAR page |
 | [ui/ui_draw.c](ui/ui_draw.c) / [.h](ui/ui_draw.h) | 1364 / 289 | Framebuffer pointer, dirty band and clip rect, blitters (plain, keyed and flipped), window frames, icons, status badges (the game's sheet plus a hand-drawn CNF, `UI_STATUS_CNF`), HP bar, sparkle art (in gold, or any ramp via `UiSparkleRamp`), `UiHit`, `UiHoldRepeat` |
 | [ui/ui_text.c](ui/ui_text.c) / [.h](ui/ui_text.h) | 641 / 82 | Emerald font rendering at 1x and 2x, text cut or wrapped to a width with an ellipsis, the game's small font for incidental text, numbers, ASCII to game encoding (plus the UTF-8 e-acute, so a literal can say Pokémon) |
 | [ui/view_battle.c](ui/view_battle.c) / [.h](ui/view_battle.h) | 931 / 38 | The battle panel: in place of the PARTY grid from the battle's first choice to its outcome (tappable only while the player chooses). A foe header (tap for a foe card with types, HP bar, status, stat stages and conditions), four move buttons (type, PP, and the multiplier against each opponent) that use the move, a party row with BAG and RUN, and a card with SWITCH IN (SEND OUT after a faint), INFO and the stat stages of a Pokemon that is out. **Writes game state**, only through `Ctr3dsQueueBattleMove` / `Ctr3dsQueueBattleSwitch` / `Ctr3dsQueueBattleRun` |
@@ -164,7 +165,7 @@ types only**. `bridge.h` includes neither side's headers and must stay that way.
 | [ui/view_encounters.c](ui/view_encounters.c) / [.h](ui/view_encounters.h) | 950 / 55 | The wild encounter list for the place the MAP caption names, one list per method (chips for LAND, SURF, SMASH and the three rods) with level range and chance, most common first, and the roamer (LAND, SURF) and the TV outbreak (LAND) at the top in a tagged frame when they are there: icon, name and types for a seen mon, a silhouette for an unseen one, caught marks, randomizer applied. Covers the full content area, like the DEX entry. Only reads |
 | [ui/ui_marks.c](ui/ui_marks.c) / [.h](ui/ui_marks.h) | 135 / 46 | Which map sections have news, as the PokeNav Plus marks them: a trainer who wants a rematch (`trainerRematches` with `gRematchTable`), the roamer (active, and seen, as the Pokedex area screen asks), and the TV's mass outbreak. Only reads |
 | [ui/tab_dex.c](ui/tab_dex.c) | 520 | Dex list with cursor and scroll, entry screen |
-| [ui/tab_extra.c](ui/tab_extra.c) | 1143 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a launcher of 80x64 tiles, and the pages they open as `UI_VIEW_HOME_PAGE`. The game data pages first (TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP, FRONTIER, drawn by the `view_*.c` of `view_home.h`, dim until a save loads, FRONTIER until the Battle Frontier is reached), then SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`), which has no tile: a button on SETTINGS pushes it as a second page view. Each page's top line holds its title and BACK |
+| [ui/tab_extra.c](ui/tab_extra.c) | 1369 | The HOME tab (the file and `UI_TAB_EXTRA` keep the old name): a 4x4 launcher of 80x48 tiles (with a tile for the tab that is not on the nav bar), and the pages they open as `UI_VIEW_HOME_PAGE`. The game data pages first (TRAINER, CLOCK, DOWSING, BERRIES, DAY CARE, FRIENDSHIP, FRONTIER, drawn by the `view_*.c` of `view_home.h`, dim until a save loads, FRONTIER until the Battle Frontier is reached), then SETTINGS (port settings), GAMEPLAY (the cheats), EXTRAS (quality of life), FOLLOWER, LINK (drawn by `ui_link.c`), and DEBUG (compiled out by `CTR_DEBUG_MENU`), which has no tile: a button on SETTINGS pushes it as a second page view, as NAV BAR (the nav bar's picks and labels) is. Each page's top line holds its title and BACK |
 | [ui/ui_link.c](ui/ui_link.c) / [.h](ui/ui_link.h) | 480 / 38 | The LINK page (a HOME tile): HOST, SCAN and join for the Cable Club over local wireless, the link status, DISCONNECT (refused while a trade or battle is live, `LinkSessionLive`), and TRAINER CARDS, a card view that takes the whole content area (`sCardOpen`) |
 | [ui/ui_card.c](ui/ui_card.c) / [.h](ui/ui_card.h) | 531 / 49 | A trainer card from `gTrainerCards`, or any `struct TrainerCard` (`UiCardDrawCard`), drawn with the GBA's own tiles, tilemaps and star-tier palettes at 1:1 (`UiCardDraw`, front or back) and at 1:4 (`UiCardThumb`). `UiCardAvailable` says if a card belongs to this link and not the last one. Clips peer names itself (`DrawNameClipped`) |
 | [ui/view_home.h](ui/view_home.h) | 67 | The game data pages of HOME, as the DS Poketch apps. All of them only read |
@@ -224,7 +225,7 @@ touches before any tab sees them. There are three. The first two are worth
 reading as a pair because they answer the same question differently, and the
 third is what copying them looks like:
 
-- The **shiny notice** ([bottom_screen.c:165](ui/bottom_screen.c#L165)) is the
+- The **shiny notice** ([bottom_screen.c:139](ui/bottom_screen.c#L139)) is the
   pattern: a 240x112 modal panel centred in the content area, with a DISMISS
   button, keyed on the encounter rather than on a bare flag so the next shiny
   still gets its own notice. It lives in the shell because the shell owns
@@ -349,10 +350,14 @@ and (192-112)/2 are both 40.
 
 ### Adding a tab
 
-The tab bar is `tabW = 320 / visibleCount`. Five tabs is 64px wide each; six is
-53px, which is about the practical floor for a fingertip, and TROPHY is the
-sixth, so the bar is full. **Do not add a seventh.** There are two ways to add a
-view instead:
+The nav bar ([ui_navbar.c](ui/ui_navbar.c)) has five fixed slots: HOME, 80px,
+in the centre, and four 60px slots the player picks from the other five tabs
+(the config is 16 bits in settings.bin v15, `Ctr3dsGetNavConfig`). The tab
+left over is a HOME tile (`CELL_SPARE` in `tab_extra.c`). A slot whose tab is
+not unlocked (`UiTabUnlocked`) is dim and dead, so the bar never reflows. 60px
+is over the 53px practical floor for a fingertip. **Do not add a tab.** A new
+tab would need a slot, and five is the most the bar holds. There are two ways
+to add a view instead:
 
 - **A view over a page**, cheapest of all: no tile, and the page keeps its
   place. The trainer card view does this over LINK (`ui/ui_card.c`,
@@ -360,24 +365,28 @@ view instead:
   needs the whole screen returns TRUE from a full-bleed predicate and
   `UiExtraDraw` then skips the frame and the title line for it; the view owns
   every touch while it is up and must draw its own way back.
-- **A tile of HOME.** Add an entry to the page enum in `ui/tab_extra.c`, before
-  `PAGE_DEBUG` so the debug tile stays last, plus its title and hint in
-  `sPageTitle` / `sPageHint`, and dispatch it in `UiExtraDraw`, `UiExtraTouch`
-  and `UiExtraStateKey`. The launcher lays the tiles out from the enum, 4x3,
-  so there are six free cells. LINK is a tile this way (`ui/ui_link.c`,
-  `ROADMAP.md` C.3).
+- **A tile of HOME.** Add an entry to the page enum in `ui/tab_extra.c`,
+  before `PAGE_NAVBAR` (the pages after it have no tile), plus its title and
+  hint in `sPageTitle` / `sPageHint`, its cell in `sCells`, and dispatch it in
+  `UiExtraDraw`, `UiExtraTouch` and `UiExtraStateKey`. The launcher is 4x4
+  tiles of 80x48 and has 13 in use, so there are three free cells. LINK is a
+  tile this way (`ui/ui_link.c`, `ROADMAP.md` C.3).
+- **A page with no tile**, opened from a button on another page's title line,
+  as NAV BAR and DEBUG are from SETTINGS. It is a second `UI_VIEW_HOME_PAGE`
+  entry, so its BACK returns to the page under it (`UiViewArg` gives the
+  newest entry).
 
 A page keeps the top line, y 8 to 24, for its title and BACK, so its own rows
 start at y 30. The interior ends at y 183.
 
 The steps below are for a tab, and are kept for the record.
 
-1. Add to `enum UiTab` in [ui_shell.h:24](ui/ui_shell.h#L24), before `UI_TAB_COUNT`.
+1. Add to `enum UiTab` in [ui_shell.h:22](ui/ui_shell.h#L22), before `UI_TAB_COUNT`.
 2. Declare `UiXxxDraw` / `UiXxxTouch` in the same header.
-3. Add a row to `sTabs[]` at [bottom_screen.c:63](ui/bottom_screen.c#L63):
-   `{ "NAME", FLAG_... }`, or flag `0` for always available.
-4. Add a `case` to the `switch` in `Redraw()` ([:776](ui/bottom_screen.c#L787))
-   and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L979)).
+3. Add its unlock flag to `sTabFlag[]` at [bottom_screen.c:59](ui/bottom_screen.c#L59),
+   or `0` for always available, and its name and icon in `ui_navbar.c`.
+4. Add a `case` to the `switch` in `Redraw()` ([:761](ui/bottom_screen.c#L761))
+   and to the one in `CtrBottomUpdate()` ([:968](ui/bottom_screen.c#L918)).
 5. Create `3ds/ui/tab_xxx.c`. It is picked up automatically by the `3ds/ui/*.c`
    glob in [build_objs.sh:120](build_objs.sh#L120). **See the naming hazard in
    section 12.**
@@ -401,7 +410,7 @@ typedef struct {
 } CtrTouchState;
 ```
 
-Dispatch in `CtrBottomUpdate` ([bottom_screen.c:917](ui/bottom_screen.c#L917)),
+Dispatch in `CtrBottomUpdate` ([bottom_screen.c:856](ui/bottom_screen.c#L856)),
 in order:
 
 - **Before the game** (`!sInGame`) nothing below sees a touch at all. The one
@@ -443,7 +452,7 @@ int UiHit(const CtrTouchState *t, int x, int y, int w, int h);
 ```
 
 Order matters: test overlays and pagers **before** the controls underneath them
-(see `UiExtraTouch` at [tab_extra.c:1064](ui/tab_extra.c#L1064), which tests the
+(see `UiExtraTouch` at [tab_extra.c:1262](ui/tab_extra.c#L1262), which tests the
 pager first so nothing can sit under it).
 
 `Ctr3dsUiModifierHeld()` is a held 3DS button (X/Y/ZL/ZR, bound in EXTRA) used
@@ -555,7 +564,7 @@ Three ways to get a repaint:
 **1. Push.** Call `UiMarkDirty()` after changing anything the screen depends on.
 Every touch handler that changes state does this. This is the normal route.
 
-**2. Poll.** `UiStateHash()` ([bottom_screen.c:577](ui/bottom_screen.c#L577)) is
+**2. Poll.** `UiStateHash()` ([bottom_screen.c:551](ui/bottom_screen.c#L551)) is
 recomputed every frame and compared. This is for state that changes with no
 touch at all: taking damage, levelling up, the player changing the window border
 in Options, being handed the Pokedex.
@@ -1116,7 +1125,7 @@ offset. Azahar tolerated this for months; a real ARM11 faulted on the first
 hardware boot. Gate any save-block read with:
 
 ```c
-static bool8 SaveDataLive(void);   // bottom_screen.c:84
+static bool8 SaveDataLive(void);   // bottom_screen.c:80
 ```
 
 Note this is **not** the same question as `sInGame`, which latches on reaching
@@ -1387,7 +1396,7 @@ value without writing the file back out during the load that produced it.
    `settings_put()` writes uninitialized stack to the card. Choose the sense so
    that a zero byte means the old default.
 4. **`3ds/ui/tab_extra.c`**: add the control, and fold the value into
-   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L886)) in a bit range nothing else
+   `UiExtraStateKey()` ([:780](ui/tab_extra.c#L1084)) in a bit range nothing else
    claims -- but only if it can change with **no touch on this tab**, the way
    the shiny test does when its encounter fires. A plain toggle needs no slot:
    its own handler calls `UiMarkDirty()`, which is why `phoneCallsOff` and
@@ -1445,7 +1454,7 @@ store.
 knowing before you copy it:
 
 - **A setting that expires does not persist.** `Ctr3dsSetShinyTest` has no
-  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:491](host/main.c#L491)),
+  `Apply` and never calls `CtrSettingsMarkDirty` ([host/main.c:492](host/main.c#L492)),
   because it disarms itself when the encounter fires. A saved "armed" would go
   off in some later session the player had forgotten arming it in. Skip step 3
   entirely for anything like that; fast-forward is the older precedent.
