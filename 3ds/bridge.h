@@ -227,9 +227,9 @@ int  Ctr3dsGetTopScale(void);
 //   (3ds/host/main.c). Two of them persist in settings.bin. Without this, a
 //   release build could get "show every tab" or a muted PSG channel from a
 //   debug session, with no control to undo it.
-// - There is no log file (3ds/host/log.c). A shared build must not write to the
-//   player's SD card. svcOutputDebugString stays, so an emulator still shows
-//   the same lines.
+// - The log file holds only warnings (3ds/host/log.c). A shared build must
+//   not write to the player's SD card in a normal session. svcOutputDebugString
+//   stays, so an emulator still shows the same lines.
 #define CTR_DEBUG_MENU 1
 
 // Show every bottom-screen tab, the ones that the save has not unlocked too.
@@ -524,7 +524,7 @@ void Ctr3dsApplyAudioDbg(int which, int on);
 // cannot be seen from outside. The game stops, then continues, and nothing says
 // which call caused it. These functions time a stage and write a line only when
 // it is too slow. Thus sdmc:/3ds/emerald3ds/log.txt names the call. A release
-// build keeps the timing and drops the file.
+// build keeps the timing, and writes only warnings to the file.
 //
 // Declared here, not in 3ds/host/trace.h, because the bottom screen is on the
 // game side and must never see <3ds.h>. `const char *` and `unsigned int` cross

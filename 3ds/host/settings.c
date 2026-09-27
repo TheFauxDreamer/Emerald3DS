@@ -672,8 +672,8 @@ static void settings_put(const struct CtrSettings *s)
         // The log (log.c) uses the same method to get a line onto the card
         // before a crash.
         if (n != sizeof(*s) || fflush(f) != 0)
-            CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
-                   (unsigned)n, (unsigned)sizeof(*s));
+            CtrLogWarn("emerald3ds: settings write failed (%u/%u bytes)\n",
+                       (unsigned)n, (unsigned)sizeof(*s));
     }
 
     elapsed = CtrTimeNowMs() - t0;

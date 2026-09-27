@@ -134,7 +134,7 @@ static void sample_touch(CtrTouchState *t)
 // the build that crashes.
 void CtrTraceHex(const char *label, unsigned int value)
 {
-    CtrLog("emerald3ds: %s = %08X\n", label, value);
+    CtrLogWarn("emerald3ds: %s = %08X\n", label, value);
 }
 
 #if CTR_BOOT_DIAG
@@ -1123,7 +1123,7 @@ int main(int argc, char **argv)
     // port failed later" look the same. See 3ds/host/log.c. Do not use __DATE__
     // and __TIME__: they come from the last compile of this file, so they can
     // be stale. CTR_BUILD_STAMP is new on each build.
-    CtrLog("emerald3ds: boot (%s)\n", CTR_BUILD_STAMP);
+    CtrLogBoot(CTR_BUILD_STAMP);
 
     // This must come first: every VRAM, palette, OAM and register access in the
     // game uses this block.
@@ -1144,9 +1144,9 @@ int main(int argc, char **argv)
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
-        // Use CtrLog, not CtrTrace. This failure ends the run, so it must be in
-        // a release build's log.
-        CtrLog("emerald3ds: FATAL CtrVideoInit failed\n");
+        // A warning, not a trace. This failure ends the run, so it must be in a
+        // release build's log.
+        CtrLogWarn("emerald3ds: FATAL CtrVideoInit failed\n");
         CtrVideoExit();
         return 1;
     }
