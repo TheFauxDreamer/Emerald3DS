@@ -436,9 +436,9 @@ int Ctr3dsRasteriserOnOwnCore(void)
 // on the edge of a rule does not change path on every frame.
 //
 // When the path changes from the GPU to ppu.c, the stage gets the GPU's last
-// picture first (gpu_to_stage). ppu.c keeps old pixels where a window hides
-// the backdrop, and those must be the pixels of the frame before, not of the
-// last frame that ppu.c drew.
+// picture first (gpu_to_stage). A blend with the backdrop as source reads the
+// old pixel in ppu.c, and that must be the pixel of the frame before, not of
+// the last frame that ppu.c drew.
 //
 // CTR_GPU_VERIFY=1 (3ds/Makefile) also runs ppu.c on each GPU frame, and
 // compares the two pictures before the next frame. See gpu_verify_pending().
