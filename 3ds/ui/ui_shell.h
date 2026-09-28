@@ -9,10 +9,34 @@
 #include "global.h"
 #include "../bridge.h"
 
-// The tab bar is along the bottom. Everything above it is the content area.
-// Both are whole 8px tiles, so the window frames land on tile boundaries.
+// The nav bar and the content area. All are whole 8px tiles, so the window
+// frames land on tile boundaries.
+//
+// CTR_UI_RAIL (3ds/build_objs.sh) selects the layout:
+// - 0: the bar is along the bottom, 48px tall. The content area is 320x192.
+// - 1: the rail is on the right, 64px wide. The content area is 256x240, the
+//   same number of pixels. The five slots stack at 48px each.
+// The tabs move to the rail layout one by one (3ds/NAV_RAIL_PLAN.md). Until a
+// tab has moved, the rail covers its right 64px.
+#ifndef CTR_UI_RAIL
+#define CTR_UI_RAIL 0
+#endif
+
+#if CTR_UI_RAIL
+#define UI_RAIL_W     64
+#define UI_TABBAR_H   0
+#define UI_CONTENT_W  (CTR_BOTTOM_WIDTH - UI_RAIL_W)       // 256 = 32 tiles
+#define UI_CONTENT_H  CTR_BOTTOM_HEIGHT                    // 240 = 30 tiles
+#else
+#define UI_RAIL_W     0
 #define UI_TABBAR_H   48
+#define UI_CONTENT_W  CTR_BOTTOM_WIDTH                     // 320 = 40 tiles
 #define UI_CONTENT_H  (CTR_BOTTOM_HEIGHT - UI_TABBAR_H)   // 192 = 24 tiles
+#endif
+
+// A touch for the nav bar or rail, not for the tab.
+#define UI_TOUCH_IN_NAV(t) \
+    (CTR_UI_RAIL ? (t)->x >= UI_CONTENT_W : (t)->y >= UI_CONTENT_H)
 
 // The tabs that show depend on what the player has unlocked. The shell
 // (bottom_screen.c) follows BuildNormalStartMenu() (src/start_menu.c).

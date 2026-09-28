@@ -57,6 +57,11 @@ CFLAGS="$ARCH -O2 -ffreestanding -fno-strict-aliasing -fomit-frame-pointer \
 # and looks correct.
 CTR_BOOT_DIAG="${CTR_BOOT_DIAG:-0}"
 
+# The bottom screen's nav rail (3ds/ui/ui_shell.h). 0 is the bar along the
+# bottom; 1 is the rail on the right, while the tabs move to it one by one.
+# Game side only, so 3ds/Makefile needs no matching flag.
+CTR_UI_RAIL="${CTR_UI_RAIL:-0}"
+
 # The m4a mixer is the original src/m4a_1.s, not the C version.
 #
 # The file rp2350/m4a_engine.c exists because the Cortex-M33 of the RP2350 can
@@ -65,7 +70,7 @@ CTR_BOOT_DIAG="${CTR_BOOT_DIAG:-0}"
 # cannot be wrong about the engine, as a new version can. It is the only
 # configuration that this script builds. The RP2350 port still needs the C
 # engine, so it stays in the tree.
-CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=$CTR_BOOT_DIAG"
+CPPFLAGS="-iquote include -DMODERN=1 -DRP2350=1 -DPLATFORM_3DS=1 -DCTR_BOOT_DIAG=$CTR_BOOT_DIAG -DCTR_UI_RAIL=$CTR_UI_RAIL"
 
 if [ ! -d "$ASSETS" ]; then
   echo "error: $ASSETS missing. Run 'make tools && make wasm-assets' first." >&2
