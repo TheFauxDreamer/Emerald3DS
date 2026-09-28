@@ -88,9 +88,15 @@ The large pieces:
     the divider's engage and release lines. The target is the field at 60 Hz
     with the divider off, and a title screen that does not stutter.
   - The `gpu drew N of 600 frames` lines say which rules send frames back to
-    ppu.c. `wineffect` (a window region that turns a live effect off),
-    `objwin` (the title's logo shine) and `fade` are expected to be the common
-    ones. If one of them is most of the game, it is the next thing
+    ppu.c. `wineffect` (a window region that turns a live effect off, as the
+    title's logo shine does) and `fade` are expected to be the common ones.
+  - The first console logs (2026-09-28, build `0708b53`): where the GPU drew,
+    the Old 3DS spent 2.5 ms a frame on it, against 11 to 14 ms for ppu.c, with
+    no late frames. But it drew almost nothing: the field went to ppu.c for
+    `window` (an inert effect-1 BLDCNT; `555ccce` fixed the rule) and every
+    battle for `objwin` (the OBJ window is on for the whole battle; now drawn
+    with stencil bit 7). The New 3DS showed no change, as expected: ppu.c is
+    on core 2 there and the frame was already a flat 16.7 ms. If one of them is most of the game, it is the next thing
     to teach the compositor.
   - On a New 3DS at GPU, the picture must look the same, and `ppu.wait` must
     go to near zero on GPU frames.
