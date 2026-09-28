@@ -68,8 +68,8 @@ The large pieces:
   four directions, at a map seam, and on the bike; the margins must never show
   a stale or a wrong column. Open a door and cut a tree near the screen edge.
   Talk to someone: the text box stays 240 wide with the field beside it. Open
-  the start menu. Start a battle: the transition and the battle are 240 wide
-  with black margins. Check the rain on Route 119 and a dark cave. Compare
+  the start menu. Start a battle: the transition, the battle and the menus fill
+  the width like the field, stretched 13%, with no black margins. Check the rain on Route 119 and a dark cave. Compare
   `ppu` and `upload.top.xfer` in `log.txt` against 1.5x, on the Old 3DS too.
 - **The GPU renderer: test on hardware.** RENDERER on SETTINGS (AUTO, CPU,
   GPU) chooses between ppu.c and `3ds/host/gpu_compose.c`, a PICA200

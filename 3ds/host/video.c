@@ -1507,9 +1507,16 @@ void CtrVideoPresent(void)
         // A wide frame is 272 wide, so at 1.5x its x is -4: two screen pixels
         // of each margin go past the edges, and the GBA picture stays where
         // 1.5X puts it.
+        //
+        // At WIDE, a 240-wide frame (a battle, a menu) is stretched to the
+        // same 408 screen pixels, so no screen has black bars. It is 13%
+        // wider, as FILL is, and the filter is linear there already.
         int   w  = sShownWide ? TOP_WIDE_W : CTR_GBA_WIDTH;
         float sx = kTopScales[sTopScale].sx;
         float sy = kTopScales[sTopScale].sy;
+
+        if (sTopScale == CTR_TOP_SCALE_WIDE && !sShownWide)
+            sx = sx * TOP_WIDE_W / CTR_GBA_WIDTH;
         float x  = (TOP_SCREEN_W - w * sx) / 2.0f;
         float y  = (TOP_SCREEN_H - CTR_GBA_HEIGHT * sy) / 2.0f;
 

@@ -191,7 +191,8 @@ opens its DEBUG page from a button on SETTINGS.
 8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height), FILL
 (fills the panel, stretching 11%) or WIDE (1.5x, and in the overworld the
 field shows 16 more GBA pixels on each side, so it fills the panel with no
-stretch; menus, text boxes and battles stay the GBA's 240 wide); and the four buttons a GBA has no use for (X,
+stretch; menus and battles are stretched 13% to the same width); a renderer
+(AUTO, CPU or GPU); and the four buttons a GBA has no use for (X,
 Y, ZL, ZR) bindable to hold-for-speed or to the touch UI's modifier key. Screen
 size and bindings persist. Fast-forward deliberately resets each launch.
 
