@@ -191,6 +191,11 @@ const u32 gItemIconPalette_MoonStone[] = INCGFX_U32("graphics/items/icon_palette
 const u32 gItemIcon_FireStone[] = INCGFX_U32("graphics/items/icons/fire_stone.png", ".4bpp.lz");
 const u32 gItemIconPalette_FireStone[] = INCGFX_U32("graphics/items/icon_palettes/fire_stone.pal", ".gbapal.lz");
 
+#if PLATFORM_3DS
+const u32 gItemIcon_LinkingCord[] = INCGFX_U32("graphics/items/icons/linking_cord.png", ".4bpp.lz");
+const u32 gItemIconPalette_LinkingCord[] = INCGFX_U32("graphics/items/icon_palettes/linking_cord.pal", ".gbapal.lz");
+#endif
+
 const u32 gItemIcon_ThunderStone[] = INCGFX_U32("graphics/items/icons/thunder_stone.png", ".4bpp.lz");
 const u32 gItemIconPalette_ThunderStone[] = INCGFX_U32("graphics/items/icon_palettes/thunder_stone.pal", ".gbapal.lz");
 

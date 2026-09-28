@@ -374,6 +374,13 @@ static const u8 sMoonStoneDesc[] = _(
     "species of POKéMON\n"
     "evolve.");
 
+#if PLATFORM_3DS
+static const u8 sLinkingCordDesc[] = _(
+    "Makes POKéMON that\n"
+    "evolve by trade\n"
+    "evolve at once.");
+#endif
+
 static const u8 sFireStoneDesc[] = _(
     "Makes certain\n"
     "species of POKéMON\n"

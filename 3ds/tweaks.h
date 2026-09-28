@@ -105,4 +105,9 @@ void Ctr3dsRefreshFollowerNow(void);
 // made at map load (AddDayCareYardTemplates).
 bool8 Ctr3dsDayCareYardOn(void);
 
+// The Linking Cord: the species that a trade gives this mon, or SPECIES_NONE.
+// The rule is the EVO_MODE_TRADE rule. Only EVO_MODE_ITEM_USE uses up the held
+// item. EVO_MODE_ITEM_CHECK runs for the party menu, and must not change a mon.
+u16 Ctr3dsLinkingCordTarget(struct Pokemon *mon, u8 mode);
+
 #endif // CTR_TWEAKS_H

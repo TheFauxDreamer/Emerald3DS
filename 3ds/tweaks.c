@@ -568,3 +568,42 @@ void Ctr3dsSortBagNow(void)
     for (i = 0; i < POCKETS_COUNT; i++)
         Ctr3dsSortBagPocket(i);
 }
+
+// ---- Linking Cord ----------------------------------------------------------
+
+extern const struct Evolution gEvolutionTable[][EVOS_PER_MON];
+
+u16 Ctr3dsLinkingCordTarget(struct Pokemon *mon, u8 mode)
+{
+    int i;
+    u16 targetSpecies = SPECIES_NONE;
+    u16 species = GetMonData(mon, MON_DATA_SPECIES, NULL);
+    u16 heldItem = GetMonData(mon, MON_DATA_HELD_ITEM, NULL);
+    bool8 useHeldItem = FALSE;
+
+    for (i = 0; i < EVOS_PER_MON; i++)
+    {
+        switch (gEvolutionTable[species][i].method)
+        {
+        case EVO_TRADE:
+            targetSpecies = gEvolutionTable[species][i].targetSpecies;
+            useHeldItem = FALSE;
+            break;
+        case EVO_TRADE_ITEM:
+            if (gEvolutionTable[species][i].param == heldItem)
+            {
+                targetSpecies = gEvolutionTable[species][i].targetSpecies;
+                useHeldItem = TRUE;
+            }
+            break;
+        }
+    }
+
+    if (useHeldItem && mode == EVO_MODE_ITEM_USE)
+    {
+        heldItem = ITEM_NONE;
+        SetMonData(mon, MON_DATA_HELD_ITEM, &heldItem);
+    }
+
+    return targetSpecies;
+}

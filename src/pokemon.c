@@ -5619,6 +5619,10 @@ u16 GetEvolutionTargetSpecies(struct Pokemon *mon, u8 mode, u16 evolutionItem)
         break;
     case EVO_MODE_ITEM_USE:
     case EVO_MODE_ITEM_CHECK:
+#if PLATFORM_3DS
+        if (evolutionItem == ITEM_LINKING_CORD)
+            return Ctr3dsLinkingCordTarget(mon, mode);
+#endif
         for (i = 0; i < EVOS_PER_MON; i++)
         {
             if (gEvolutionTable[species][i].method == EVO_ITEM
