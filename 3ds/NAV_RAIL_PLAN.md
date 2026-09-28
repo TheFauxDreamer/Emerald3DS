@@ -1,6 +1,6 @@
 # Nav rail plan
 
-**Status: stage 1 done.** Written 2026-09-28.
+**Status: stage 1 done; stage 2 in progress.** Written 2026-09-28.
 
 The bottom screen moves its nav bar from the bottom edge to a rail on the
 right, after the layout of
@@ -35,11 +35,13 @@ shell draws the rail last), so each intermediate build still works.
 Counts are references to `CTR_BOTTOM_WIDTH` / `UI_CONTENT_H` at the start;
 most coordinates are literals beside them.
 
-- [ ] tab_extra.c (1414 lines): the HOME launcher (4x4 grid of tiles) and
-      pages SETTINGS, GAMEPLAY, EXTRAS, FOLLOWER, NAV BAR, DEBUG. SETTINGS rows
-      are 276px wide centred in 320: four buttons become 54px (4 x 54 + 3 x 8
-      = 240 inside the frame). The RENDER and MUSIC controls take a line of
-      their own. Check rows narrow the hint column.
+- [x] tab_extra.c: the HOME launcher is 3x5 tiles of 80x48 (13 tiles and
+      SETTINGS last). SETTINGS rows are four 53px buttons with 6px gaps from
+      x 13; the MOD note goes under BUTTON HOLD, and NAV BAR and DEBUG are a
+      row at the bottom. BAG SORT's buttons go under its label; FOLLOWER's
+      choice buttons are 70px from x 96; the NAV BAR preview uses 44px boxes;
+      the debug ACH note goes under its buttons. The check rows fit as they
+      are (the widest hint ends at x 245).
 - [ ] view_trainer.c, view_clock.c, view_dowsing.c, view_berries.c,
       view_daycare.c, view_friendship.c, view_frontier.c, ui_link.c: the game
       pages of HOME.
