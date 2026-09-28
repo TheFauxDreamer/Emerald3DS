@@ -5283,6 +5283,16 @@ u8 GetItemEffectType(u16 item)
     else
         itemEffect = gItemEffectTable[item - ITEM_POTION];
 
+#ifdef UBFIX
+    // UB NULL: ITEM_HAS_EFFECT is a range of ids, and some ids in it have no
+    // table entry (the repels, the shards, the unused slots). The game's bag
+    // calls this only for items that have an entry. The BAG tab of the 3DS
+    // calls it for all items. A GBA reads the BIOS at address 0. On the 3DS,
+    // address 0 is not mapped.
+    if (itemEffect == NULL)
+        return ITEM_EFFECT_NONE;
+#endif
+
     if ((itemEffect[0] & (ITEM0_DIRE_HIT | ITEM0_X_ATTACK)) || itemEffect[1] || itemEffect[2] || (itemEffect[3] & ITEM3_GUARD_SPEC))
         return ITEM_EFFECT_X_ITEM;
     else if (itemEffect[0] & ITEM0_SACRED_ASH)
