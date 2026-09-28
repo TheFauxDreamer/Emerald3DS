@@ -68,7 +68,9 @@
 //   zero there, which is CTR_RENDERER_AUTO.
 // - v17 uses the next byte for the REMATCH MARKS switch. Same size. It stores
 //   OFF, so zero means "MAP marks rematches".
-#define SETTINGS_VERSION 17
+// - v18 uses the last byte of pad2 for LAYOUT. Same size. Older files have zero
+//   there, which is the nav bar.
+#define SETTINGS_VERSION 18
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
@@ -153,7 +155,7 @@ struct CtrSettings {
     uint8_t  count;                    // records in use, from rec[0]
     uint8_t  renderer;                 // CTR_RENDERER_*, added in v16
     uint8_t  rematchMarksOff;          // added in v17
-    uint8_t  pad2[1];
+    uint8_t  uiRail;                   // added in v18
     struct CtrSaveSettings rec[CTR_SETTINGS_SAVES];
 };
 
@@ -214,6 +216,8 @@ extern int  Ctr3dsGetDayCareYard(void);
 extern void Ctr3dsApplyDayCareYard(int on);
 extern int  Ctr3dsGetRematchMarksOff(void);
 extern void Ctr3dsApplyRematchMarksOff(int on);
+extern int  Ctr3dsGetUiRail(void);
+extern void Ctr3dsApplyUiRail(int on);
 extern int  Ctr3dsGetNavConfig(void);
 extern void Ctr3dsApplyNavConfig(int config);
 extern int  Ctr3dsGetBattleAnimOff(void);
@@ -508,10 +512,10 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // Files v11 to v17 have the same size. Their bytes for the later values
+    // Files v11 to v18 have the same size. Their bytes for the later values
     // are zero.
-    if (s.version == SETTINGS_VERSION || s.version == 16 || s.version == 15 || s.version == 14
-        || s.version == 13 || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 17 || s.version == 16 || s.version == 15
+        || s.version == 14 || s.version == 13 || s.version == 12 || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -591,6 +595,9 @@ void CtrSettingsLoad(void)
     // Zero for a file older than v17, which means "MAP marks rematches".
     Ctr3dsApplyRematchMarksOff(s.rematchMarksOff != 0);
 
+    // Zero for a file older than v18, which is the nav bar.
+    Ctr3dsApplyUiRail(s.uiRail != 0);
+
     // Zero for a file older than v15, which is the default bar. The game side
     // checks the value before it uses it.
     Ctr3dsApplyNavConfig(s.nav);
@@ -601,8 +608,9 @@ void CtrSettingsLoad(void)
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 16 || s.version == 15
-        || s.version == 14 || s.version == 13 || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 17 || s.version == 16
+        || s.version == 15 || s.version == 14 || s.version == 13 || s.version == 12
+        || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
@@ -641,6 +649,7 @@ static void settings_build(struct CtrSettings *s)
     s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
     s->dayCareYard   = (uint8_t)(Ctr3dsGetDayCareYard() ? 1 : 0);
     s->rematchMarksOff = (uint8_t)(Ctr3dsGetRematchMarksOff() ? 1 : 0);
+    s->uiRail          = (uint8_t)(Ctr3dsGetUiRail() ? 1 : 0);
     s->nav           = (uint16_t)Ctr3dsGetNavConfig();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)

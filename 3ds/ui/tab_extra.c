@@ -67,20 +67,14 @@ static const u8 sTurboSteps[] = { CTR_BIND_OFF, 2, 4, 8, CTR_BIND_MOD };
 static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
 
 // The first three rows are 276px wide, centered in 320. That leaves 22px on
-// each side, clear of the 8px window frame. On the rail (CTR_UI_RAIL) the
+// each side, clear of the 8px window frame. On the rail (UiRailOn) the
 // content area is 256 wide: four 53px buttons with 6px gaps are 230px from x
 // 13, and 53px is the finger floor.
 #define BTN_H         26
 #define BTN_GAP       12
-#if CTR_UI_RAIL
-#define ROW_BTN_W     53
-#define ROW_BTN_GAP   6
-#define ROW_X0        13
-#else
-#define ROW_BTN_W     60
-#define ROW_BTN_GAP   BTN_GAP
-#define ROW_X0        22
-#endif
+#define ROW_BTN_W     (UiRailOn() ? 53 : 60)
+#define ROW_BTN_GAP   (UiRailOn() ? 6 : BTN_GAP)
+#define ROW_X0        (UiRailOn() ? 13 : 22)
 
 // A label is 17px above its buttons, so a row with a label is 43px tall. The
 // interior is y 8..183, which is 176px.
@@ -113,13 +107,8 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define P2_SORT_LABEL_X 16
 // On the rail the BAG SORT buttons do not fit after the label, so they go
 // under it, as the LEVEL CAP buttons do. The page then ends at y 192.
-#if CTR_UI_RAIL
-#define P2_SORT_LABEL_Y P2_SORT_Y
-#define P2_SORT_BTN_Y   (P2_SORT_Y + LABEL_TO_BTN)
-#else
-#define P2_SORT_LABEL_Y (P2_SORT_Y + (BTN_H - UI_GLYPH_H) / 2)
-#define P2_SORT_BTN_Y   P2_SORT_Y
-#endif
+#define P2_SORT_LABEL_Y (UiRailOn() ? P2_SORT_Y : P2_SORT_Y + (BTN_H - UI_GLYPH_H) / 2)
+#define P2_SORT_BTN_Y   (UiRailOn() ? P2_SORT_Y + LABEL_TO_BTN : P2_SORT_Y)
 
 // Page 3's grid: check rows at a 30px pitch from y 30. Five rows end at y 176,
 // and the interior ends at y 183. The page is full.
@@ -154,14 +143,9 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 // wide, so x 96 is clear of it. The note is 163px and ends inside the 311px
 // interior. On the rail it does not fit there, so it goes under the buttons,
 // and NAV BAR and DEBUG leave the title line for the row under it.
-#if CTR_UI_RAIL
-#define TRB_NOTE_X    16
-#define TRB_NOTE_Y    (TRB_Y + BTN_H + 6)
-#define P1_LINKS_Y    (TRB_NOTE_Y + UI_GLYPH_H + 4)
-#else
-#define TRB_NOTE_X    96
-#define TRB_NOTE_Y    P1_ROW_Y(2)
-#endif
+#define TRB_NOTE_X    (UiRailOn() ? 16 : 96)
+#define TRB_NOTE_Y    (UiRailOn() ? TRB_Y + BTN_H + 6 : P1_ROW_Y(2))
+#define P1_LINKS_Y    (TRB_Y + BTN_H + 6 + UI_GLYPH_H + 4)     // the rail only
 
 // What fast-forward does to the music. It shares the line of the GAME SPEED
 // label, because it changes only that control. A row of its own would cost
@@ -236,22 +220,33 @@ static const char *const sPageHint[] = {
 #define CELL_SPARE 0xFF
 #define CELL_EMPTY 0xFE
 
-#if CTR_UI_RAIL
-static const u8 sCells[15] = {
+static const u8 sCellsRail[15] = {
     PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING,
     PAGE_BERRIES, PAGE_DAYCARE, PAGE_FRIENDSHIP,
     PAGE_FRONTIER, CELL_SPARE, PAGE_LINK,
     PAGE_GAMEPLAY, PAGE_EXTRAS, PAGE_FOLLOWER,
     CELL_EMPTY, CELL_EMPTY, PAGE_SETTINGS,
 };
-#else
-static const u8 sCells[16] = {
+
+static const u8 sCellsBar[16] = {
     PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING, PAGE_BERRIES,
     PAGE_DAYCARE, PAGE_FRIENDSHIP, PAGE_FRONTIER, CELL_SPARE,
     PAGE_LINK, PAGE_GAMEPLAY, PAGE_EXTRAS, PAGE_FOLLOWER,
     CELL_EMPTY, CELL_EMPTY, CELL_EMPTY, PAGE_SETTINGS,
 };
-#endif
+
+// The cells of the current layout, and their count.
+static const u8 *LauncherCells(u32 *count)
+{
+    if (UiRailOn())
+    {
+        *count = ARRAY_COUNT(sCellsRail);
+        return sCellsRail;
+    }
+
+    *count = ARRAY_COUNT(sCellsBar);
+    return sCellsBar;
+}
 
 // The spare tab's tile hint, for each tab that can be spare.
 static const char *const sSpareHint[UI_TAB_COUNT] = {
@@ -305,33 +300,22 @@ static bool8 PageFullBleed(u8 page)
 // at the bottom of the page.
 #define DEBUG_BTN_W   54
 #define NAVBAR_BTN_W  66
-#if CTR_UI_RAIL
-#define NAVBAR_BTN_X  16
-#define NAVBAR_BTN_Y  P1_LINKS_Y
-#define DEBUG_BTN_X   (NAVBAR_BTN_X + NAVBAR_BTN_W + 6)
-#define DEBUG_BTN_Y   P1_LINKS_Y
-#else
-#define DEBUG_BTN_X   (TITLE_BACK_X - 6 - DEBUG_BTN_W)
-#define DEBUG_BTN_Y   PGR_Y
+#define DEBUG_BTN_X   (UiRailOn() ? 16 + NAVBAR_BTN_W + 6 : TITLE_BACK_X - 6 - DEBUG_BTN_W)
+#define DEBUG_BTN_Y   (UiRailOn() ? P1_LINKS_Y : PGR_Y)
 #if CTR_DEBUG_MENU
-#define NAVBAR_BTN_X  (DEBUG_BTN_X - 6 - NAVBAR_BTN_W)
+#define NAVBAR_BAR_X  (DEBUG_BTN_X - 6 - NAVBAR_BTN_W)
 #else
-#define NAVBAR_BTN_X  (TITLE_BACK_X - 6 - NAVBAR_BTN_W)
+#define NAVBAR_BAR_X  (TITLE_BACK_X - 6 - NAVBAR_BTN_W)
 #endif
-#define NAVBAR_BTN_Y  PGR_Y
-#endif
+#define NAVBAR_BTN_X  (UiRailOn() ? 16 : NAVBAR_BAR_X)
+#define NAVBAR_BTN_Y  (UiRailOn() ? P1_LINKS_Y : PGR_Y)
 
 // The launcher: 4x4 tiles of 80x48, which fill the 320x192 content area
 // exactly on whole 8px tiles, as UiWindowFrame needs. The title is centred on
 // the tile's middle; the hint sits under it. On the rail: 3x5 tiles of the same
 // size, 240x240 from x 8 in the 256x240 area.
-#if CTR_UI_RAIL
-#define TILE_COLS     3
-#define TILE_X0       8
-#else
-#define TILE_COLS     4
-#define TILE_X0       0
-#endif
+#define TILE_COLS     (UiRailOn() ? 3 : 4)
+#define TILE_X0       (UiRailOn() ? 8 : 0)
 #define TILE_TW       10
 #define TILE_TH       6
 #define TILE_W        (TILE_TW * 8)
@@ -349,17 +333,15 @@ static bool8 PageFullBleed(u8 page)
 #define NAV_NOTE_Y    108
 #define NAV_TABS_Y    126
 // On the rail, smaller boxes: 4 x 44 + 48 + 4 x 2 = 232 in the 240 interior.
-#if CTR_UI_RAIL
-#define NAV_BOX_W     44
-#define NAV_HOME_W    48
-#define NAV_GAP       2
-#else
-#define NAV_BOX_W     56
-#define NAV_HOME_W    76
-#define NAV_GAP       4
-#endif
+#define NAV_BOX_W     (UiRailOn() ? 44 : 56)
+#define NAV_HOME_W    (UiRailOn() ? 48 : 76)
+#define NAV_GAP       (UiRailOn() ? 2 : 4)
 #define DEFAULT_BTN_W 66
 #define DEFAULT_BTN_X (TITLE_BACK_X - 6 - DEFAULT_BTN_W)
+// LAYOUT shows the current layout, BAR or RAIL, and a tap changes it. It is on
+// this page in both layouts, so the player can always change back.
+#define LAYOUT_BTN_W  46
+#define LAYOUT_BTN_X  (DEFAULT_BTN_X - 6 - LAYOUT_BTN_W)
 #define NAV_NO_PICK   0xFF
 
 // The LEVEL CAP buttons use the columns of the SCREEN SIZE row (SCL_X and
@@ -368,24 +350,14 @@ static bool8 PageFullBleed(u8 page)
 #define P2_HINT_X     96
 #define WIDE_W        SCL_W
 #define WIDE_X(i)     SCL_X(i)
-#if CTR_UI_RAIL
-#define SORT_W        WIDE_W
-#define SORT_X(i)     WIDE_X(i)
-#else
-#define SORT_W        75
-#define SORT_X(i)     (70 + (i) * (SORT_W + 8))
-#endif
+#define SORT_W        (UiRailOn() ? WIDE_W : 75)
+#define SORT_X(i)     (UiRailOn() ? WIDE_X(i) : 70 + (i) * (SORT_W + 8))
 
 // The two buttons of a choice row (page 4). They use the right two columns of
 // LEVEL CAP, so the pages align. On the rail those are too narrow for "POKE
 // BALL", so the two buttons are 70px from x 96.
-#if CTR_UI_RAIL
-#define CHOICE_W      70
-#define CHOICE_X(i)   (96 + (i) * (CHOICE_W + 6))
-#else
-#define CHOICE_W      WIDE_W
-#define CHOICE_X(i)   WIDE_X((i) + 1)
-#endif
+#define CHOICE_W      (UiRailOn() ? 70 : WIDE_W)
+#define CHOICE_X(i)   (UiRailOn() ? 96 + (i) * (CHOICE_W + 6) : WIDE_X((i) + 1))
 
 // The page that shows, from the view stack. HOME opens on the launcher, so
 // the player does not see the cheats first.
@@ -747,13 +719,9 @@ static const u8 sDebugAudio[] = {
 #define DBG_BTN_W     60
 #define DBG_BTN_X(c)  (62 + (c) * (DBG_BTN_W + 6))
 // On the rail the note goes under the buttons, at the column of TEST.
-#if CTR_UI_RAIL
-#define DBG_NOTE_X    DBG_BTN_X(0)
-#define DBG_NOTE_DY   (DBG_PITCH + (DBG_BTN_H - UI_GLYPH_H) / 2)
-#else
-#define DBG_NOTE_X    198
-#define DBG_NOTE_DY   ((DBG_BTN_H - UI_GLYPH_H) / 2)
-#endif
+#define DBG_NOTE_X    (UiRailOn() ? DBG_BTN_X(0) : 198)
+#define DBG_NOTE_DY   (UiRailOn() ? DBG_PITCH + (DBG_BTN_H - UI_GLYPH_H) / 2 \
+                                  : (DBG_BTN_H - UI_GLYPH_H) / 2)
 
 // One function reads a row and one writes a row, so the draw and the touch
 // handler always agree on which switch a row is.
@@ -914,8 +882,13 @@ static void DrawPageTitle(u8 page)
         DrawButtonH(NAVBAR_BTN_X, NAVBAR_BTN_Y, NAVBAR_BTN_W, PGR_H,
                     UiAscii(label, "NAV BAR", sizeof(label)), FALSE);
     else if (page == PAGE_NAVBAR)
+    {
+        DrawButtonH(LAYOUT_BTN_X, PGR_Y, LAYOUT_BTN_W, PGR_H,
+                    UiAscii(label, UiRailOn() ? "RAIL" : "BAR", sizeof(label)),
+                    FALSE);
         DrawButtonH(DEFAULT_BTN_X, PGR_Y, DEFAULT_BTN_W, PGR_H,
                     UiAscii(label, "DEFAULT", sizeof(label)), FALSE);
+    }
 
 #if CTR_DEBUG_MENU
     if (page == PAGE_SETTINGS)
@@ -1057,11 +1030,13 @@ static void TouchPageNavBar(const CtrTouchState *t)
 static void DrawLauncher(void)
 {
     u8 label[16];
+    u32 count;
+    const u8 *cells = LauncherCells(&count);
 
-    for (u32 c = 0; c < ARRAY_COUNT(sCells); c++)
+    for (u32 c = 0; c < count; c++)
     {
         int x = TILE_X(c), y = TILE_Y(c);
-        u32 i = sCells[c];
+        u32 i = cells[c];
         bool8 live;
         const char *title, *hint;
 
@@ -1398,9 +1373,12 @@ void UiExtraTouch(const CtrTouchState *t)
 
     if (!PageOpen())
     {
-        for (u32 c = 0; c < ARRAY_COUNT(sCells); c++)
+        u32 count;
+        const u8 *cells = LauncherCells(&count);
+
+        for (u32 c = 0; c < count; c++)
         {
-            u32 i = sCells[c];
+            u32 i = cells[c];
 
             if (i == CELL_EMPTY || !UiHit(t, TILE_X(c), TILE_Y(c), TILE_W, TILE_H))
                 continue;
@@ -1457,6 +1435,15 @@ void UiExtraTouch(const CtrTouchState *t)
     {
         sNavPick = NAV_NO_PICK;
         UiViewPush(UI_VIEW_HOME_PAGE, PAGE_NAVBAR);
+        return;
+    }
+
+    // The whole screen changes at the next paint, this page too.
+    if (page == PAGE_NAVBAR && UiHit(t, LAYOUT_BTN_X, PGR_Y, LAYOUT_BTN_W, PGR_H))
+    {
+        Ctr3dsSetUiRail(!UiRailOn());
+        sNavPick = NAV_NO_PICK;
+        UiMarkDirty();
         return;
     }
 
