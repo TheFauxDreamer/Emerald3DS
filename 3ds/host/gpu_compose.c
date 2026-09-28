@@ -8,9 +8,9 @@
 // - A window edge at x = 0 or 240 continues into the wide margin.
 //
 // What it cannot do, GpuComposeCheck() refuses (the GPU_WHY_* bits): the
-// bitmap modes, the OBJ window, a window region that turns a live colour
-// effect off, and the one reference quirk that reads the previous frame (a
-// blend with the backdrop as source), because this file clears the surface.
+// bitmap modes, a window region that turns a live colour effect off, and the
+// one reference quirk that reads the previous frame (a blend with the backdrop
+// as source), because this file clears the surface.
 //
 // HOW A FRAME IS DRAWN
 //
@@ -34,9 +34,16 @@
 // Stencil bit 0 records "a second target is here". A first-target layer draws
 // twice. The first pass is where bit 0 is clear: plain colour, and it sets a
 // mark bit so the second pass skips those pixels. The second pass is where
-// bit 0 is set and the mark is clear: blended. Seven marks are used in turn,
-// then one quad clears them. Sprites that blend draw one at a time, because a
-// sprite can land on a sprite of the same pass.
+// bit 0 is set and the mark is clear: blended. Six marks (bits 1 to 6) are
+// used in turn, then one quad clears them. Sprites that blend draw one at a
+// time, because a sprite can land on a sprite of the same pass.
+//
+// OBJ WINDOW
+//
+// Stencil bit 7 is the OBJ window: the opaque texels of the mode-2 sprites,
+// drawn into the stencil only, before the layers. Outside WIN0 and WIN1, a
+// layer that WINOUT shows in only one of the two regions draws only where bit
+// 7 says it is in that region.
 //
 // AFFINE LAYERS
 //
@@ -56,7 +63,7 @@
 #include "gpu_compose.h"
 
 const char *const kGpuWhyName[GPU_WHY_COUNT] = {
-    "bitmap", "objwin", "wineffect", "blendback",
+    "bitmap", "wineffect", "blendback",
     "singular", "fade", "budget", "vram",
 };
 
@@ -153,6 +160,8 @@ static void load_state(const GpuComposeInput *in)
 typedef struct {
     int x0, x1, y0, y1;
     uint8_t mask;
+    // Outside WIN0 and WIN1 with the OBJ window on: the mask inside it.
+    uint8_t objwin, objMask;
 } Rect;
 
 #define RECT_MAX 25
@@ -206,7 +215,7 @@ static int build_rects(Rect *out)
     int xs[6], ys[6], nx = 0, ny = 0, n = 0;
 
     if (!(F.dispcnt & 0xe000)) {
-        out[0] = (Rect){ F.xbeg, F.xend, 0, GBA_H, 0x3f };
+        out[0] = (Rect){ F.xbeg, F.xend, 0, GBA_H, 0x3f, 0, 0 };
         return 1;
     }
 
@@ -232,12 +241,18 @@ static int build_rects(Rect *out)
         for (int i = 0; i + 1 < nx; i++) {
             int x = xs[i], y = ys[j];
             uint8_t mask = reg16(0x4a) & 0x3f;
+            uint8_t objwin = (F.dispcnt & 0x8000) != 0;
 
-            if (on[1] && x >= wx0[1] && x < wx1[1] && y >= wy0[1] && y < wy1[1])
+            if (on[1] && x >= wx0[1] && x < wx1[1] && y >= wy0[1] && y < wy1[1]) {
                 mask = (reg16(0x48) >> 8) & 0x3f;
-            if (on[0] && x >= wx0[0] && x < wx1[0] && y >= wy0[0] && y < wy1[0])
+                objwin = 0;
+            }
+            if (on[0] && x >= wx0[0] && x < wx1[0] && y >= wy0[0] && y < wy1[0]) {
                 mask = reg16(0x48) & 0x3f;
-            out[n++] = (Rect){ x, xs[i + 1], y, ys[j + 1], mask };
+                objwin = 0;
+            }
+            out[n++] = (Rect){ x, xs[i + 1], y, ys[j + 1], mask, objwin,
+                               (uint8_t)((reg16(0x4a) >> 8) & 0x3f) };
         }
     return n;
 }
@@ -262,21 +277,19 @@ unsigned GpuComposeCheck(const GpuComposeInput *in)
 
     if (F.mode > 2)
         why |= GPU_WHY_BITMAP;
-    if (F.dispcnt & 0x8000)
-        why |= GPU_WHY_OBJWIN;
     if (F.effect == 1 && (F.src & 0x20))
         why |= GPU_WHY_BLENDBACK;
 
     // A region without bit 5 turns the colour effects off there. This file
     // applies an effect to the whole screen, so refuse when one is live: an
-    // effect, and a first target that is on.
-    if (!(why & GPU_WHY_OBJWIN) && (F.dispcnt & 0x6000) && F.effect != 0
+    // effect, and a first target that is on. The OBJ window is a region too.
+    if ((F.dispcnt & 0xe000) && F.effect != 0
         && (F.src & (((F.dispcnt >> 8) & 0x1f) | 0x20))) {
         Rect r[RECT_MAX];
         int n = build_rects(r);
 
         for (int i = 0; i < n; i++)
-            if (!(r[i].mask & 0x20))
+            if (!(r[i].mask & 0x20) || (r[i].objwin && !(r[i].objMask & 0x20)))
                 why |= GPU_WHY_WINDOW;
     }
 
@@ -296,7 +309,9 @@ unsigned GpuComposeCheck(const GpuComposeInput *in)
             uint16_t a0 = rd16(F.oam, i * 8), a1 = rd16(F.oam, i * 8 + 2);
             uint32_t mb;
 
-            if (!(a0 & 0x100) || ((a0 >> 14) & 3) == 3 || ((a0 >> 10) & 3) == 2)
+            if (!(a0 & 0x100) || ((a0 >> 14) & 3) == 3)
+                continue;
+            if (((a0 >> 10) & 3) == 2 && !(F.dispcnt & 0x8000))
                 continue;
             mb = ((a1 >> 9) & 31) * 32;
             if (affine_singular(sext16(rd16(F.oam, mb + 6)), sext16(rd16(F.oam, mb + 14)),
@@ -667,14 +682,35 @@ static void layer_free(Layer *L)
     L->valid = 0;
 }
 
+// Textures replaced during a frame. A quad of this frame may still read
+// one, and citro3d cannot delete a target inside a frame, so
+// GpuComposeMaintain frees them after it.
+#define GRAVE_MAX 8
+static struct {
+    C3D_Tex tex;
+    C3D_RenderTarget *target;
+} sGrave[GRAVE_MAX];
+static int sNgrave;
+
 // A texture of w x h for the layer. 0 if it cannot have one this frame.
 static int layer_ensure(Layer *L, int w, int h)
 {
     if (L->w == w && L->h == h && !L->release)
         return 1;
     if (L->w) {
-        L->release = 1;   // a new size: free it between frames first
-        return 0;
+        // A new size. Keep the old texture until the frame ends, and make the
+        // new one now, so the frame does not go to ppu.c.
+        if (sNgrave == GRAVE_MAX) {
+            L->release = 1;
+            return 0;
+        }
+        sGrave[sNgrave].tex = L->tex;
+        sGrave[sNgrave].target = L->target;
+        sNgrave++;
+        L->target = NULL;
+        L->w = L->h = 0;
+        L->release = 0;
+        L->valid = 0;
     }
     if (!C3D_TexInitVRAM(&L->tex, (u16)w, (u16)h, GPU_RGBA5551))
         return 0;
@@ -945,6 +981,9 @@ static Spr     sSpr[128];
 static uint8_t sByPrio[4][128];
 static int     sNbyPrio[4];
 static int     sSprFx;
+// The OBJ-window sprites (mode 2), in the same array from the far end, as
+// ppu.c keeps them: sSpr[127 - k] for k < sNobjwin.
+static int     sNobjwin;
 
 static void build_sprites(void)
 {
@@ -956,23 +995,25 @@ static void build_sprites(void)
     int n = 0;
 
     sNbyPrio[0] = sNbyPrio[1] = sNbyPrio[2] = sNbyPrio[3] = 0;
+    sNobjwin = 0;
     sSprFx = F.effect >= 2 && (F.src & 0x10);
     if (!(F.dispcnt & 0x1000))
         return;
     for (int i = 0; i < 128; i++) {
         uint16_t a0 = rd16(F.oam, i * 8), a1 = rd16(F.oam, i * 8 + 2), a2 = rd16(F.oam, i * 8 + 4);
         int am = (a0 >> 8) & 3, affine = am & 1, shape = (a0 >> 14) & 3, ox, oy, prio;
+        int objwin = ((a0 >> 10) & 3) == 2;
         Spr *s;
 
         if (!affine && (a0 & 0x200))
             continue;
         if (shape == 3)
             continue;
-        // OBJ mode 2 marks the OBJ window and never draws. With the window
-        // on, the check has already refused the frame.
-        if (((a0 >> 10) & 3) == 2)
+        // OBJ mode 2 marks the OBJ window and never draws. Without the window
+        // it is nothing at all.
+        if (objwin && !(F.dispcnt & 0x8000))
             continue;
-        s = &sSpr[n];
+        s = objwin ? &sSpr[127 - sNobjwin++] : &sSpr[n];
         s->w = sizes[shape][(a1 >> 14) & 3][0];
         s->h = sizes[shape][(a1 >> 14) & 3][1];
         s->affine = (uint8_t)affine;
@@ -999,6 +1040,8 @@ static void build_sprites(void)
             s->pc = (int16_t)sext16(rd16(F.oam, mb + 22));
             s->pd = (int16_t)sext16(rd16(F.oam, mb + 30));
         }
+        if (objwin)
+            continue;
         prio = (a2 >> 10) & 3;
         sByPrio[prio][sNbyPrio[prio]++] = (uint8_t)n;
         n++;
@@ -1202,8 +1245,10 @@ static void emit_affine(const Bg *c, const Rect *r)
 
 // ---- stencil passes -------------------------------------------------------------
 
-static int      sStencil;   // effect 1 with a first target: bit 0 is kept
-static unsigned sMark;      // the next mark bit, 0x02 to 0x80
+static int      sBlend;     // effect 1 with a first target: bit 0 is kept
+static int      sObjWin;    // some region uses the OBJ window: bit 7 is kept
+static int      sStencil;   // either of the two
+static unsigned sMark;      // the next mark bit, 0x02 to 0x40
 
 enum { E_TEXT, E_AFFINE, E_SPRITE, E_SPRITES };
 
@@ -1228,12 +1273,12 @@ static void emit(const Emit *e)
     }
 }
 
-// Clear the mark bits, keep bit 0.
+// Clear the mark bits, keep bits 0 and 7.
 static void clear_marks(void)
 {
     C2D_Flush();
     C3D_DepthTest(true, GPU_ALWAYS, 0);
-    C3D_StencilTest(true, GPU_ALWAYS, 0, 0xff, 0xfe);
+    C3D_StencilTest(true, GPU_ALWAYS, 0, 0xff, 0x7e);
     C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_REPLACE);
     if (!C2D_DrawRectSolid(0.0f, 0.0f, 0.0f, (float)SURF_W, (float)GBA_H, C2D_Color32(0, 0, 0, 255)))
         sFail |= GPU_WHY_BUDGET;
@@ -1242,26 +1287,30 @@ static void clear_marks(void)
     sMark = 0x02;
 }
 
-// Draw one layer of one region, with the blend that BLDCNT gives it.
-static void run(const Emit *e, int bit)
+// Draw one layer of one region, with the blend that BLDCNT gives it. 'cond'
+// is the OBJ window: -1 draw anywhere, 1 only inside it, 0 only outside it.
+static void run(const Emit *e, int bit, int cond)
 {
     int dst = (F.dst & bit) != 0;
+    unsigned cm = cond >= 0 ? 0x80 : 0, cr = cond > 0 ? 0x80 : 0;
     unsigned m;
 
     if (!sStencil) {
         emit(e);
         return;
     }
-    if (!(F.effect == 1 && (F.src & bit))) {
-        // Opaque, and bit 0 says whether this layer is a second target.
+    if (!(sBlend && (F.src & bit))) {
+        // Opaque. Bit 0 says whether this layer is a second target, while
+        // the blend needs it.
         C2D_Flush();
-        C3D_StencilTest(true, GPU_ALWAYS, dst, 0xff, 0x01);
+        C3D_StencilTest(true, cm ? GPU_EQUAL : GPU_ALWAYS, (int)(cr | (unsigned)dst), (int)cm,
+                        sBlend ? 0x01 : 0);
         C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_REPLACE);
         emit(e);
         return;
     }
 
-    if (sMark > 0x80)
+    if (sMark > 0x40)
         clear_marks();
     m = sMark;
     sMark <<= 1;
@@ -1270,7 +1319,7 @@ static void run(const Emit *e, int bit)
     // this layer is a second target (both bits are 0 here, so INVERT sets them).
     C2D_Flush();
     blend_opaque();
-    C3D_StencilTest(true, GPU_EQUAL, 0, 0x01, (int)(m | (unsigned)dst));
+    C3D_StencilTest(true, GPU_EQUAL, (int)cr, (int)(0x01 | cm), (int)(m | (unsigned)dst));
     C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_INVERT);
     emit(e);
 
@@ -1278,7 +1327,7 @@ static void run(const Emit *e, int bit)
     // layer is not a second target.
     C2D_Flush();
     blend_alpha();
-    C3D_StencilTest(true, GPU_EQUAL, 1, (int)(0x01 | m), dst ? 0 : 0x01);
+    C3D_StencilTest(true, GPU_EQUAL, (int)(cr | 1), (int)(0x01 | m | cm), dst ? 0 : 0x01);
     C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_INVERT);
     emit(e);
 
@@ -1288,32 +1337,62 @@ static void run(const Emit *e, int bit)
 
 // ---- the draw -------------------------------------------------------------------
 
+// Where a layer draws in a region: -2 nowhere, else run()'s 'cond'.
+static int layer_cond(const Rect *r, int bit)
+{
+    int out = (r->mask & bit) != 0, in = r->objwin && (r->objMask & bit);
+
+    if (!r->objwin)
+        return out ? -1 : -2;
+    if (out && in)
+        return -1;
+    return in ? 1 : (out ? 0 : -2);
+}
+
 static void compose_rect(const Rect *r)
 {
     for (int prio = 3; prio >= 0 && !sFail; prio--) {
+        int cond;
+
         for (int i = sNbg - 1; i >= 0 && !sFail; i--) {
             const Bg *c = &sBg[i];
             Emit e = { c->affine ? E_AFFINE : E_TEXT, c, NULL, prio, r };
 
-            if (c->prio != prio || !(r->mask & (1 << c->bg)))
+            if (c->prio != prio || (cond = layer_cond(r, 1 << c->bg)) == -2)
                 continue;
-            run(&e, 1 << c->bg);
+            run(&e, 1 << c->bg, cond);
         }
-        if (!sNbyPrio[prio] || !(r->mask & 0x10) || sFail)
+        if (!sNbyPrio[prio] || sFail || (cond = layer_cond(r, 0x10)) == -2)
             continue;
-        if (sStencil && F.effect == 1 && (F.src & 0x10)) {
+        if (sBlend && (F.src & 0x10)) {
             // One at a time: a sprite can land on a sprite of the same pass.
             for (int i = sNbyPrio[prio] - 1; i >= 0 && !sFail; i--) {
                 Emit e = { E_SPRITE, NULL, &sSpr[sByPrio[prio][i]], prio, r };
 
-                run(&e, 0x10);
+                run(&e, 0x10, cond);
             }
         } else {
             Emit e = { E_SPRITES, NULL, NULL, prio, r };
 
-            run(&e, 0x10);
+            run(&e, 0x10, cond);
         }
     }
+}
+
+// Stamp the OBJ window into stencil bit 7: each opaque texel of each mode-2
+// sprite, anywhere on the screen, as ppu.c's objWinFill does.
+static void stamp_objwin(void)
+{
+    const Rect all = { F.xbeg, F.xend, 0, GBA_H, 0x3f, 0, 0 };
+
+    C2D_Flush();
+    C3D_DepthTest(true, GPU_ALWAYS, 0);
+    C3D_StencilTest(true, GPU_ALWAYS, 0x80, 0xff, 0x80);
+    C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_REPLACE);
+    for (int k = 0; k < sNobjwin && !sFail; k++)
+        emit_sprite(&sSpr[127 - k], &all);
+    C2D_Flush();
+    C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR);
 }
 
 // The backdrop, as ppu.c's backdropLine: palette 0, with BLDY if it is a
@@ -1352,6 +1431,13 @@ unsigned GpuComposeDraw(const GpuComposeInput *in)
     build_bgs();
     build_sprites();
     nr = build_rects(r);
+    // With no mode-2 sprite the OBJ window is empty: the outside mask holds.
+    sObjWin = 0;
+    for (int i = 0; i < nr; i++) {
+        if (!sNobjwin)
+            r[i].objwin = 0;
+        sObjWin |= r[i].objwin;
+    }
 
     state_begin();
 
@@ -1360,7 +1446,7 @@ unsigned GpuComposeDraw(const GpuComposeInput *in)
         unsigned shown = 0;
 
         for (int j = 0; j < nr; j++)
-            shown |= r[j].mask;
+            shown |= r[j].mask | (r[j].objwin ? r[j].objMask : 0);
         if (!sBg[i].affine && (shown & (1u << sBg[i].bg)))
             text_prepare(&sBg[i]);
     }
@@ -1373,12 +1459,15 @@ unsigned GpuComposeDraw(const GpuComposeInput *in)
     C3D_FrameSplit(0);
 
     // 2. The surface: backdrop and stencil, then the regions.
-    sStencil = F.effect == 1 && (F.src & 0x1f);
+    sBlend = F.effect == 1 && (F.src & 0x1f);
+    sStencil = sBlend || sObjWin;
     sMark = 0x02;
     C3D_RenderTargetClear(sSurfTarget, C3D_CLEAR_ALL, backdrop_rgba(),
                           (F.dst & 0x20) ? 0x01000000u : 0);
     C2D_SceneBegin(sSurfTarget);
     C2D_ViewReset();
+    if (sObjWin)
+        stamp_objwin();
     for (int i = 0; i < nr && !sFail; i++)
         compose_rect(&r[i]);
 
@@ -1441,6 +1530,7 @@ fail:
 
 void GpuComposeExit(void)
 {
+    GpuComposeMaintain();
     for (int i = 0; i < 4; i++) {
         layer_free(&sMain[i]);
         layer_free(&sSide[i]);
@@ -1459,6 +1549,11 @@ void GpuComposeExit(void)
 
 void GpuComposeMaintain(void)
 {
+    for (int i = 0; i < sNgrave; i++) {
+        C3D_RenderTargetDelete(sGrave[i].target);
+        C3D_TexDelete(&sGrave[i].tex);
+    }
+    sNgrave = 0;
     for (int i = 0; i < 4; i++) {
         if (sMain[i].release)
             layer_free(&sMain[i]);

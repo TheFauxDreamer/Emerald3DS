@@ -20,14 +20,13 @@
 // mask of these. 0 means that the GPU draws the frame.
 enum {
     GPU_WHY_BITMAP    = 1u << 0,   // DISPCNT mode 3 to 7
-    GPU_WHY_OBJWIN    = 1u << 1,   // the OBJ window is on
-    GPU_WHY_WINDOW    = 1u << 2,   // a window region turns a live effect off
-    GPU_WHY_BLENDBACK = 1u << 3,   // alpha blend with the backdrop as source
-    GPU_WHY_SINGULAR  = 1u << 4,   // an affine matrix with no inverse
-    GPU_WHY_FADE      = 1u << 5,   // most BG colours changed this frame
-    GPU_WHY_BUDGET    = 1u << 6,   // too many quads or tiles for one frame
-    GPU_WHY_VRAM      = 1u << 7,   // no VRAM for a texture
-    GPU_WHY_COUNT     = 8
+    GPU_WHY_WINDOW    = 1u << 1,   // a window region turns a live effect off
+    GPU_WHY_BLENDBACK = 1u << 2,   // alpha blend with the backdrop as source
+    GPU_WHY_SINGULAR  = 1u << 3,   // an affine matrix with no inverse
+    GPU_WHY_FADE      = 1u << 4,   // most BG colours changed this frame
+    GPU_WHY_BUDGET    = 1u << 5,   // too many quads or tiles for one frame
+    GPU_WHY_VRAM      = 1u << 6,   // no VRAM for a texture
+    GPU_WHY_COUNT     = 7
 };
 
 // A short name for each bit, for the log.
