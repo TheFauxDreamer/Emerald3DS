@@ -286,10 +286,21 @@ function putPixel(x, y, color, layer = 0x20) {
   layerData[pixel] = layer;
 }
 
+// The backdrop is under every pixel, whatever the windows say. A window's
+// bit 5 only turns the colour effects off, as on the GBA.
 function clearScreen() {
   const color = gbaColor(u16[PAL >> 1]);
   for (let y = 0; y < HEIGHT; y++) {
-    for (let x = 0; x < WIDTH; x++) putPixel(x, y, color, 0x20);
+    for (let x = 0; x < WIDTH; x++) {
+      const pixel = y * WIDTH + x;
+      const output = activeBlendColor(color, 0x20, pixel, windowMask(x, y) & 0x20);
+      const p = pixel * 4;
+      image.data[p] = output[0];
+      image.data[p + 1] = output[1];
+      image.data[p + 2] = output[2];
+      image.data[p + 3] = 255;
+      layerData[pixel] = 0x20;
+    }
   }
 }
 

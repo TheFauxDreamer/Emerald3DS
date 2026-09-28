@@ -23,14 +23,12 @@
 // reads the same pixel's composited-so-far colour and layer), but the scanout
 // never sees a half-composited frame -- on-device this kills the flashing that
 // scanning out mid-render caused. The line buffer is seeded from the existing
-// framebuffer row so window-masked holes keep their old contents, exactly like
-// the reference leaving those framebuffer pixels untouched.
+// framebuffer row, as the reference leaves its framebuffer between frames. The
+// backdrop now covers every pixel, so only the blend below needs the old row.
 //
-// Quirks of the reference that MUST be preserved: window bit 5 gates the
-// backdrop fill (skipped pixels keep the previous frame's contents); alpha
-// blending reads the "below" pixel and layer byte that may be stale from the
-// previous frame during the backdrop pass; sprites can alpha-blend over
-// sprites.
+// Quirks of the reference that MUST be preserved: alpha blending reads the
+// "below" pixel and layer byte that may be stale from the previous frame during
+// the backdrop pass; sprites can alpha-blend over sprites.
 //
 // MARGINS (PPU_MAX_MARGIN > 0, the 3DS build only): the direct 565 render can
 // draw up to PPU_MAX_MARGIN more pixels on each side of the 240, from
@@ -685,11 +683,19 @@ static void buildSpriteList(uint16_t dispcnt) {
 }
 
 // ---- per-scanline renderers ----------------------------------------------------
+// The backdrop is under every pixel: a window cannot hide it. Its bit 5 only
+// turns the colour effects off, as on the GBA. The reference used to skip the
+// fill there and keep the old frame's pixels (the title screen's logo shine
+// smeared its background flash).
 static void backdropLine(int y) {
     setPass(0x20);
-    bool skip;
-    const uint8_t *wr = passWinRow(y, &skip);
-    if (skip) return;   // backdrop fill gated off: line keeps its old contents
+    const uint8_t *wr = winRowFor(y);
+    const int mode = g_passMode;
+    if (wr && winrow_u >= 0) {
+        // One mask for the whole line: effects are on or off for all of it.
+        if (!(winrow_u & 0x20)) g_passMode = 0;
+        wr = NULL;
+    }
     if (!wr && g_passMode != 1) {
         if (g_fb888) {
             uint32_t c = pal888[0];
@@ -702,10 +708,14 @@ static void backdropLine(int y) {
             for (int x = XBEG; x < XEND; x++) line565[x] = c;
         }
         memset(&g_layer[g_rowBase + XBEG], 0x20, XEND - XBEG);
+        g_passMode = mode;
         return;
     }
+    // A mixed row has its bytes (winRowFor filled them). Blend reads the old
+    // "below" pixel here, as before.
     for (int x = XBEG; x < XEND; x++)
-        emitMasked(x, 0, wr);
+        emit(x, 0, wr ? (wr[x] & 0x20) : 0x20);
+    g_passMode = mode;
 }
 
 static void textBgLine(const bgcfg_t *c, int y) {
