@@ -208,11 +208,50 @@ int  Ctr3dsUiModifierHeld(void);
 #define CTR_TOP_SCALE_1X     0   // 240x160, pixel-perfect, wide borders
 #define CTR_TOP_SCALE_1_5X   1   // 360x240, fills the height, 20px bars
 #define CTR_TOP_SCALE_FILL   2   // 400x240, no borders, 11% wider
-#define CTR_TOP_SCALE_COUNT  3
+#define CTR_TOP_SCALE_WIDE   3   // 1.5x, and the field shows 16px more each side
+#define CTR_TOP_SCALE_COUNT  4
 #define CTR_TOP_SCALE_DEFAULT CTR_TOP_SCALE_1_5X
 
 void Ctr3dsSetTopScale(int mode);
 int  Ctr3dsGetTopScale(void);
+
+// What draws the top screen (3ds/host/video.c). CPU is rp2350/ppu.c, the
+// reference. GPU is the compositor in 3ds/host/gpu_compose.c, which gives a
+// frame back to ppu.c when the frame uses something it cannot draw the same.
+// AUTO is GPU when ppu.c has no core of its own (an Old 3DS), else CPU. This
+// setting persists, as the scale does.
+#define CTR_RENDERER_AUTO  0
+#define CTR_RENDERER_CPU   1
+#define CTR_RENDERER_GPU   2
+#define CTR_RENDERER_COUNT 3
+
+void Ctr3dsSetRenderer(int mode);
+int  Ctr3dsGetRenderer(void);
+
+// ---- the wide overworld (CTR_TOP_SCALE_WIDE) --------------------------------
+//
+// At WIDE, the top screen shows the GBA picture at 1.5x, as 1.5X does. In the
+// field it also shows CTR_WIDE_MARGIN more GBA pixels on each side: 272x160 at
+// 1.5x is 408x240, so 4 screen pixels go past each edge. Menus, battles and
+// every other screen stay 240 wide, and video.c stretches them to the same 408
+// screen pixels (13% wider), so no screen has black bars. In the field the 240
+// pixels in the middle are always the GBA's own.
+//
+// Where the margins come from: the side maps of src/field_camera.c for BG1-3,
+// sprites as they are placed, and window edges extended (ppu_set_wide in
+// rp2350/ppu.h). Text boxes and menus on BG0 stop at the edges of the 240.
+#define CTR_WIDE_MARGIN 16
+
+typedef struct {
+    const uint16_t *sideMap[4];   // for each BG: a 64x32 map, or NULL
+    uint16_t sideDelta;           // see ppu_set_wide
+    uint8_t  active;              // this frame is the field, at WIDE
+} CtrWideField;
+
+// Game side (src/field_camera.c). The state of the frame the game just made.
+// The side maps stay valid for the process, but their contents change with the
+// next frame, so the host copies them.
+void CtrWideFieldGet(CtrWideField *out);
 
 // ---- the debug menu -------------------------------------------------------
 //
@@ -227,9 +266,9 @@ int  Ctr3dsGetTopScale(void);
 //   (3ds/host/main.c). Two of them persist in settings.bin. Without this, a
 //   release build could get "show every tab" or a muted PSG channel from a
 //   debug session, with no control to undo it.
-// - There is no log file (3ds/host/log.c). A shared build must not write to the
-//   player's SD card. svcOutputDebugString stays, so an emulator still shows
-//   the same lines.
+// - The log file holds only warnings (3ds/host/log.c). A shared build must
+//   not write to the player's SD card in a normal session. svcOutputDebugString
+//   stays, so an emulator still shows the same lines.
 #define CTR_DEBUG_MENU 1
 
 // Show every bottom-screen tab, the ones that the save has not unlocked too.
@@ -317,6 +356,11 @@ int  Ctr3dsGetFollowerPokeBall(void);
 // shows at the next load of Route 117.
 void Ctr3dsSetDayCareYard(int on);
 int  Ctr3dsGetDayCareYard(void);
+
+// Stored as "off": zero means that MAP marks the places where a trainer wants
+// a rematch, as it did before the switch. The value is for the console.
+void Ctr3dsSetRematchMarksOff(int on);
+int  Ctr3dsGetRematchMarksOff(void);
 
 // The bottom screen's nav bar: which tab is in each slot, and whether the
 // labels show. A raw 16-bit value for the console. Its bits are defined on the
@@ -524,7 +568,7 @@ void Ctr3dsApplyAudioDbg(int which, int on);
 // cannot be seen from outside. The game stops, then continues, and nothing says
 // which call caused it. These functions time a stage and write a line only when
 // it is too slow. Thus sdmc:/3ds/emerald3ds/log.txt names the call. A release
-// build keeps the timing and drops the file.
+// build keeps the timing, and writes only warnings to the file.
 //
 // Declared here, not in 3ds/host/trace.h, because the bottom screen is on the
 // game side and must never see <3ds.h>. `const char *` and `unsigned int` cross

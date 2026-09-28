@@ -19,16 +19,20 @@
 // Nothing here can block startup. A read-only card, a full card or a missing
 // directory costs the file, not the game.
 //
-// A release build does not have the file part. CTR_DEBUG_MENU (3ds/bridge.h)
-// controls it, so one switch prepares a build to share. A player's build must
-// not make files on their card or write to the SD card for each line.
+// Two kinds of line:
+// - CtrLog: a debug build writes it to the file. A release build does not.
+// - CtrLogWarn: a fault that a player must be able to report, such as a
+//   missing DSP firmware dump. Every build writes it to the file.
+//
+// CTR_DEBUG_MENU (3ds/bridge.h) selects the build. A release build must not
+// write to the player's card in a normal session. Thus it opens the file only
+// at its first warning, and a session with no warning writes nothing. At boot
+// it removes the file of an earlier session (CtrLogBoot), so an old warning
+// cannot look like a new one. Its first warning comes after the boot line, so
+// the file names the build that wrote it.
 //
 // The svcOutputDebugString call stays in every build. It costs nothing and a
 // console discards it.
-//
-// On a console, the missing sdmc:/3ds/dspfirm.cdc warning thus has no
-// destination. It is about the player's SD card, and no build can carry a DSP
-// dump. The Limitations section of README.md explains it.
 
 #include <3ds.h>
 #include <stdarg.h>
@@ -40,14 +44,18 @@
 #include "io_thread.h"
 #include "trace.h"
 
-#if CTR_DEBUG_MENU
-
 #define LOG_DIR   "sdmc:/3ds/emerald3ds"
 #define LOG_PATH  LOG_DIR "/log.txt"
 
+#if CTR_DEBUG_MENU
 // Large for a boot log, which is about a dozen lines. Much too small to harm an
 // SD card if a caller logs from a frame loop.
 #define LOG_MAX_LINES 512
+#else
+// Only warnings reach the file. A healthy session has none, and a faulty one
+// has a few.
+#define LOG_MAX_LINES 32
+#endif
 
 // Lines that wait for the I/O thread. Linear, not a ring: each pass takes all
 // of it, so there is no tail to wrap. The 8 KB buffer holds more than thirty of
@@ -165,12 +173,38 @@ void CtrLogDrain(void)
     fflush(sFile);
 }
 
-#else   // !CTR_DEBUG_MENU: release build, nothing goes to the card
+// The build stamp from CtrLogBoot, for the first line of a release file.
+static const char *sBootStamp = "build stamp unknown";
 
-static void log_to_file(const char *buf, int n) { (void)buf; (void)n; }
-void CtrLogDrain(void) {}
+void CtrLogBoot(const char *stamp)
+{
+    if (stamp != NULL)
+        sBootStamp = stamp;
 
+#if !CTR_DEBUG_MENU
+    // Before any warning can open the file. The call writes nothing when there
+    // is no file.
+    remove(LOG_PATH);
 #endif
+
+    CtrLog("emerald3ds: boot (%s)\n", sBootStamp);
+}
+
+// Format one line and send it to the emulator's log. Returns the length, or -1.
+static int log_format(char *buf, int size, const char *fmt, va_list ap)
+{
+    int n = vsnprintf(buf, (size_t)size, fmt, ap);
+
+    if (n < 0)
+        return -1;
+    if (n > size - 1)
+        n = size - 1;
+
+    // Always, and first. Under an emulator this is the live view. It must not
+    // depend on the SD card, or on a write to it.
+    svcOutputDebugString(buf, n);
+    return n;
+}
 
 // Always compiled, unlike CtrTrace. These conditions reach an emulator's log in
 // every build. CTR_DEBUG_MENU decides if they also reach the SD card (see the
@@ -182,17 +216,40 @@ void CtrLog(const char *fmt, ...)
     int n;
 
     va_start(ap, fmt);
-    n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    n = log_format(buf, (int)sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (n >= 0 && CTR_DEBUG_MENU)
+        log_to_file(buf, n);
+}
+
+void CtrLogWarn(const char *fmt, ...)
+{
+    static volatile int sHeaderDone;
+    char buf[256];
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = log_format(buf, (int)sizeof(buf), fmt, ap);
     va_end(ap);
 
     if (n < 0)
         return;
-    if (n > (int)sizeof(buf) - 1)
-        n = (int)sizeof(buf) - 1;
 
-    // Always, and first. Under an emulator this is the live view. It must not
-    // depend on the SD card, or on a write to it.
-    svcOutputDebugString(buf, n);
+    // A release file has no boot line, because CtrLog does not write there.
+    // Thus the first warning writes it. The main thread and the I/O thread can
+    // both warn, so exactly one of them takes this.
+    if (!CTR_DEBUG_MENU && __sync_bool_compare_and_swap(&sHeaderDone, 0, 1)) {
+        char head[96];
+        int h = snprintf(head, sizeof(head), "emerald3ds: boot (%s)\n",
+                         sBootStamp);
+
+        if (h > (int)sizeof(head) - 1)
+            h = (int)sizeof(head) - 1;
+        if (h > 0)
+            log_to_file(head, h);
+    }
 
     log_to_file(buf, n);
 }

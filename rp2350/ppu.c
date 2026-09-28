@@ -23,14 +23,20 @@
 // reads the same pixel's composited-so-far colour and layer), but the scanout
 // never sees a half-composited frame -- on-device this kills the flashing that
 // scanning out mid-render caused. The line buffer is seeded from the existing
-// framebuffer row so window-masked holes keep their old contents, exactly like
-// the reference leaving those framebuffer pixels untouched.
+// framebuffer row, as the reference leaves its framebuffer between frames. The
+// backdrop now covers every pixel, so only the blend below needs the old row.
 //
-// Quirks of the reference that MUST be preserved: window bit 5 gates the
-// backdrop fill (skipped pixels keep the previous frame's contents); alpha
-// blending reads the "below" pixel and layer byte that may be stale from the
-// previous frame during the backdrop pass; sprites can alpha-blend over
-// sprites.
+// Quirks of the reference that MUST be preserved: alpha blending reads the
+// "below" pixel and layer byte that may be stale from the previous frame during
+// the backdrop pass; sprites can alpha-blend over sprites.
+//
+// MARGINS (PPU_MAX_MARGIN > 0, the 3DS build only): the direct 565 render can
+// draw up to PPU_MAX_MARGIN more pixels on each side of the 240, from
+// x = -margin to x = 240 + margin. See ppu_set_wide in ppu.h. The line, layer
+// and window buffers then hold negative x, and XBEG/XEND replace 0/WIDTH as
+// the bounds of the line. The 240 pixels in the middle go through the same code
+// and come out the same. With PPU_MAX_MARGIN 0, XBEG and XEND are the constants
+// 0 and WIDTH, so the RP2350 build does not change.
 //
 // Both renderers implement the OBJ window. A sprite in OBJ mode 2 is never
 // drawn. With DISPCNT bit 15 set, its opaque texels are the region of the
@@ -43,6 +49,20 @@
 
 #define WIDTH  PPU_WIDTH
 #define HEIGHT PPU_HEIGHT
+#define LSTRIDE PPU_LAYER_STRIDE   // the layer scratch's row stride
+
+// The bounds of the line: 0 and WIDTH, or wider when this render has margins.
+#if PPU_MAX_MARGIN
+static int g_margin;                  // what ppu_set_wide asked for
+static int g_m;                       // this render's margin: 0 or g_margin
+static const uint16_t *g_side[4];     // the side map of each BG, or NULL
+static unsigned g_sideDelta;
+#define XBEG (-g_m)
+#define XEND (WIDTH + g_m)
+#else
+#define XBEG 0
+#define XEND WIDTH
+#endif
 
 // Bulky per-frame state lives in the EWRAM region's slack on-device (the SDK
 // RAM region is full); host builds and the standalone display test keep it in
@@ -145,7 +165,11 @@ static bool inWindowRange(int value, uint16_t range) {
 
 // Window mask for one scanline (only valid when F.windowsOn). Window registers
 // are frame-constant, so the row is cached across passes within the frame.
-static uint8_t winrow[WIDTH] __attribute__((aligned(4)));
+// Indexed by x, so with margins it starts PPU_MAX_MARGIN bytes into the buffer.
+// PPU_MAX_MARGIN and the margin are multiples of 4, so the word sweep below
+// stays aligned.
+static uint8_t winrowbuf[WIDTH + 2 * PPU_MAX_MARGIN] __attribute__((aligned(4)));
+#define winrow (winrowbuf + PPU_MAX_MARGIN)
 static int winrow_y;
 static int winrow_u;   // the row's uniform mask value, or -1 if not uniform
 static int winrow_filled;   // are winrow's bytes valid, or only winrow_u?
@@ -157,6 +181,12 @@ static void winrowFill(uint16_t hrange, uint8_t val) {
     // note on inWindowRange.
     if (start > end || end > WIDTH) end = WIDTH;
     if (start >= end) return;   // X1 at or past the right edge: nothing shown
+#if PPU_MAX_MARGIN
+    // A window that reaches an edge of the 240 continues into the margin on
+    // that side, as it would on a wider screen.
+    if (start == 0) start = XBEG;
+    if (end == WIDTH) end = XEND;
+#endif
     memset(&winrow[start], val, end - start);
 }
 
@@ -222,7 +252,7 @@ static const uint8_t *winRowFor(int y) {
                    && (!w1on || winrowCoversNone(F.win1h))) {
             winrow_u = F.winout & 0x3f;
         } else {
-            memset(winrow, F.winout & 0x3f, WIDTH);
+            memset(&winrow[XBEG], F.winout & 0x3f, XEND - XBEG);
             if (objwon)
                 objWinFill(y, (F.winout >> 8) & 0x3f);
             // win1 first, then win0 overwrites: matches the reference's
@@ -237,11 +267,11 @@ static const uint8_t *winRowFor(int y) {
             // out uniform, for example when the OBJ window stamps nothing on
             // this line, and every pass on a uniform row can drop per-pixel
             // masking (see passWinRow).
-            const uint32_t *p = (const uint32_t *)winrow;
+            const uint32_t *p = (const uint32_t *)&winrow[XBEG];
             uint32_t w = p[0];
             winrow_u = (uint8_t)w * 0x01010101u == w ? (int)(w & 0xff) : -1;
             if (winrow_u >= 0)
-                for (int i = 1; i < WIDTH / 4; i++)
+                for (int i = 1; i < (XEND - XBEG) / 4; i++)
                     if (p[i] != w) { winrow_u = -1; break; }
         }
     }
@@ -253,7 +283,7 @@ static const uint8_t *winRowFor(int y) {
 // so in the overworld this never runs.
 static void winrowEnsure(void) {
     if (!winrow_filled) {
-        memset(winrow, (uint8_t)winrow_u, WIDTH);
+        memset(&winrow[XBEG], (uint8_t)winrow_u, XEND - XBEG);
         winrow_filled = 1;
     }
 }
@@ -290,12 +320,23 @@ static uint8_t  line888[WIDTH * 3] PPU_EWRAM;
 // of this pointer on every pixel.
 static uint16_t *line565 = line565buf;
 
-static int g_rowBase;   // y * WIDTH: g_layer index of the line's first pixel
+// g_layer index of the line's pixel at x = 0: y * WIDTH with no margins. With
+// margins the layer rows are LSTRIDE wide and x = 0 is PPU_MAX_MARGIN into each.
+static int g_rowBase;
+
+// y * WIDTH, the line's first pixel in the framebuffer and in bitmap VRAM. With
+// no margins that is g_rowBase, and the RP2350 build keeps reading it from there
+// so that its code does not change.
+#if PPU_MAX_MARGIN
+#define PIXROW(y) ((y) * WIDTH)
+#else
+#define PIXROW(y) ((void)(y), g_rowBase)
+#endif
 static int g_fbStride = WIDTH;   // the 565 target's row stride, >= WIDTH
 static int g_fbDirect;           // compose in the target, with no line buffer
 
 static inline void lineInit(int y) {
-    g_rowBase = y * WIDTH;
+    g_rowBase = y * LSTRIDE + PPU_MAX_MARGIN;
 
     // Compose in place. The seed below keeps pixels that nothing draws to, and
     // in the target those pixels ALREADY hold what the seed would have copied,
@@ -311,8 +352,8 @@ static inline void lineInit(int y) {
     // Seed from the framebuffer so pixels nothing draws to (window-masked
     // backdrop) keep their previous contents, as the reference leaves them.
     line565 = line565buf;
-    if (g_fb888) memcpy(line888, &g_fb888[g_rowBase * 3], WIDTH * 3);
-    else memcpy(line565, &g_fb565[g_rowBase], WIDTH * 2);
+    if (g_fb888) memcpy(line888, &g_fb888[PIXROW(y) * 3], WIDTH * 3);
+    else memcpy(line565, &g_fb565[PIXROW(y)], WIDTH * 2);
 }
 
 static inline void lineFlush(int y) {
@@ -624,7 +665,7 @@ static void buildSpriteList(uint16_t dispcnt) {
         s->flipV = (!affine && (a1 & 0x2000)) ? 1 : 0;
         int ox = a1 & 511;
         int oy = a0 & 255;
-        if (ox > 240) ox -= 512;
+        if (ox > XEND) ox -= 512;
         if (oy > 160) oy -= 256;
         s->ox = (int16_t)ox;
         s->oy = (int16_t)oy;
@@ -642,27 +683,39 @@ static void buildSpriteList(uint16_t dispcnt) {
 }
 
 // ---- per-scanline renderers ----------------------------------------------------
+// The backdrop is under every pixel: a window cannot hide it. Its bit 5 only
+// turns the colour effects off, as on the GBA. The reference used to skip the
+// fill there and keep the old frame's pixels (the title screen's logo shine
+// smeared its background flash).
 static void backdropLine(int y) {
     setPass(0x20);
-    bool skip;
-    const uint8_t *wr = passWinRow(y, &skip);
-    if (skip) return;   // backdrop fill gated off: line keeps its old contents
+    const uint8_t *wr = winRowFor(y);
+    const int mode = g_passMode;
+    if (wr && winrow_u >= 0) {
+        // One mask for the whole line: effects are on or off for all of it.
+        if (!(winrow_u & 0x20)) g_passMode = 0;
+        wr = NULL;
+    }
     if (!wr && g_passMode != 1) {
         if (g_fb888) {
             uint32_t c = pal888[0];
-            for (int x = 0; x < WIDTH; x++) {
+            for (int x = XBEG; x < XEND; x++) {
                 if (g_passMode == 2) store888fx(x, c);
                 else store888(x, c & 0xff, (c >> 8) & 0xff, c >> 16);
             }
         } else {
             uint16_t c = (g_passMode == 2) ? pal565fx[0] : pal565[0];
-            for (int x = 0; x < WIDTH; x++) line565[x] = c;
+            for (int x = XBEG; x < XEND; x++) line565[x] = c;
         }
-        memset(&g_layer[g_rowBase], 0x20, WIDTH);
+        memset(&g_layer[g_rowBase + XBEG], 0x20, XEND - XBEG);
+        g_passMode = mode;
         return;
     }
-    for (int x = 0; x < WIDTH; x++)
-        emitMasked(x, 0, wr);
+    // A mixed row has its bytes (winRowFor filled them). Blend reads the old
+    // "below" pixel here, as before.
+    for (int x = XBEG; x < XEND; x++)
+        emit(x, 0, wr ? (wr[x] & 0x20) : 0x20);
+    g_passMode = mode;
 }
 
 static void textBgLine(const bgcfg_t *c, int y) {
@@ -682,6 +735,28 @@ static void textBgLine(const bgcfg_t *c, int y) {
     int sy = (y + c->vofs) & c->hmask;
     uint32_t blockYOff = (sy >= 256) ? (uint32_t)(c->sizebits == 3 ? 2 : 1) * 0x800 : 0;
     uint32_t mapRow = c->screenBase + blockYOff + (uint32_t)((sy & 255) >> 3) * 64;
+#if PPU_MAX_MARGIN
+    // A BG with no side map stops at the edges of the 240.
+    const uint16_t *side = g_side[c->bg];
+    const int xe = side ? XEND : WIDTH;
+    int x = side ? XBEG : 0;
+    while (x < xe) {
+        int sx = (x + c->hofs) & c->wmask;
+        int span = 8 - (sx & 7);
+        // A span never crosses x = 0 or x = WIDTH: the two sides of each come
+        // from different maps.
+        int lim = x < 0 ? 0 : (x < WIDTH ? WIDTH : xe);
+        if (span > lim - x) span = lim - x;
+        uint16_t entry;
+        if ((unsigned)x >= (unsigned)WIDTH) {
+            // The delta is a multiple of 256, so this column's pixel phase is
+            // the one that sx above has.
+            int wsx = (x + c->hofs + (int)g_sideDelta) & 511;
+            entry = side[(uint32_t)((sy & 255) >> 3) * 64 + (uint32_t)(wsx >> 3)];
+        } else
+            entry = ld16(VRAMb, mapRow + (sx >= 256 ? 0x800 : 0)
+                                       + (uint32_t)((sx & 255) >> 3) * 2);
+#else
     int x = 0;
     while (x < WIDTH) {
         int sx = (x + c->hofs) & c->wmask;
@@ -689,6 +764,7 @@ static void textBgLine(const bgcfg_t *c, int y) {
         if (span > WIDTH - x) span = WIDTH - x;
         uint16_t entry = ld16(VRAMb, mapRow + (sx >= 256 ? 0x800 : 0)
                                           + (uint32_t)((sx & 255) >> 3) * 2);
+#endif
         int tile = entry & 0x3ff;
         int py = (entry & 0x800) ? 7 - (sy & 7) : (sy & 7);
         int q0 = sx & 7;
@@ -927,8 +1003,8 @@ static void objWinFill(int y, uint8_t val) {
         const sprite_t *s = &g_spr[127 - k];
         int row = y - s->oy;
         if (row < 0 || row >= s->drawH) continue;
-        int x0 = (s->ox < 0) ? -s->ox : 0;
-        int x1 = (s->ox + s->drawW > WIDTH) ? WIDTH - s->ox : s->drawW;
+        int x0 = (s->ox < XBEG) ? XBEG - s->ox : 0;
+        int x1 = (s->ox + s->drawW > XEND) ? XEND - s->ox : s->drawW;
         int palIdx;
         if (s->affine) {
             int w = s->w, h = s->h;
@@ -978,8 +1054,8 @@ static void spritesLine(int priority, int y) {
         const sprite_t *s = &g_spr[bucket ? bucket[bi] : bi];
         int row = y - s->oy;
         if (row < 0 || row >= s->drawH) continue;
-        int x0 = (s->ox < 0) ? -s->ox : 0;
-        int x1 = (s->ox + s->drawW > WIDTH) ? WIDTH - s->ox : s->drawW;
+        int x0 = (s->ox < XBEG) ? XBEG - s->ox : 0;
+        int x1 = (s->ox + s->drawW > XEND) ? XEND - s->ox : s->drawW;
         if (x0 >= x1) continue;
 
         if (s->affine) {
@@ -1112,8 +1188,8 @@ static void spritesLine(int priority, int y) {
 // ---- bitmap-mode scanlines ---------------------------------------------------
 // Like the reference, the bitmap itself ignores windows/blending and tags every
 // pixel layer 0x04; sprites composite on top through the normal emit path.
-static void bitmap3Line(void) {
-    uint32_t off = (uint32_t)g_rowBase * 2;
+static void bitmap3Line(int y) {
+    uint32_t off = (uint32_t)PIXROW(y) * 2;
     for (int x = 0; x < WIDTH; x++) {
         uint16_t v = ld16(VRAMb, off + (uint32_t)x * 2);
         int r = (v & 31) * 255 / 31;
@@ -1125,10 +1201,10 @@ static void bitmap3Line(void) {
     memset(&g_layer[g_rowBase], 0x04, WIDTH);
 }
 
-static void bitmap4Line(uint16_t dispcnt) {
+static void bitmap4Line(uint16_t dispcnt, int y) {
     uint32_t page = (dispcnt & 0x10) ? 0xA000 : 0;
     for (int x = 0; x < WIDTH; x++)
-        store_pal(x, r8(VRAMb, page + g_rowBase + x));
+        store_pal(x, r8(VRAMb, page + PIXROW(y) + x));
     memset(&g_layer[g_rowBase], 0x04, WIDTH);
 }
 
@@ -1164,12 +1240,12 @@ static void renderFrame(void) {
         lineInit(y);
         PSLOT(1);
         if (mode == 3) {
-            bitmap3Line();
+            bitmap3Line(y);
             PSLOT(3);
             spritesLine(-1, y);
             PSLOT(5);
         } else if (mode == 4) {
-            bitmap4Line(dispcnt);
+            bitmap4Line(dispcnt, y);
             PSLOT(3);
             spritesLine(-1, y);
             PSLOT(5);
@@ -1211,6 +1287,9 @@ static void renderFrame(void) {
 }
 
 void ppu_render_rgb888(uint8_t *img, uint8_t *layer) {
+#if PPU_MAX_MARGIN
+    g_m = 0;
+#endif
     g_fb888 = img;
     g_fb565 = NULL;
     g_layer = layer;
@@ -1218,6 +1297,9 @@ void ppu_render_rgb888(uint8_t *img, uint8_t *layer) {
 }
 
 void ppu_render_rgb565(uint16_t *out, uint8_t *layer) {
+#if PPU_MAX_MARGIN
+    g_m = 0;
+#endif
     g_fb888 = NULL;
     g_fb565 = out;
     g_layer = layer;
@@ -1227,6 +1309,10 @@ void ppu_render_rgb565(uint16_t *out, uint8_t *layer) {
 }
 
 void ppu_render_rgb565_direct(uint16_t *out, int stride, uint8_t *layer) {
+#if PPU_MAX_MARGIN
+    g_m = g_margin;
+    if (stride < XEND - XBEG) g_m = 0;   // no room for the margins
+#endif
     g_fb888 = NULL;
     g_fb565 = out;
     g_layer = layer;
@@ -1238,3 +1324,14 @@ void ppu_render_rgb565_direct(uint16_t *out, int stride, uint8_t *layer) {
     g_fbStride = WIDTH;
     g_fbDirect = 0;
 }
+
+#if PPU_MAX_MARGIN
+void ppu_set_wide(int margin, const uint16_t *const sideMap[4], unsigned sideDelta) {
+    if (margin < 0) margin = 0;
+    if (margin > PPU_MAX_MARGIN) margin = PPU_MAX_MARGIN;
+    g_margin = margin & ~3;
+    for (int i = 0; i < 4; i++)
+        g_side[i] = (sideMap && g_margin) ? sideMap[i] : NULL;
+    g_sideDelta = sideDelta;
+}
+#endif

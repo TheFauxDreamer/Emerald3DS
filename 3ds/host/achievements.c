@@ -342,8 +342,8 @@ static void ach_put(const struct CtrAchFile *f)
         size_t n = fwrite(f, 1, sizeof(*f), fp);
 
         if (n != sizeof(*f) || fflush(fp) != 0)
-            CtrLog("emerald3ds: achievements write failed (%u/%u bytes)\n",
-                   (unsigned)n, (unsigned)sizeof(*f));
+            CtrLogWarn("emerald3ds: achievements write failed (%u/%u bytes)\n",
+                       (unsigned)n, (unsigned)sizeof(*f));
     }
 
     elapsed = CtrTimeNowMs() - t0;

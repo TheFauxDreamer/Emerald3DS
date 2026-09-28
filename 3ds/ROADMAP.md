@@ -60,6 +60,46 @@ The large pieces:
   - A Battle Tower Doubles streak over 55 gives its ribbons with no crash. A
     Static lead while surfing on Route 110 meets only water Pokemon. A Battle
     Factory round 9 draft has random IVs.
+- **The release warnings log: test on hardware.** Build with `CTR_DEBUG_MENU`
+  0. With `sdmc:/3ds/dspfirm.cdc` renamed, `log.txt` holds the boot line and
+  the ndspInit line only. With the file back, the next boot leaves no
+  `log.txt`.
+- **The WIDE scale: test on hardware.** Select WIDE on SETTINGS. Walk in all
+  four directions, at a map seam, and on the bike; the margins must never show
+  a stale or a wrong column. Open a door and cut a tree near the screen edge.
+  Talk to someone: the text box stays 240 wide with the field beside it. Open
+  the start menu. Start a battle: the transition, the battle and the menus fill
+  the width like the field, stretched 13%, with no black margins. Check the rain on Route 119 and a dark cave. Compare
+  `ppu` and `upload.top.xfer` in `log.txt` against 1.5x, on the Old 3DS too.
+- **The GPU renderer: test on hardware.** RENDERER on SETTINGS (AUTO, CPU,
+  GPU) chooses between ppu.c and `3ds/host/gpu_compose.c`, a PICA200
+  compositor after the design of pokeemerald-3Ds-dualscreen v0.1.1. AUTO is
+  the GPU on an Old 3DS only. Nothing has run it yet; it is compile-checked
+  against the libctru, citro3d and citro2d headers. Check these:
+  - First a `make -C 3ds CTR_GPU_VERIFY=1` build with RENDERER at GPU, in
+    Azahar and on a console. Walk the route of the WIDE item above, at 1X, 1.5X
+    and WIDE, and add the title screen, the intro, a battle with a blend move
+    (Growl's notes, a stat change), the Pokédex, the bag, the PC and a fade.
+    `gpu verify: ... differ` must stay at 0 outside affine scenes. If every
+    pixel differs, the readback is upside down or its bytes are swapped: see
+    `GpuComposeReadback`. Send the `gpuverify/` BMP files of any difference.
+  - Then a normal build on an Old 3DS at AUTO. Compare `prof gpu` with the old
+    `prof ppu` (11.4 ms mean, 23.2 ms worst), and read the late-frame lines and
+    the divider's engage and release lines. The target is the field at 60 Hz
+    with the divider off, and a title screen that does not stutter.
+  - The `gpu drew N of 600 frames` lines say which rules send frames back to
+    ppu.c. `wineffect` (a window region that turns a live effect off, as the
+    title's logo shine does) and `fade` are expected to be the common ones.
+  - The first console logs (2026-09-28, build `0708b53`): where the GPU drew,
+    the Old 3DS spent 2.5 ms a frame on it, against 11 to 14 ms for ppu.c, with
+    no late frames. But it drew almost nothing: the field went to ppu.c for
+    `window` (an inert effect-1 BLDCNT; `555ccce` fixed the rule) and every
+    battle for `objwin` (the OBJ window is on for the whole battle; now drawn
+    with stencil bit 7). The New 3DS showed no change, as expected: ppu.c is
+    on core 2 there and the frame was already a flat 16.7 ms. If one of them is most of the game, it is the next thing
+    to teach the compositor.
+  - On a New 3DS at GPU, the picture must look the same, and `ppu.wait` must
+    go to near zero on GPU frames.
 - **[UI_SKIN_PLAN.md](UI_SKIN_PLAN.md):** a bottom screen drawn from image
   assets. Not started.
 - **[UPSTREAM_FEATURES_PLAN.md](UPSTREAM_FEATURES_PLAN.md):** features that can

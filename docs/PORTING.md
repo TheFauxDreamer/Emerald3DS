@@ -331,15 +331,25 @@ Collected gotchas, most of which cost hours.
   `app.js`) and rank it WIN0 > WIN1 > OBJ > outside. The title screen's logo
   shine, the Pokédex's rotating ball and the catch and contest effects use the
   same window.
-  That makes four reference-inherited defects, and none of them could ever show
+- **A fifth: a window hid the backdrop.** Both renderers read bit 5 of a
+  window mask as "draw the backdrop here". On the GBA that bit only turns the
+  colour effects on or off; the backdrop is under every pixel. Where the bit
+  was clear, the old frame's pixels stayed. The title screen's logo shine sets
+  WINOUT to 0x1F and flashes palette 0 white and green, so the flash showed
+  only inside the shine and smeared behind it. Both now fill the backdrop
+  everywhere and use bit 5 only as the effects gate (`backdropLine`,
+  `clearScreen`).
+  That makes five reference-inherited defects, and none of them could ever show
   up in `ppu_validate.sh`, because it measures agreement with the reference.
   **Byte-exact is not correct.** The first fix for the grass went to the window
   clamp, because the intro's per-scanline writes look like window values; they
   actually target `REG_BG3HOFS` (`sIntroScanlineParams16Bit`). Check which
   register a scanline effect drives before reasoning about its values.
-- **Some intro frames legitimately retain the previous frame's pixels** via
-  `winout` with no backdrop bit. A single-snapshot diff renders those black and
-  reports a false failure. Use old-vs-new A/B there.
+- **Only a blend onto the backdrop still reads the previous frame.** A
+  BLDCNT with the backdrop as the first target and effect 1 blends it with the
+  pixel that the old frame left. A single-snapshot diff of such a frame
+  reports a false failure; use old-vs-new A/B there. Before the fifth defect
+  above was fixed, frames whose WINOUT had no bit 5 did this too.
 - **Host benchmarks are not evidence.** Measure on the device.
 - **EWRAM and the SDK RAM region are both full.** New buffers go in
   `.ewram_top` or `.iwram_top`; see `memmap_emerald.ld`.

@@ -53,7 +53,8 @@ APP_BANNER_WAV  := meta/banner.wav
 # header, and gets the GBA region pointers at run time from ppu_set_memory().
 # Thus this port and the RP2350 port use the same byte-exact rasterizer.
 HOST_SRCS := host/main.c host/video.c host/audio.c host/save.c host/settings.c \
-             host/log.c host/io_thread.c host/achievements.c host/link.c
+             host/log.c host/io_thread.c host/achievements.c host/link.c \
+             host/gpu_compose.c
 OBJS      := $(patsubst host/%.c,$(BUILD)/%.o,$(HOST_SRCS)) $(BUILD)/ppu.o
 
 # This must be the same as ARCH in 3ds/build_objs.sh. If not, the game archive
@@ -93,6 +94,17 @@ CTR_PPU_THREAD ?= 1
 #   make -C 3ds CTR_PPU_PROFILE=1
 # Host-only, like CTR_PPU_THREAD: 3ds/build_objs.sh needs no matching flag.
 CTR_PPU_PROFILE ?= 0
+
+# Check the GPU compositor against ppu.c. Each frame that the GPU draws, ppu.c
+# draws too, and before the next frame 3ds/host/video.c compares the two
+# pictures. The log gets a line for the first difference in each scene, and
+# sdmc:/3ds/emerald3ds/gpuverify/ gets both pictures as BMP files. Every 600
+# frames a line gives the count. It costs ppu.c's time and a readback on each
+# frame, so it is off by default, and only for tests. Set RENDERER to GPU on
+# SETTINGS, or AUTO on an Old 3DS, or nothing is compared.
+#   make -C 3ds CTR_GPU_VERIFY=1
+# Host-only, like CTR_PPU_THREAD.
+CTR_GPU_VERIFY ?= 0
 
 # Each make run sets these again, so the boot log always shows the correct
 # build. The git description identifies the build. The timestamp shows the
@@ -134,10 +146,16 @@ CFLAGS   := $(ARCH) -g -Wall -O2 -fno-strict-aliasing -fomit-frame-pointer \
             -DCTR_BOOT_DIAG=$(CTR_BOOT_DIAG) \
             -DCTR_PPU_THREAD=$(CTR_PPU_THREAD) \
             -DCTR_PPU_PROFILE=$(CTR_PPU_PROFILE) \
+            -DCTR_GPU_VERIFY=$(CTR_GPU_VERIFY) \
             -DCTR_BUILD_STAMP='"$(BUILD_STAMP)"' \
             -DCTR_BUILD_ID='"$(BUILD_ID)"' \
             -D__3DS__ -I$(CTRULIB)/include -I$(PORTLIBS)/include -I.
 LDFLAGS  := $(ARCH) -specs=3dsx.specs -g -Wl,-Map,$(BUILD)/$(TARGET).map
+
+# Room in rp2350/ppu.c for the wide field's margins (CTR_WIDE_MARGIN in
+# 3ds/bridge.h). ppu.o and video.o must agree on it, so it is here, in the flags
+# of both. host/video.c checks it at compile time.
+CFLAGS   += -DPPU_MAX_MARGIN=16
 
 # rp2350/ppu.c guards its timers on PPU_PROFILE, which the rp2350 build uses
 # too, so the 3DS knob maps onto that name rather than renaming the guard.

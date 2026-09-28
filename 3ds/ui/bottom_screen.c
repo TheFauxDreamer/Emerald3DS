@@ -932,10 +932,10 @@ void CtrBottomUpdate(const CtrTouchState *touch)
     {
         UiQuickBallTouch(touch);
     }
-    // A tap on the tab bar switches the view. Touches above it go to the active
-    // view. Act on release, so a touch that slides off a tab does not trigger
-    // it.
-    else if (touch != NULL && touch->justReleased && touch->y >= UI_CONTENT_H)
+    // A tap on the tab bar (or the rail) switches the view. Other touches go
+    // to the active view. Act on release, so a touch that slides off a tab
+    // does not trigger it.
+    else if (touch != NULL && touch->justReleased && UI_TOUCH_IN_NAV(touch))
     {
         u8 tab = UiNavHit(touch);
 
@@ -946,7 +946,7 @@ void CtrBottomUpdate(const CtrTouchState *touch)
         if (tab < UI_TAB_COUNT && (tab != sTab || UiViewTop() != UI_VIEW_NONE))
             LeaveTab(tab);
     }
-    else if (touch != NULL && touch->y < UI_CONTENT_H)
+    else if (touch != NULL && !UI_TOUCH_IN_NAV(touch))
     {
         switch (sTab)
         {

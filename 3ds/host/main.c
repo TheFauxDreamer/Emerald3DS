@@ -134,7 +134,7 @@ static void sample_touch(CtrTouchState *t)
 // the build that crashes.
 void CtrTraceHex(const char *label, unsigned int value)
 {
-    CtrLog("emerald3ds: %s = %08X\n", label, value);
+    CtrLogWarn("emerald3ds: %s = %08X\n", label, value);
 }
 
 #if CTR_BOOT_DIAG
@@ -476,6 +476,7 @@ static uint8_t sFollowerWho;        // CTR_FOLLOWER_*
 static uint8_t sFollowerBobOff;
 static uint8_t sFollowerPokeBall;
 static uint8_t sDayCareYard;
+static uint8_t sRematchMarksOff;
 static uint16_t sNavConfig;
 
 // The last ball thrown, as a raw item id. There is no range check here: the
@@ -683,6 +684,26 @@ void Ctr3dsSetDayCareYard(int on)
 int Ctr3dsGetDayCareYard(void)
 {
     return sDayCareYard;
+}
+
+void Ctr3dsApplyRematchMarksOff(int on)
+{
+    sRematchMarksOff = on ? 1 : 0;
+}
+
+void Ctr3dsSetRematchMarksOff(int on)
+{
+    int before = sRematchMarksOff;
+
+    Ctr3dsApplyRematchMarksOff(on);
+
+    if (sRematchMarksOff != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetRematchMarksOff(void)
+{
+    return sRematchMarksOff;
 }
 
 void Ctr3dsApplyNavConfig(int config)
@@ -1123,7 +1144,7 @@ int main(int argc, char **argv)
     // port failed later" look the same. See 3ds/host/log.c. Do not use __DATE__
     // and __TIME__: they come from the last compile of this file, so they can
     // be stale. CTR_BUILD_STAMP is new on each build.
-    CtrLog("emerald3ds: boot (%s)\n", CTR_BUILD_STAMP);
+    CtrLogBoot(CTR_BUILD_STAMP);
 
     // This must come first: every VRAM, palette, OAM and register access in the
     // game uses this block.
@@ -1144,9 +1165,9 @@ int main(int argc, char **argv)
     CtrTrace("emerald3ds: save loaded\n");
 
     if (!CtrVideoInit()) {
-        // Use CtrLog, not CtrTrace. This failure ends the run, so it must be in
-        // a release build's log.
-        CtrLog("emerald3ds: FATAL CtrVideoInit failed\n");
+        // A warning, not a trace. This failure ends the run, so it must be in a
+        // release build's log.
+        CtrLogWarn("emerald3ds: FATAL CtrVideoInit failed\n");
         CtrVideoExit();
         return 1;
     }
