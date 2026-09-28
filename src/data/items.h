@@ -684,7 +684,7 @@ const struct Item gItems[] =
     {
         .name = _("LINKING CORD"),
         .itemId = ITEM_LINKING_CORD,
-        .price = 2100,
+        .price = 10000,
         .description = sLinkingCordDesc,
         .pocket = POCKET_ITEMS,
         .type = ITEM_USE_PARTY_MENU,
