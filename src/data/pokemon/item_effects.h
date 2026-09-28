@@ -284,6 +284,12 @@ const u8 gItemEffect_FireStone[6] = {
     [4] = ITEM4_EVO_STONE,
 };
 
+#if PLATFORM_3DS
+const u8 gItemEffect_LinkingCord[6] = {
+    [4] = ITEM4_EVO_STONE,
+};
+#endif
+
 const u8 gItemEffect_ThunderStone[6] = {
     [4] = ITEM4_EVO_STONE,
 };
@@ -433,6 +439,9 @@ const u8 *const gItemEffectTable[] =
     [ITEM_X_SPECIAL - ITEM_POTION]     = gItemEffect_XSpecial,
     [ITEM_SUN_STONE - ITEM_POTION]     = gItemEffect_SunStone,
     [ITEM_MOON_STONE - ITEM_POTION]    = gItemEffect_MoonStone,
+#if PLATFORM_3DS
+    [ITEM_LINKING_CORD - ITEM_POTION]  = gItemEffect_LinkingCord,
+#endif
     [ITEM_FIRE_STONE - ITEM_POTION]    = gItemEffect_FireStone,
     [ITEM_THUNDER_STONE - ITEM_POTION] = gItemEffect_ThunderStone,
     [ITEM_WATER_STONE - ITEM_POTION]   = gItemEffect_WaterStone,

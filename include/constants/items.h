@@ -74,6 +74,11 @@
 #define ITEM_03C 60
 #define ITEM_03D 61
 #define ITEM_03E 62
+
+#if PLATFORM_3DS
+// An unused slot. It is inside ITEM_HAS_EFFECT, which the evolution stone path needs.
+#define ITEM_LINKING_CORD ITEM_034
+#endif
 #define ITEM_HP_UP 63
 #define ITEM_PROTEIN 64
 #define ITEM_IRON 65

@@ -3489,6 +3489,10 @@ extern const u32 gItemIcon_MoonStone[];
 extern const u32 gItemIconPalette_MoonStone[];
 extern const u32 gItemIcon_FireStone[];
 extern const u32 gItemIconPalette_FireStone[];
+#if PLATFORM_3DS
+extern const u32 gItemIcon_LinkingCord[];
+extern const u32 gItemIconPalette_LinkingCord[];
+#endif
 extern const u32 gItemIcon_ThunderStone[];
 extern const u32 gItemIconPalette_ThunderStone[];
 extern const u32 gItemIcon_WaterStone[];

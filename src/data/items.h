@@ -679,6 +679,18 @@ const struct Item gItems[] =
         .fieldUseFunc = ItemUseOutOfBattle_CannotUse,
     },
 
+#if PLATFORM_3DS
+    [ITEM_LINKING_CORD] =
+    {
+        .name = _("LINKING CORD"),
+        .itemId = ITEM_LINKING_CORD,
+        .price = 2100,
+        .description = sLinkingCordDesc,
+        .pocket = POCKET_ITEMS,
+        .type = ITEM_USE_PARTY_MENU,
+        .fieldUseFunc = ItemUseOutOfBattle_EvolutionStone,
+    },
+#else
     [ITEM_034] =
     {
         .name = _("????????"),
@@ -689,6 +701,7 @@ const struct Item gItems[] =
         .type = ITEM_USE_BAG_MENU,
         .fieldUseFunc = ItemUseOutOfBattle_CannotUse,
     },
+#endif
 
     [ITEM_035] =
     {
