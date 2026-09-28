@@ -477,6 +477,7 @@ static uint8_t sFollowerBobOff;
 static uint8_t sFollowerPokeBall;
 static uint8_t sDayCareYard;
 static uint8_t sRematchMarksOff;
+static uint8_t sUiRail;
 static uint16_t sNavConfig;
 
 // The last ball thrown, as a raw item id. There is no range check here: the
@@ -704,6 +705,26 @@ void Ctr3dsSetRematchMarksOff(int on)
 int Ctr3dsGetRematchMarksOff(void)
 {
     return sRematchMarksOff;
+}
+
+void Ctr3dsApplyUiRail(int on)
+{
+    sUiRail = on ? 1 : 0;
+}
+
+void Ctr3dsSetUiRail(int on)
+{
+    int before = sUiRail;
+
+    Ctr3dsApplyUiRail(on);
+
+    if (sUiRail != before)
+        CtrSettingsMarkDirty();
+}
+
+int Ctr3dsGetUiRail(void)
+{
+    return sUiRail;
 }
 
 void Ctr3dsApplyNavConfig(int config)

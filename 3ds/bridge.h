@@ -362,6 +362,11 @@ int  Ctr3dsGetDayCareYard(void);
 void Ctr3dsSetRematchMarksOff(int on);
 int  Ctr3dsGetRematchMarksOff(void);
 
+// The bottom screen's LAYOUT: zero is the nav bar along the bottom, nonzero is
+// the rail on the right (3ds/ui/ui_shell.h). The value is for the console.
+void Ctr3dsSetUiRail(int on);
+int  Ctr3dsGetUiRail(void);
+
 // The bottom screen's nav bar: which tab is in each slot, and whether the
 // labels show. A raw 16-bit value for the console. Its bits are defined on the
 // game side (3ds/ui/ui_navbar.c), which also checks it. Zero is the default.

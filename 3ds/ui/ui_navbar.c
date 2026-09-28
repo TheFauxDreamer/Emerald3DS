@@ -318,28 +318,36 @@ void UiNavReset(void)
 
 // -------------------------------------------------------------------- bar ---
 
-#if CTR_UI_RAIL
-// The rail: five slots of 48px, top to bottom, all as wide as the rail.
+// The rail: five slots of 48px, top to bottom, all as wide as the rail. The
+// bar: HOME wider, in the center.
 #define RAIL_SLOT_H  (CTR_BOTTOM_HEIGHT / UI_NAV_SLOTS)
 
-static int SlotX(u32 slot) { (void)slot; return UI_CONTENT_W; }
-static int SlotW(u32 slot) { (void)slot; return UI_RAIL_W; }
-static int SlotY(u32 slot) { return (int)slot * RAIL_SLOT_H; }
-static int SlotH(u32 slot) { (void)slot; return RAIL_SLOT_H; }
-#else
 static int SlotX(u32 slot)
 {
+    if (UiRailOn())
+        return UI_CONTENT_W;
+
     return (int)slot * SLOT_W + (slot > UI_NAV_HOME_SLOT ? HOME_W - SLOT_W : 0);
 }
 
 static int SlotW(u32 slot)
 {
+    if (UiRailOn())
+        return UI_RAIL_W;
+
     return slot == UI_NAV_HOME_SLOT ? HOME_W : SLOT_W;
 }
 
-static int SlotY(u32 slot) { (void)slot; return UI_CONTENT_H; }
-static int SlotH(u32 slot) { (void)slot; return UI_TABBAR_H; }
-#endif
+static int SlotY(u32 slot)
+{
+    return UiRailOn() ? (int)slot * RAIL_SLOT_H : UI_CONTENT_H;
+}
+
+static int SlotH(u32 slot)
+{
+    (void)slot;
+    return UiRailOn() ? RAIL_SLOT_H : UI_TABBAR_H;
+}
 
 void UiNavDraw(u8 activeTab)
 {

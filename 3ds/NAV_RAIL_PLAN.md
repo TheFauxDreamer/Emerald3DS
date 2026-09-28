@@ -13,20 +13,27 @@ is removed; only positions change.
 | Nav | 320x48 along the bottom, 4 x 60 + HOME 80 | 64x240 on the right, 5 slots of 48 |
 | Content | 320x192 (40 x 24 tiles) | 256x240 (32 x 30 tiles), the same pixel count |
 
-`CTR_UI_RAIL` (3ds/build_objs.sh, default 0) selects the layout, and
-`3ds/ui/ui_shell.h` gives `UI_CONTENT_W`, `UI_CONTENT_H` and `UI_RAIL_W` for
-it. With 0 every file must preprocess to the same code as before its stage.
-With 1, a tab that has not moved yet loses its right 64px under the rail (the
+The LAYOUT setting selects the layout at runtime. It is the BAR / RAIL button
+on the NAV BAR page (SETTINGS > NAV BAR), and settings.bin v18 keeps it. The
+default is BAR. `UiRailOn()` in `3ds/ui/ui_shell.h` reads it, and
+`UI_CONTENT_W`, `UI_CONTENT_H` and `UI_RAIL_W` follow it. A change shows at the
+next paint, because each paint clears the screen and draws the tab and the nav.
+With RAIL, a tab that has not moved yet loses its right 64px under the rail (the
 shell draws the rail last), so each intermediate build still works.
+
+Each value that differs is `(UiRailOn() ? rail : bar)`. The bar branch keeps
+the value from before the rail.
 
 ## Stages
 
 1. **The switch, the rail and touch routing.** Done: ui_shell.h, ui_navbar.c
    (slots from `SlotX/SlotY/SlotW/SlotH`), bottom_screen.c
-   (`UI_TOUCH_IN_NAV`), build_objs.sh.
-2. **One tab per commit**, each with a 256x240 layout behind the flag. The
+   (`UI_TOUCH_IN_NAV`). The compile-time `CTR_UI_RAIL` was then replaced by
+   the LAYOUT setting.
+2. **One tab per commit**, each with a 256x240 layout behind `UiRailOn()`. The
    list below is the order.
-3. **Flip the default** to 1, then delete the bar layout constants. Update
+3. **Make RAIL the default**, then remove the LAYOUT setting and the bar
+   branch of each value. Leave the settings.bin byte unused. Update
    SECOND_SCREEN_CHEATSHEET.md ("Adding a tab", the layout sections), the
    README and the ROADMAP.
 
@@ -59,6 +66,7 @@ most coordinates are literals beside them.
 ## Rules
 
 - A primary button or rail slot stays at or above the 53px finger floor.
-- Game side only (3ds/ui/, 3ds/build_objs.sh). No change in src/.
-- Check each commit with the clang recipe at `CTR_UI_RAIL` 0 and 1, and
-  compare the flag-0 preprocessed text with HEAD.
+- Game side only (3ds/ui/). No change in src/.
+- Check each commit with the clang recipe. In the diff, the bar branch of each
+  new `UiRailOn()` value must be the old value. Test both layouts on the
+  console with the LAYOUT button.
