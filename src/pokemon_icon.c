@@ -1190,7 +1190,16 @@ const u8 *GetMonIconTiles(u16 species, bool32 handleDeoxys)
     const u8 *iconSprite = gMonIconTable[species];
     if (species == SPECIES_DEOXYS && handleDeoxys == TRUE)
     {
+#ifdef UBFIX
+        // UB: the offset reads past the end of gMonIcon_Deoxys (0x400 bytes).
+        // The GBA link puts gMonIcon_DeoxysSpeed there. The 3DS build puts each
+        // array in its own section, so other data is there, and the icon is
+        // corrupt. Use the array by name.
+        extern const u8 gMonIcon_DeoxysSpeed[];
+        iconSprite = gMonIcon_DeoxysSpeed;
+#else
         iconSprite = (const u8 *)(0x400 + (u32)iconSprite); // use the specific Deoxys form icon (Speed in this case)
+#endif
     }
     return iconSprite;
 }
