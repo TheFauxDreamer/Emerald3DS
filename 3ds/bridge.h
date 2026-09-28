@@ -233,8 +233,9 @@ int  Ctr3dsGetRenderer(void);
 // At WIDE, the top screen shows the GBA picture at 1.5x, as 1.5X does. In the
 // field it also shows CTR_WIDE_MARGIN more GBA pixels on each side: 272x160 at
 // 1.5x is 408x240, so 4 screen pixels go past each edge. Menus, battles and
-// every other screen stay 240 wide, and the margins are then black, exactly as
-// at 1.5X. The 240 pixels in the middle are always the GBA's own.
+// every other screen stay 240 wide, and video.c stretches them to the same 408
+// screen pixels (13% wider), so no screen has black bars. In the field the 240
+// pixels in the middle are always the GBA's own.
 //
 // Where the margins come from: the side maps of src/field_camera.c for BG1-3,
 // sprites as they are placed, and window edges extended (ppu_set_wide in
