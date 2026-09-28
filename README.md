@@ -446,6 +446,10 @@ them.
 - **[rh-hideout/pokeemerald-expansion](https://github.com/rh-hideout/pokeemerald-expansion)**:
   the LEVEL CAP values come from its `src/caps.c`, and it carried the
   Krabby and Kingler sprites above.
+- **[ZallaxDev/pokeemerald-3Ds-dualscreen](https://github.com/ZallaxDev/pokeemerald-3Ds-dualscreen)**
+  by Daniel Cazalla (MIT). The GPU renderer (`3ds/host/gpu_compose.c`) uses
+  the design of its compositor from release v0.1.1: a tile atlas with palette
+  versions, and text backgrounds kept in textures that change cell by cell.
 
 **Tools and libraries for the 3DS build**
 
