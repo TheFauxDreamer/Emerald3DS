@@ -621,7 +621,9 @@ void SE12PanpotControl(s8 pan)
 
 bool8 IsSEPlaying(void)
 {
-#if WASM || RP2350
+// The 3DS runs the original m4a, so the status is real. Evolution waits for
+// SE_EXP to start (EVOSTATE_RESTORE_SCREEN), and FALSE here stops it forever.
+#if WASM || (RP2350 && !PLATFORM_3DS)
     return FALSE;
 #else
     if ((gMPlayInfo_SE1.status & MUSICPLAYER_STATUS_PAUSE) && (gMPlayInfo_SE2.status & MUSICPLAYER_STATUS_PAUSE))
@@ -643,7 +645,7 @@ bool8 IsBGMPlaying(void)
 
 bool8 IsSpecialSEPlaying(void)
 {
-#if WASM || RP2350
+#if WASM || (RP2350 && !PLATFORM_3DS)
     return FALSE;
 #else
     if (gMPlayInfo_SE3.status & MUSICPLAYER_STATUS_PAUSE)
