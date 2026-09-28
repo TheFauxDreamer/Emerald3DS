@@ -1,6 +1,6 @@
 # The NULL dereference crashes, and how to find the rest
 
-**Status: 15 crashes fixed, the sweep not yet run.** Written 2026-09-18 against
+**Status: 16 crashes fixed, the sweep not yet run.** Written 2026-09-18 against
 `ab0412e`. This is the record of one bug class that keeps stopping the console,
 what is fixed, what the tools can and cannot see, and what to do next.
 
@@ -80,8 +80,10 @@ The last shape now accounts for 5 of the 15 crashes. Watch for it.
 | `ab0412e` | `CB2_CheckPlayAgainLocal` and `Link` tails | finished a Berry Blender session |
 | `ab0412e` | `CB2_FreeTradeAnim` tail | finished any trade |
 | `ab0412e` | `CB2_InGameTrade` tail | finished an NPC trade |
+| `0f65210` | `GetItemEffectType`, from the BAG tab | used a Super Repel |
 
-The first 8 were each found by a player. The last 7 were found by reading.
+The first 8 were each found by a player. The next 7 were found by reading.
+The last one was found by a player.
 
 Three of these came from one file, `src/trade.c`, through three different
 reader shapes. One fix in a file does not clear the file.
