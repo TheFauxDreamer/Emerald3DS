@@ -101,8 +101,8 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define P2_SORT_Y       149
 #define P2_SORT_LABEL_X 16
 
-// Page 3's grid: check rows at a 30px pitch from y 30. Four rows end at y 146,
-// and the interior ends at y 183. A fifth row fits.
+// Page 3's grid: check rows at a 30px pitch from y 30. Five rows end at y 176,
+// and the interior ends at y 183. The page is full.
 #define P3_ROW_PITCH  30
 #define P3_ROW_Y(i)   (30 + (i) * P3_ROW_PITCH)
 
@@ -523,6 +523,7 @@ enum {
     P3_QUICK_BALL,
     P3_BATTLE_ANIM,
     P3_DAY_CARE,
+    P3_REMATCH_MARKS,
 };
 
 static void DrawPage3(void)
@@ -559,6 +560,11 @@ static void DrawPage3(void)
     // Route 117, because the yard objects are made at map load.
     DrawCheckRow(P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H, "DAY CARE",
                  "Pokemon in the yard", Ctr3dsGetDayCareYard());
+
+    // The red REMATCH dots on MAP, with their key and caption note. The roamer
+    // and the outbreak keep their marks.
+    DrawCheckRow(P3_ROW_Y(P3_REMATCH_MARKS), CHK_ROW_H, "REMATCHES",
+                 "red dots on MAP", !Ctr3dsGetRematchMarksOff());
 }
 
 // ---- PAGE 4: the follower --------------------------------------------------
@@ -1254,6 +1260,8 @@ static void TouchPage3(const CtrTouchState *t)
         Ctr3dsSetBattleAnimOff(!Ctr3dsGetBattleAnimOff());
     else if (HitCheckRow(t, P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H))
         Ctr3dsSetDayCareYard(!Ctr3dsGetDayCareYard());
+    else if (HitCheckRow(t, P3_ROW_Y(P3_REMATCH_MARKS), CHK_ROW_H))
+        Ctr3dsSetRematchMarksOff(!Ctr3dsGetRematchMarksOff());
     else
         return;
 
