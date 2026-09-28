@@ -403,8 +403,8 @@ static int ensure_uds(void)
     CtrLog("emerald3ds: link udsInit\n");
     rc = udsInit(LINK_SHAREDMEM, NULL);
     if (R_FAILED(rc)) {
-        CtrLog("emerald3ds: link udsInit failed rc=0x%08lX\n",
-               (unsigned long)rc);
+        CtrLogWarn("emerald3ds: link udsInit failed rc=0x%08lX\n",
+                   (unsigned long)rc);
         return 0;
     }
 
@@ -518,7 +518,8 @@ static void do_host(void)
     rc = udsCreateNetwork(&sNetwork, LINK_PASSPHRASE, sizeof(LINK_PASSPHRASE),
                           &sBind, LINK_CHANNEL, LINK_RECVBUF);
     if (R_FAILED(rc)) {
-        CtrLog("emerald3ds: link host failed rc=0x%08lX\n", (unsigned long)rc);
+        CtrLogWarn("emerald3ds: link host failed rc=0x%08lX\n",
+                   (unsigned long)rc);
         publish_state(CTR_LINK_FAILED, 0);
         return;
     }
@@ -562,8 +563,8 @@ static void do_scan(void)
         // that omission is why a dead UDS session could only be identified
         // from the host path: a 15 ms "scan" says something is wrong, and
         // rc=0xC8A113EA says exactly what.
-        CtrLog("emerald3ds: link scan failed after %u ms rc=0x%08lX\n",
-               CtrTimeNowMs() - t0, (unsigned long)rc);
+        CtrLogWarn("emerald3ds: link scan failed after %u ms rc=0x%08lX\n",
+                   CtrTimeNowMs() - t0, (unsigned long)rc);
         return;
     }
 
@@ -631,7 +632,8 @@ static void do_join(int index)
                            &sBind, UDS_BROADCAST_NETWORKNODEID,
                            UDSCONTYPE_Client, LINK_CHANNEL, LINK_RECVBUF);
     if (R_FAILED(rc)) {
-        CtrLog("emerald3ds: link join failed rc=0x%08lX\n", (unsigned long)rc);
+        CtrLogWarn("emerald3ds: link join failed rc=0x%08lX\n",
+                   (unsigned long)rc);
         publish_state(CTR_LINK_FAILED, 0);
         return;
     }
@@ -1852,11 +1854,11 @@ void Ctr3dsLinkLogError(unsigned int status, int sendCount, int recvCount)
                       sPeerSeen[p] ? (long)sPeerNewest[p] : -1L);
     }
 
-    CtrLog("emerald3ds: link error status=%08X send=%d recv=%d missrun=%u "
-           "frame=%lu players=%u last=%s%s\n",
-           status, sendCount, recvCount, sMissRun, (unsigned long)sFrame,
-           (unsigned)st.playerCount, kMissWhy[why],
-           (n > 0) ? buf : " no peers on the network");
+    CtrLogWarn("emerald3ds: link error status=%08X send=%d recv=%d missrun=%u "
+               "frame=%lu players=%u last=%s%s\n",
+               status, sendCount, recvCount, sMissRun, (unsigned long)sFrame,
+               (unsigned)st.playerCount, kMissWhy[why],
+               (n > 0) ? buf : " no peers on the network");
 }
 
 // A link fault that does NOT pass TrySetLinkErrorBuffer().

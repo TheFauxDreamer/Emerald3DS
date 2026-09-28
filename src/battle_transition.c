@@ -1053,6 +1053,15 @@ bool8 IsBattleTransitionDone(void)
     }
 }
 
+#if PLATFORM_3DS
+// For the wide overworld (src/field_camera.c): a transition covers only the
+// GBA screen, so the field must not show beside it.
+bool8 CtrBattleTransitionActive(void)
+{
+    return FindTaskIdByFunc(Task_BattleTransition) != TASK_NONE;
+}
+#endif
+
 static void LaunchBattleTransitionTask(u8 transitionId)
 {
     u8 taskId = CreateTask(Task_BattleTransition, 2);

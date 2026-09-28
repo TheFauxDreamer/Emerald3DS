@@ -17,6 +17,7 @@ reasoning behind the decisions already taken.
 - [Why it cannot be a .3dsx](#why-it-cannot-be-a-3dsx)
 - [Audio](#audio)
 - [Bring-up and debugging](#bring-up-and-debugging)
+- [The wide field](#the-wide-field)
 - [What a bottom-screen repaint costs](#what-a-bottom-screen-repaint-costs)
 - [Repository layout](#repository-layout)
 
@@ -269,9 +270,13 @@ and writes a line only when it overran, so the log names the call rather than
 the symptom. The stage profiler measures the frame loop itself; see below.
 
 `CTR_DEBUG_MENU` in `3ds/bridge.h` gates all of it at the file level. A release
-build keeps the timing but never creates `sdmc:/3ds/emerald3ds/log.txt`, because
-a build handed to someone else should not write to their SD card, and everything
-in that file is written for whoever is developing the port.
+build keeps the timing but writes only warnings to
+`sdmc:/3ds/emerald3ds/log.txt`, because a build handed to someone else should
+not write to their SD card in a normal session. A warning (`CtrLogWarn`) is a
+fault the player must be able to report: a missing DSP firmware dump, a failed
+settings or save-side write, a link failure, a NULL-pointer trace. The file is
+made at the first warning, after the boot line that names the build. A healthy
+session makes no file, and each boot removes the file of the last one.
 `svcOutputDebugString` survives either way, so an emulator still shows the same
 lines.
 
@@ -283,6 +288,36 @@ sample after a quiet spell, which is exactly the repaint a battle overlay just
 caused, so its card write used to land on the one frame already over budget.
 Boot, before the thread starts, is still written synchronously, and a crash can
 lose the last frame or so of lines.
+
+## The wide field
+
+The WIDE top-screen scale is 1.5x, and in the overworld the rasteriser also
+draws 16 GBA pixels on each side: 272x160, which at 1.5x is 408x240, 4 screen
+pixels past the panel. The game's layout does not change. The player, text
+boxes and menus stay where the GBA put them, and the 240 pixels in the middle
+always come from VRAM, so they are the GBA's own picture.
+
+The margins need map data that the GBA never had. The field's BG1-3 are 32x32
+tile rings that hold 16 metatiles across, and the wide view needs 19 (from 2
+left of `pos.x` to 16 right of it). `src/field_camera.c` keeps a second ring
+for each, 64 tiles across, behind `#if PLATFORM_3DS`: every metatile it draws
+into the GBA ring also goes there, and it draws the margin metatiles there
+only. Its columns follow the GBA ring's rule with a period of 64, so
+`rp2350/ppu.c` finds the column of margin pixel x at
+`(x + BGxHOFS + delta) & 511`, where `delta` (0 or 256) is the difference
+between the camera's pixel offset counted mod 512 and mod 256.
+
+`rp2350/ppu.c` draws margins only when it is built with `PPU_MAX_MARGIN` above
+0, which only `3ds/Makefile` does. At 0 the RP2350 build compiles to the same
+code as before. In the margins, a BG without a side map (BG0, the text boxes)
+does not draw, sprites draw as on a wider screen, and a window edge at 0 or 240
+continues to the edge of the margin. A battle transition, a screen that moves
+BG1-3's map bases, and every callback but the overworld's show 240 wide with
+black margins, exactly as 1.5x does.
+
+A wide frame needs a 512-wide texture, so it has its own, and its upload moves
+twice the bytes of a 240-wide frame. Every other frame keeps the 256-wide
+texture.
 
 ## What a bottom-screen repaint costs
 

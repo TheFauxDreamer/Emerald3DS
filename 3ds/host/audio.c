@@ -167,9 +167,10 @@ static void fix_thread_priority(void)
     if (before < NDSP_THREAD_PRIO) {
         rc = svcSetThreadPriority(CUR_THREAD_HANDLE, MAIN_THREAD_PRIO);
         if (R_FAILED(rc)) {
-            CtrLog("emerald3ds: main thread priority 0x%02lX outranks NDSP's "
-                   "0x%02X and could not be lowered (rc=0x%08lX)\n",
-                   (unsigned long)before, NDSP_THREAD_PRIO, (unsigned long)rc);
+            CtrLogWarn("emerald3ds: main thread priority 0x%02lX outranks "
+                       "NDSP's 0x%02X and could not be lowered (rc=0x%08lX)\n",
+                       (unsigned long)before, NDSP_THREAD_PRIO,
+                       (unsigned long)rc);
             return;
         }
         svcGetThreadPriority(&after, CUR_THREAD_HANDLE);
@@ -192,13 +193,11 @@ void CtrAudioInit(void)
         // warning, but it must be visible. Otherwise it looks like "the port
         // has no sound".
         //
-        // In a debug build, it goes to sdmc:/3ds/emerald3ds/log.txt and to the
-        // emulator's debug output (3ds/host/log.c). A release build writes no
-        // file. On a console, the Limitations section of README.md answers
-        // this.
-        CtrLog("emerald3ds: audio disabled - ndspInit failed (rc=0x%08lX). "
-               "Missing sdmc:/3ds/dspfirm.cdc? Dump it with DSP1.\n",
-               (unsigned long)rc);
+        // It goes to sdmc:/3ds/emerald3ds/log.txt in every build, a release
+        // build too, and to the emulator's debug output (3ds/host/log.c).
+        CtrLogWarn("emerald3ds: audio disabled - ndspInit failed (rc=0x%08lX). "
+                   "Missing sdmc:/3ds/dspfirm.cdc? Dump it with DSP1.\n",
+                   (unsigned long)rc);
         return;
     }
 
@@ -233,8 +232,8 @@ void CtrAudioInit(void)
     for (int i = 0; i < NUM_WAVEBUFS; i++) {
         sBlock[i] = linearAlloc(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));
         if (sBlock[i] == NULL) {
-            CtrLog("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
-                   (int)(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t)));
+            CtrLogWarn("emerald3ds: audio disabled - linearAlloc(%d) failed\n",
+                       (int)(BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t)));
             return;
         }
         memset(sBlock[i], 0, BLOCK_SAMPLES * AUDIO_CHANNELS * sizeof(int16_t));

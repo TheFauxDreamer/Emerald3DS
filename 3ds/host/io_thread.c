@@ -76,7 +76,8 @@ void CtrIoInit(void)
     // Always log which path started, like the other such lines. Without it,
     // "the writer runs" and "all writes are still direct" give the same log.
     if (sThread == NULL) {
-        CtrLog("emerald3ds: io thread not started; SD writes stay synchronous\n");
+        CtrLogWarn("emerald3ds: io thread not started; "
+                   "SD writes stay synchronous\n");
         return;
     }
 

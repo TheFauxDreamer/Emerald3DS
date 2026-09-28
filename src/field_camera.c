@@ -11,6 +11,11 @@
 #include "rotating_gate.h"
 #include "sprite.h"
 #include "text.h"
+#if PLATFORM_3DS
+#include "main.h"
+#include "battle_transition.h"
+#include "../3ds/bridge.h"
+#endif
 
 EWRAM_DATA bool8 gUnusedBikeCameraAheadPanback = FALSE;
 
@@ -32,6 +37,15 @@ static void DrawWholeMapViewInternal(int, int, const struct MapLayout *);
 static void DrawMetatileAt(const struct MapLayout *, u16, int, int);
 static void DrawMetatile(s32, const u16 *, u16);
 static void CameraPanningCB_PanAhead(void);
+#if PLATFORM_3DS
+static void CtrWideReset(void);
+static void CtrWideAddTileX(u32 xOffset);
+static void CtrWideAddPixelX(u32 xOffset);
+static void CtrWideDrawMetatile(s32 metatileLayerType, const u16 *tiles, int x, int y);
+static bool8 CtrWideDrawMapMetatileAt(const struct MapLayout *mapLayout, int x, int y);
+static void CtrWideDrawColumn(const struct MapLayout *mapLayout, int dx);
+static void CtrWideDrawRow(const struct MapLayout *mapLayout, int dy);
+#endif
 
 static struct FieldCameraOffset sFieldCameraOffset;
 static s16 sHorizontalCameraPan;
@@ -50,6 +64,9 @@ static void ResetCameraOffset(struct FieldCameraOffset *cameraOffset)
     cameraOffset->xPixelOffset = 0;
     cameraOffset->yPixelOffset = 0;
     cameraOffset->copyBGToVRAM = TRUE;
+#if PLATFORM_3DS
+    CtrWideReset();
+#endif
 }
 
 static void AddCameraTileOffset(struct FieldCameraOffset *cameraOffset, u32 xOffset, u32 yOffset)
@@ -58,12 +75,18 @@ static void AddCameraTileOffset(struct FieldCameraOffset *cameraOffset, u32 xOff
     cameraOffset->xTileOffset %= 32;
     cameraOffset->yTileOffset += yOffset;
     cameraOffset->yTileOffset %= 32;
+#if PLATFORM_3DS
+    CtrWideAddTileX(xOffset);
+#endif
 }
 
 static void AddCameraPixelOffset(struct FieldCameraOffset *cameraOffset, u32 xOffset, u32 yOffset)
 {
     cameraOffset->xPixelOffset += xOffset;
     cameraOffset->yPixelOffset += yOffset;
+#if PLATFORM_3DS
+    CtrWideAddPixelX(xOffset);
+#endif
 }
 
 void ResetFieldCamera(void)
@@ -94,6 +117,12 @@ void GetCameraOffsetWithPan(s16 *x, s16 *y)
 void DrawWholeMapView(void)
 {
     DrawWholeMapViewInternal(gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, gMapHeader.mapLayout);
+#if PLATFORM_3DS
+    // The metatiles of the wide view that the 16x16 above does not hold.
+    CtrWideDrawColumn(gMapHeader.mapLayout, -2);
+    CtrWideDrawColumn(gMapHeader.mapLayout, -1);
+    CtrWideDrawColumn(gMapHeader.mapLayout, 16);
+#endif
     sFieldCameraOffset.copyBGToVRAM = TRUE;
 }
 
@@ -132,6 +161,20 @@ static void RedrawMapSlicesForCameraUpdate(struct FieldCameraOffset *cameraOffse
         RedrawMapSliceNorth(cameraOffset, mapLayout);
     if (y < 0)
         RedrawMapSliceSouth(cameraOffset, mapLayout);
+#if PLATFORM_3DS
+    // The wide view's new edges. A step east (x > 0) brings in the metatile
+    // column 16 to the right of pos.x, a step west the column 2 to the left.
+    // A new row gets its margin metatiles here; the slices above drew the rest
+    // of it.
+    if (x > 0)
+        CtrWideDrawColumn(mapLayout, 16);
+    if (x < 0)
+        CtrWideDrawColumn(mapLayout, -2);
+    if (y > 0)
+        CtrWideDrawRow(mapLayout, 14);
+    if (y < 0)
+        CtrWideDrawRow(mapLayout, 0);
+#endif
     cameraOffset->copyBGToVRAM = TRUE;
 }
 
@@ -210,12 +253,21 @@ void CurrentMapDrawMetatileAt(int x, int y)
         DrawMetatileAt(gMapHeader.mapLayout, offset, x, y);
         sFieldCameraOffset.copyBGToVRAM = TRUE;
     }
+#if PLATFORM_3DS
+    else
+    {
+        CtrWideDrawMapMetatileAt(gMapHeader.mapLayout, x, y);
+    }
+#endif
 }
 
 void DrawDoorMetatileAt(int x, int y, u16 *tiles)
 {
     int offset = MapPosToBgTilemapOffset(&sFieldCameraOffset, x, y);
 
+#if PLATFORM_3DS
+    CtrWideDrawMetatile(METATILE_LAYER_TYPE_COVERED, tiles, x, y);
+#endif
     if (offset >= 0)
     {
         DrawMetatile(METATILE_LAYER_TYPE_COVERED, tiles, offset);
@@ -240,6 +292,9 @@ static void DrawMetatileAt(const struct MapLayout *mapLayout, u16 offset, int x,
         metatileId -= NUM_METATILES_IN_PRIMARY;
     }
     DrawMetatile(MapGridGetMetatileLayerTypeAt(x, y), metatiles + metatileId * NUM_TILES_PER_METATILE, offset);
+#if PLATFORM_3DS
+    CtrWideDrawMetatile(MapGridGetMetatileLayerTypeAt(x, y), metatiles + metatileId * NUM_TILES_PER_METATILE, x, y);
+#endif
 }
 
 static void DrawMetatile(s32 metatileLayerType, const u16 *tiles, u16 offset)
@@ -505,3 +560,197 @@ static void CameraPanningCB_PanAhead(void)
         }
     }
 }
+
+#if PLATFORM_3DS
+// ---- the wide overworld (3DS) ----------------------------------------------
+//
+// The WIDE top-screen scale shows 16 more pixels on each side of the field
+// (3ds/bridge.h, CTR_WIDE_MARGIN). The 32x32 tile rings of BG1-3 above hold 16
+// metatiles across, and the view then needs 19: from 2 left of pos.x to 16
+// right of it. Thus each ring has a copy here that is 64 tiles across, the
+// "side map". The PPU reads it only for the margins (ppu_set_wide in
+// rp2350/ppu.h). The 240 pixels in the middle still come from VRAM, so nothing
+// the GBA shows changes.
+//
+// The side map keeps the ring's rows, and its columns follow the same rule
+// with a period of 64: the column of a metatile is sCtrWideTileX + 2 * (x -
+// pos.x), where sCtrWideTileX is xTileOffset counted mod 64. Every metatile
+// that the code above draws is also drawn here. The margin metatiles are drawn
+// here only.
+
+#define CTR_WIDE_COLS   64
+#define CTR_WIDE_LEFT   (-2)    // metatiles, relative to pos.x
+#define CTR_WIDE_RIGHT  16
+
+static u16 sCtrWideMap[3][32 * CTR_WIDE_COLS];   // BG1, BG2, BG3
+static u8  sCtrWideTileX;    // xTileOffset, mod 64
+static u16 sCtrWidePixelX;   // xPixelOffset, mod 512
+
+static void CtrWideReset(void)
+{
+    sCtrWideTileX = 0;
+    sCtrWidePixelX = 0;
+}
+
+// The offsets are u32 because the callers pass a negative step as u32. The
+// masks keep the result right, as 2^32 is a multiple of 64 and of 512.
+static void CtrWideAddTileX(u32 xOffset)
+{
+    sCtrWideTileX = (sCtrWideTileX + xOffset) & (CTR_WIDE_COLS - 1);
+}
+
+static void CtrWideAddPixelX(u32 xOffset)
+{
+    sCtrWidePixelX = (sCtrWidePixelX + xOffset) & 0x1FF;
+}
+
+// The side-map index of the metatile at map position (x, y), or -1 when the
+// wide view does not hold it.
+static s32 CtrWideOffset(int x, int y)
+{
+    int dx = x - gSaveBlock1Ptr->pos.x;
+    int dy = y - gSaveBlock1Ptr->pos.y;
+    int col, row;
+
+    if (dx < CTR_WIDE_LEFT || dx > CTR_WIDE_RIGHT || dy < 0 || dy > 15)
+        return -1;
+
+    col = (sCtrWideTileX + dx * 2) & (CTR_WIDE_COLS - 1);
+    row = (sFieldCameraOffset.yTileOffset + dy * 2) & 31;
+    return row * CTR_WIDE_COLS + col;
+}
+
+// The same layer rules as DrawMetatile, into the side map.
+static void CtrWideDrawMetatile(s32 metatileLayerType, const u16 *tiles, int x, int y)
+{
+    static const u16 sBlank[4] = {0};
+    static const u16 sGarbage[4] = {0x3014, 0x3014, 0x3014, 0x3014};
+    const u16 *bg1, *bg2, *bg3;
+    s32 offset = CtrWideOffset(x, y);
+    int i;
+
+    if (offset < 0)
+        return;
+
+    switch (metatileLayerType)
+    {
+    case METATILE_LAYER_TYPE_SPLIT:
+        bg3 = tiles;
+        bg2 = sBlank;
+        bg1 = tiles + 4;
+        break;
+    case METATILE_LAYER_TYPE_COVERED:
+        bg3 = tiles;
+        bg2 = tiles + 4;
+        bg1 = sBlank;
+        break;
+    case METATILE_LAYER_TYPE_NORMAL:
+        bg3 = sGarbage;
+        bg2 = tiles;
+        bg1 = tiles + 4;
+        break;
+    default:
+        return;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        s32 at = offset + (i & 1) + (i >> 1) * CTR_WIDE_COLS;
+
+        sCtrWideMap[0][at] = bg1[i];
+        sCtrWideMap[1][at] = bg2[i];
+        sCtrWideMap[2][at] = bg3[i];
+    }
+}
+
+// DrawMetatileAt for the side map only.
+static bool8 CtrWideDrawMapMetatileAt(const struct MapLayout *mapLayout, int x, int y)
+{
+    u16 metatileId;
+    const u16 *metatiles;
+
+    if (CtrWideOffset(x, y) < 0)
+        return FALSE;
+
+    metatileId = MapGridGetMetatileIdAt(x, y);
+    if (metatileId > NUM_METATILES_TOTAL)
+        metatileId = 0;
+    if (metatileId < NUM_METATILES_IN_PRIMARY)
+    {
+        metatiles = mapLayout->primaryTileset->metatiles;
+    }
+    else
+    {
+        metatiles = mapLayout->secondaryTileset->metatiles;
+        metatileId -= NUM_METATILES_IN_PRIMARY;
+    }
+    CtrWideDrawMetatile(MapGridGetMetatileLayerTypeAt(x, y),
+                        metatiles + metatileId * NUM_TILES_PER_METATILE, x, y);
+    return TRUE;
+}
+
+// One metatile column, dx metatiles right of pos.x, over the 16 rows.
+static void CtrWideDrawColumn(const struct MapLayout *mapLayout, int dx)
+{
+    int dy;
+
+    for (dy = 0; dy < 16; dy++)
+        CtrWideDrawMapMetatileAt(mapLayout, gSaveBlock1Ptr->pos.x + dx,
+                                 gSaveBlock1Ptr->pos.y + dy);
+}
+
+// The margin metatiles of one row, dy metatiles below pos.y. The GBA ring's
+// slice drew the others, and those reached the side map through DrawMetatileAt.
+static void CtrWideDrawRow(const struct MapLayout *mapLayout, int dy)
+{
+    int dx;
+
+    for (dx = CTR_WIDE_LEFT; dx <= CTR_WIDE_RIGHT; dx++)
+    {
+        if (dx == 0)
+            dx = 16;   // 0 to 15 are the GBA ring's
+        CtrWideDrawMapMetatileAt(mapLayout, gSaveBlock1Ptr->pos.x + dx,
+                                 gSaveBlock1Ptr->pos.y + dy);
+    }
+}
+
+// Is this frame the field with the layout the side maps belong to? Menus and
+// cut scenes over the field keep it, because they draw on BG0 or on sprites.
+// A screen that takes over BG1-3 changes their map bases, and a battle
+// transition stays 240 wide, because it covers only the GBA screen.
+static bool8 CtrWideFieldShows(void)
+{
+    static const u8 sMapBase[4] = {0, 29, 28, 30};   // sOverworldBgTemplates
+    int bg;
+
+    if (gMain.callback2 != CB2_Overworld && gMain.callback2 != CB2_OverworldBasic)
+        return FALSE;
+    if (CtrBattleTransitionActive())
+        return FALSE;
+    if ((GetGpuReg(REG_OFFSET_DISPCNT) & 7) != DISPCNT_MODE_0)
+        return FALSE;
+
+    for (bg = 1; bg <= 3; bg++)
+    {
+        u16 cnt = GetGpuReg(REG_OFFSET_BG0CNT + bg * 2);
+
+        // 256x256, and the map base of the overworld template.
+        if ((cnt >> 14) != 0 || ((cnt >> 8) & 31) != sMapBase[bg])
+            return FALSE;
+    }
+    return TRUE;
+}
+
+void CtrWideFieldGet(CtrWideField *out)
+{
+    int bg;
+
+    out->active = Ctr3dsGetTopScale() == CTR_TOP_SCALE_WIDE && CtrWideFieldShows();
+    out->sideMap[0] = NULL;
+    for (bg = 1; bg <= 3; bg++)
+        out->sideMap[bg] = sCtrWideMap[bg - 1];
+    // A multiple of 256: the two counters move together, and the u8 one wraps
+    // at 256. See ppu_set_wide.
+    out->sideDelta = (u16)((sCtrWidePixelX - sFieldCameraOffset.xPixelOffset) & 0x1FF);
+}
+#endif

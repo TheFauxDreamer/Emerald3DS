@@ -22,6 +22,7 @@
 #include "constants/region_map_sections.h"
 #include "constants/species.h"
 
+#include "../bridge.h"                // Ctr3dsGetRematchMarksOff
 #include "ui_marks.h"
 
 static mapsec_u16_t MapSecOf(u8 mapGroup, u8 mapNum)
@@ -93,7 +94,8 @@ void UiMarksBuild(struct UiMarks *marks)
 
     memset(marks, 0, sizeof(*marks));
 
-    for (u32 i = 0; i < REMATCH_TABLE_ENTRIES; i++)
+    // REMATCHES off on EXTRAS: no dot, key row or caption note.
+    for (u32 i = 0; i < REMATCH_TABLE_ENTRIES && !Ctr3dsGetRematchMarksOff(); i++)
     {
         mapsec_u16_t mapSec;
 
@@ -120,9 +122,12 @@ u32 UiMarksKey(void)
     u32 key = 0;
     u8 group = 0, num = 0;
 
-    for (u32 i = 0; i < REMATCH_TABLE_ENTRIES; i++)
-        if (gSaveBlock1Ptr->trainerRematches[i] != 0)
-            key ^= (i + 1) * 2654435761u;
+    if (Ctr3dsGetRematchMarksOff())
+        key ^= 0x5BD1E995u;
+    else
+        for (u32 i = 0; i < REMATCH_TABLE_ENTRIES; i++)
+            if (gSaveBlock1Ptr->trainerRematches[i] != 0)
+                key ^= (i + 1) * 2654435761u;
 
     if (RoamerLocation(&group, &num))
         key ^= (0x10000u | ((u32)group << 8) | num) * 0x85EBCA6Bu;

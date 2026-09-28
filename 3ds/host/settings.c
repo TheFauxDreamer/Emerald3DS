@@ -64,7 +64,11 @@
 // - v15 uses the two padding bytes after dayCareYard for the bottom screen's
 //   nav bar: its four slots and the label switch. Same size. Older files have
 //   zero there, which is the default bar with labels.
-#define SETTINGS_VERSION 15
+// - v16 uses the first byte of pad2 for RENDERER. Same size. Older files have
+//   zero there, which is CTR_RENDERER_AUTO.
+// - v17 uses the next byte for the REMATCH MARKS switch. Same size. It stores
+//   OFF, so zero means "MAP marks rematches".
+#define SETTINGS_VERSION 17
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
@@ -147,7 +151,9 @@ struct CtrSettings {
     // zero.
     uint32_t clock;                    // the next lastUsed value
     uint8_t  count;                    // records in use, from rec[0]
-    uint8_t  pad2[3];
+    uint8_t  renderer;                 // CTR_RENDERER_*, added in v16
+    uint8_t  rematchMarksOff;          // added in v17
+    uint8_t  pad2[1];
     struct CtrSaveSettings rec[CTR_SETTINGS_SAVES];
 };
 
@@ -176,6 +182,8 @@ _Static_assert(sizeof(struct CtrSettings)
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
 extern void Ctr3dsApplyTopScale(int mode);
+extern int  Ctr3dsGetRenderer(void);
+extern void Ctr3dsApplyRenderer(int mode);
 extern int  Ctr3dsGetTurboBind(int button);
 extern void Ctr3dsApplyTurboBind(int button, int value);
 extern int  Ctr3dsGetShowAllTabs(void);
@@ -204,6 +212,8 @@ extern int  Ctr3dsGetQuickBallOff(void);
 extern void Ctr3dsApplyQuickBallOff(int on);
 extern int  Ctr3dsGetDayCareYard(void);
 extern void Ctr3dsApplyDayCareYard(int on);
+extern int  Ctr3dsGetRematchMarksOff(void);
+extern void Ctr3dsApplyRematchMarksOff(int on);
 extern int  Ctr3dsGetNavConfig(void);
 extern void Ctr3dsApplyNavConfig(int config);
 extern int  Ctr3dsGetBattleAnimOff(void);
@@ -498,10 +508,10 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // Files v11 to v15 have the same size. Their bytes for the later values
+    // Files v11 to v17 have the same size. Their bytes for the later values
     // are zero.
-    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
-        || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 16 || s.version == 15 || s.version == 14
+        || s.version == 13 || s.version == 12 || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -550,6 +560,11 @@ void CtrSettingsLoad(void)
     if (s.topScale < CTR_TOP_SCALE_COUNT)
         Ctr3dsApplyTopScale((int)s.topScale);
 
+    // Zero for a file older than v16, which is AUTO. Only v11 and later have
+    // the byte; an older file is a short read and leaves it zero.
+    if (s.renderer < CTR_RENDERER_COUNT)
+        Ctr3dsApplyRenderer((int)s.renderer);
+
     // Any byte that is not zero means on, so a bad value cannot be out of
     // range.
     Ctr3dsApplyShowAllTabs(s.showAllTabs != 0);
@@ -573,6 +588,9 @@ void CtrSettingsLoad(void)
     // Zero for a file older than v13, which means "off".
     Ctr3dsApplyDayCareYard(s.dayCareYard != 0);
 
+    // Zero for a file older than v17, which means "MAP marks rematches".
+    Ctr3dsApplyRematchMarksOff(s.rematchMarksOff != 0);
+
     // Zero for a file older than v15, which is the default bar. The game side
     // checks the value before it uses it.
     Ctr3dsApplyNavConfig(s.nav);
@@ -583,8 +601,8 @@ void CtrSettingsLoad(void)
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
-        || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 16 || s.version == 15
+        || s.version == 14 || s.version == 13 || s.version == 12 || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
@@ -614,6 +632,7 @@ static void settings_build(struct CtrSettings *s)
     s->magic    = SETTINGS_MAGIC;
     s->version  = SETTINGS_VERSION;
     s->topScale = (uint8_t)Ctr3dsGetTopScale();
+    s->renderer = (uint8_t)Ctr3dsGetRenderer();
     s->showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         s->turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
@@ -621,6 +640,7 @@ static void settings_build(struct CtrSettings *s)
     s->quickBallOff  = (uint8_t)(Ctr3dsGetQuickBallOff() ? 1 : 0);
     s->battleAnimOff = (uint8_t)(Ctr3dsGetBattleAnimOff() ? 1 : 0);
     s->dayCareYard   = (uint8_t)(Ctr3dsGetDayCareYard() ? 1 : 0);
+    s->rematchMarksOff = (uint8_t)(Ctr3dsGetRematchMarksOff() ? 1 : 0);
     s->nav           = (uint16_t)Ctr3dsGetNavConfig();
 
     for (int i = 0; i < CTR_AUDIO_DBG_COUNT; i++)
@@ -672,8 +692,8 @@ static void settings_put(const struct CtrSettings *s)
         // The log (log.c) uses the same method to get a line onto the card
         // before a crash.
         if (n != sizeof(*s) || fflush(f) != 0)
-            CtrLog("emerald3ds: settings write failed (%u/%u bytes)\n",
-                   (unsigned)n, (unsigned)sizeof(*s));
+            CtrLogWarn("emerald3ds: settings write failed (%u/%u bytes)\n",
+                       (unsigned)n, (unsigned)sizeof(*s));
     }
 
     elapsed = CtrTimeNowMs() - t0;

@@ -188,8 +188,11 @@ that is only on or off is a checkbox: tap the box or its name. A debug build
 opens its DEBUG page from a button on SETTINGS.
 
 *SETTINGS* changes nothing about how the game plays: fast-forward at 1x, 2x, 4x or
-8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height) or FILL
-(fills the panel, stretching 11%); and the four buttons a GBA has no use for (X,
+8x; top-screen size at 1x (pixel-perfect), 1.5x (fills the height), FILL
+(fills the panel, stretching 11%) or WIDE (1.5x, and in the overworld the
+field shows 16 more GBA pixels on each side, so it fills the panel with no
+stretch; menus and battles are stretched 13% to the same width); a renderer
+(AUTO, CPU or GPU); and the four buttons a GBA has no use for (X,
 Y, ZL, ZR) bindable to hold-for-speed or to the touch UI's modifier key. Screen
 size and bindings persist. Fast-forward deliberately resets each launch.
 
@@ -351,9 +354,10 @@ make -C 3ds                              # -> 3ds/emerald3ds.{cia,3ds}
 
 ## Limitations
 
-- **Audio needs a DSP firmware dump**, as above. It is also the one failure the
-  port cannot report: a shipping build writes no log file, and no build can ship
-  a DSP dump.
+- **Audio needs a DSP firmware dump**, as above. No build can ship one. When it
+  is missing, every build, a shipping one too, writes one line about it to
+  `sdmc:/3ds/emerald3ds/log.txt`. A shipping build writes that file only when
+  something fails, so a healthy session leaves no file.
 - **No trading or link battles yet.** The Cable Club over 3DS local wireless is
   written but unbuilt on the `local-wireless` branch. The Union Room and Mystery
   Gift use a separate wireless stack that is still stubbed.
@@ -443,6 +447,10 @@ them.
 - **[rh-hideout/pokeemerald-expansion](https://github.com/rh-hideout/pokeemerald-expansion)**:
   the LEVEL CAP values come from its `src/caps.c`, and it carried the
   Krabby and Kingler sprites above.
+- **[ZallaxDev/pokeemerald-3Ds-dualscreen](https://github.com/ZallaxDev/pokeemerald-3Ds-dualscreen)**
+  by Daniel Cazalla (MIT). The GPU renderer (`3ds/host/gpu_compose.c`) uses
+  the design of its compositor from release v0.1.1: a tile atlas with palette
+  versions, and text backgrounds kept in textures that change cell by cell.
 
 **Tools and libraries for the 3DS build**
 

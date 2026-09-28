@@ -12,8 +12,8 @@
 //   game data, as the Poketch apps of the DS games do. Each has its own
 //   view_*.c (view_home.h). They only read, and they open only when a save is loaded.
 //   FRONTIER opens only after the player reaches the Battle Frontier.
-// - SETTINGS is host side only: fast-forward, top-screen scale and button
-//   binds. It does not change how the game plays.
+// - SETTINGS is host side only: fast-forward, top-screen scale, the renderer
+//   and button binds. It does not change how the game plays.
 // - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
 //   bag sort order. The file 3ds/tweaks.c holds the behavior. This file only
 //   draws the toggles.
@@ -53,9 +53,9 @@ static const u8 sSpeeds[] = { 1, 2, 4, 8 };
 // An index for each button. The modes are an enum, not a sequence, so do not
 // calculate a mode from the index.
 static const u8 sScales[] = {
-    CTR_TOP_SCALE_1X, CTR_TOP_SCALE_1_5X, CTR_TOP_SCALE_FILL
+    CTR_TOP_SCALE_1X, CTR_TOP_SCALE_1_5X, CTR_TOP_SCALE_FILL, CTR_TOP_SCALE_WIDE
 };
-static const char *const sScaleNames[] = { "1x", "1.5x", "FILL" };
+static const char *const sScaleNames[] = { "1x", "1.5x", "FILL", "WIDE" };
 #define SCALE_COUNT   ARRAY_COUNT(sScales)
 
 // The values that a button can bind to, in tap order. MOD is in the same cycle
@@ -67,9 +67,20 @@ static const u8 sTurboSteps[] = { CTR_BIND_OFF, 2, 4, 8, CTR_BIND_MOD };
 static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" };
 
 // The first three rows are 276px wide, centered in 320. That leaves 22px on
-// each side, clear of the 8px window frame.
+// each side, clear of the 8px window frame. On the rail (CTR_UI_RAIL) the
+// content area is 256 wide: four 53px buttons with 6px gaps are 230px from x
+// 13, and 53px is the finger floor.
 #define BTN_H         26
 #define BTN_GAP       12
+#if CTR_UI_RAIL
+#define ROW_BTN_W     53
+#define ROW_BTN_GAP   6
+#define ROW_X0        13
+#else
+#define ROW_BTN_W     60
+#define ROW_BTN_GAP   BTN_GAP
+#define ROW_X0        22
+#endif
 
 // A label is 17px above its buttons, so a row with a label is 43px tall. The
 // interior is y 8..183, which is 176px.
@@ -90,7 +101,7 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define CHK_LABEL_X   38
 #define CHK_HINT_X    110
 #define CHK_HIT_X     8
-#define CHK_HIT_W     (CTR_BOTTOM_WIDTH - 2 * CHK_HIT_X)
+#define CHK_HIT_W     (UI_CONTENT_W - 2 * CHK_HIT_X)
 
 // Page 2's grid from y 30: a check row, a labelled row of three buttons, a
 // check row and a row with its label next to its buttons. It ends at y 175.
@@ -100,9 +111,18 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define P2_RAND_Y       115
 #define P2_SORT_Y       149
 #define P2_SORT_LABEL_X 16
+// On the rail the BAG SORT buttons do not fit after the label, so they go
+// under it, as the LEVEL CAP buttons do. The page then ends at y 192.
+#if CTR_UI_RAIL
+#define P2_SORT_LABEL_Y P2_SORT_Y
+#define P2_SORT_BTN_Y   (P2_SORT_Y + LABEL_TO_BTN)
+#else
+#define P2_SORT_LABEL_Y (P2_SORT_Y + (BTN_H - UI_GLYPH_H) / 2)
+#define P2_SORT_BTN_Y   P2_SORT_Y
+#endif
 
-// Page 3's grid: check rows at a 30px pitch from y 30. Four rows end at y 146,
-// and the interior ends at y 183. A fifth row fits.
+// Page 3's grid: check rows at a 30px pitch from y 30. Five rows end at y 176,
+// and the interior ends at y 183. The page is full.
 #define P3_ROW_PITCH  30
 #define P3_ROW_Y(i)   (30 + (i) * P3_ROW_PITCH)
 
@@ -118,22 +138,30 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define P1_ROW_Y(i)   (30 + (i) * (LABELLED_ROW_H + P1_ROW_GAP))
 #define P1_BTN_Y(i)   (P1_ROW_Y(i) + LABEL_TO_BTN)
 
-#define SPD_W         60
+#define SPD_W         ROW_BTN_W
 #define SPD_Y         P1_BTN_Y(0)
-#define SPD_X(i)      (22 + (i) * (SPD_W + BTN_GAP))
+#define SPD_X(i)      (ROW_X0 + (i) * (SPD_W + ROW_BTN_GAP))
 
-#define SCL_W         84
+#define SCL_W         SPD_W   // four buttons, as in the speed row
 #define SCL_Y         P1_BTN_Y(1)
-#define SCL_X(i)      (22 + (i) * (SCL_W + BTN_GAP))
+#define SCL_X(i)      (ROW_X0 + (i) * (SCL_W + ROW_BTN_GAP))
 
-#define TRB_W         60
+#define TRB_W         ROW_BTN_W
 #define TRB_Y         P1_BTN_Y(2)
-#define TRB_X(i)      (22 + (i) * (TRB_W + BTN_GAP))
+#define TRB_X(i)      (ROW_X0 + (i) * (TRB_W + ROW_BTN_GAP))
 
 // The MOD note shares the line of the BUTTON HOLD label. That label is 63px
 // wide, so x 96 is clear of it. The note is 163px and ends inside the 311px
-// interior.
+// interior. On the rail it does not fit there, so it goes under the buttons,
+// and NAV BAR and DEBUG leave the title line for the row under it.
+#if CTR_UI_RAIL
+#define TRB_NOTE_X    16
+#define TRB_NOTE_Y    (TRB_Y + BTN_H + 6)
+#define P1_LINKS_Y    (TRB_NOTE_Y + UI_GLYPH_H + 4)
+#else
 #define TRB_NOTE_X    96
+#define TRB_NOTE_Y    P1_ROW_Y(2)
+#endif
 
 // What fast-forward does to the music. It shares the line of the GAME SPEED
 // label, because it changes only that control. A row of its own would cost
@@ -146,6 +174,14 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define FFA_W         88
 #define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
+
+// What draws the top screen. The same kind of control as FFA, on the line of
+// the SCREEN SIZE label, which ends near x 83. "RENDER AUTO" is the widest
+// label.
+#define RND_X         FFA_X
+#define RND_W         FFA_W
+#define RND_Y         P1_ROW_Y(1)
+#define RND_H         PGR_H
 
 // The pager, right-aligned to the interior edge at x 311, on the top line of
 // each page. It is 17px tall at y 8 and ends at y 24. Every page starts its
@@ -191,7 +227,8 @@ static const char *const sPageHint[] = {
     "follower", "", "test build",
 };
 
-// The launcher's cells, in order, all 16 of the 4x4 grid. CELL_SPARE is the
+// The launcher's cells, in order, all 16 of the 4x4 grid (15 of the 3x5 grid
+// on the rail). CELL_SPARE is the
 // tab that is not on the nav bar (UiNavSpareTab): it opens that tab, not a
 // page. CELL_EMPTY draws nothing. SETTINGS is always the last cell, bottom
 // right, so the player finds it in the same place: a new tile goes in an empty
@@ -199,12 +236,22 @@ static const char *const sPageHint[] = {
 #define CELL_SPARE 0xFF
 #define CELL_EMPTY 0xFE
 
+#if CTR_UI_RAIL
+static const u8 sCells[15] = {
+    PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING,
+    PAGE_BERRIES, PAGE_DAYCARE, PAGE_FRIENDSHIP,
+    PAGE_FRONTIER, CELL_SPARE, PAGE_LINK,
+    PAGE_GAMEPLAY, PAGE_EXTRAS, PAGE_FOLLOWER,
+    CELL_EMPTY, CELL_EMPTY, PAGE_SETTINGS,
+};
+#else
 static const u8 sCells[16] = {
     PAGE_TRAINER, PAGE_CLOCK, PAGE_DOWSING, PAGE_BERRIES,
     PAGE_DAYCARE, PAGE_FRIENDSHIP, PAGE_FRONTIER, CELL_SPARE,
     PAGE_LINK, PAGE_GAMEPLAY, PAGE_EXTRAS, PAGE_FOLLOWER,
     CELL_EMPTY, CELL_EMPTY, CELL_EMPTY, PAGE_SETTINGS,
 };
+#endif
 
 // The spare tab's tile hint, for each tab that can be spare.
 static const char *const sSpareHint[UI_TAB_COUNT] = {
@@ -251,28 +298,45 @@ static bool8 PageFullBleed(u8 page)
 // right-aligned to the interior edge, 46px wide like the MAP buttons.
 #define TITLE_X       16
 #define TITLE_BACK_W  46
-#define TITLE_BACK_X  (CTR_BOTTOM_WIDTH - 8 - TITLE_BACK_W)
+#define TITLE_BACK_X  (UI_CONTENT_W - 8 - TITLE_BACK_W)
 
 // DEBUG and NAV BAR, on the SETTINGS title line left of BACK. Their pages have
-// no tile.
+// no tile. On the rail the title line has no room for them, so they are a row
+// at the bottom of the page.
 #define DEBUG_BTN_W   54
-#define DEBUG_BTN_X   (TITLE_BACK_X - 6 - DEBUG_BTN_W)
 #define NAVBAR_BTN_W  66
+#if CTR_UI_RAIL
+#define NAVBAR_BTN_X  16
+#define NAVBAR_BTN_Y  P1_LINKS_Y
+#define DEBUG_BTN_X   (NAVBAR_BTN_X + NAVBAR_BTN_W + 6)
+#define DEBUG_BTN_Y   P1_LINKS_Y
+#else
+#define DEBUG_BTN_X   (TITLE_BACK_X - 6 - DEBUG_BTN_W)
+#define DEBUG_BTN_Y   PGR_Y
 #if CTR_DEBUG_MENU
 #define NAVBAR_BTN_X  (DEBUG_BTN_X - 6 - NAVBAR_BTN_W)
 #else
 #define NAVBAR_BTN_X  (TITLE_BACK_X - 6 - NAVBAR_BTN_W)
 #endif
+#define NAVBAR_BTN_Y  PGR_Y
+#endif
 
 // The launcher: 4x4 tiles of 80x48, which fill the 320x192 content area
 // exactly on whole 8px tiles, as UiWindowFrame needs. The title is centred on
-// the tile's middle; the hint sits under it.
+// the tile's middle; the hint sits under it. On the rail: 3x5 tiles of the same
+// size, 240x240 from x 8 in the 256x240 area.
+#if CTR_UI_RAIL
+#define TILE_COLS     3
+#define TILE_X0       8
+#else
 #define TILE_COLS     4
+#define TILE_X0       0
+#endif
 #define TILE_TW       10
 #define TILE_TH       6
 #define TILE_W        (TILE_TW * 8)
 #define TILE_H        (TILE_TH * 8)
-#define TILE_X(i)     (((i) % TILE_COLS) * TILE_W)
+#define TILE_X(i)     (TILE_X0 + ((i) % TILE_COLS) * TILE_W)
 #define TILE_Y(i)     (((i) / TILE_COLS) * TILE_H)
 #define TILE_TITLE_DY 9
 #define TILE_HINT_DY  27
@@ -284,9 +348,16 @@ static bool8 PageFullBleed(u8 page)
 #define NAV_BAR_Y     64
 #define NAV_NOTE_Y    108
 #define NAV_TABS_Y    126
+// On the rail, smaller boxes: 4 x 44 + 48 + 4 x 2 = 232 in the 240 interior.
+#if CTR_UI_RAIL
+#define NAV_BOX_W     44
+#define NAV_HOME_W    48
+#define NAV_GAP       2
+#else
 #define NAV_BOX_W     56
 #define NAV_HOME_W    76
 #define NAV_GAP       4
+#endif
 #define DEFAULT_BTN_W 66
 #define DEFAULT_BTN_X (TITLE_BACK_X - 6 - DEFAULT_BTN_W)
 #define NAV_NO_PICK   0xFF
@@ -297,8 +368,24 @@ static bool8 PageFullBleed(u8 page)
 #define P2_HINT_X     96
 #define WIDE_W        SCL_W
 #define WIDE_X(i)     SCL_X(i)
+#if CTR_UI_RAIL
+#define SORT_W        WIDE_W
+#define SORT_X(i)     WIDE_X(i)
+#else
 #define SORT_W        75
 #define SORT_X(i)     (70 + (i) * (SORT_W + 8))
+#endif
+
+// The two buttons of a choice row (page 4). They use the right two columns of
+// LEVEL CAP, so the pages align. On the rail those are too narrow for "POKE
+// BALL", so the two buttons are 70px from x 96.
+#if CTR_UI_RAIL
+#define CHOICE_W      70
+#define CHOICE_X(i)   (96 + (i) * (CHOICE_W + 6))
+#else
+#define CHOICE_W      WIDE_W
+#define CHOICE_X(i)   WIDE_X((i) + 1)
+#endif
 
 // The page that shows, from the view stack. HOME opens on the launcher, so
 // the player does not see the cheats first.
@@ -396,13 +483,27 @@ static void DrawPage1(void)
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
 
+    // Highlight a choice that is not AUTO, as FFA highlights FAST.
+    {
+        static const char *const names[CTR_RENDERER_COUNT] = {
+            [CTR_RENDERER_AUTO] = "RENDER AUTO",
+            [CTR_RENDERER_CPU]  = "RENDER CPU",
+            [CTR_RENDERER_GPU]  = "RENDER GPU",
+        };
+        int mode = Ctr3dsGetRenderer();
+
+        DrawButtonH(RND_X, RND_Y, RND_W, RND_H,
+                    UiAscii(label, names[mode], sizeof(label)),
+                    mode != CTR_RENDERER_AUTO);
+    }
+
     UiText(16, P1_ROW_Y(2), UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     // Explain MOD: one of these buttons makes the Pokedex arrows jump. ZL and
     // ZR do not exist on an Old 3DS. Without the note, a bind there looks
     // broken.
-    UiText(TRB_NOTE_X, P1_ROW_Y(2),
+    UiText(TRB_NOTE_X, TRB_NOTE_Y,
            UiAscii(label, "MOD jumps lists. ZL/ZR: New 3DS.", sizeof(label)),
            UI_COL_DIM, UiThemeShadow());
 
@@ -477,17 +578,17 @@ static void DrawPage2(void)
     DrawCheckRow(P2_RAND_Y, CHK_ROW_H, "RANDOMISER", "new encounters only",
                  Ctr3dsGetRandomizer());
 
-    UiText(P2_SORT_LABEL_X, P2_SORT_Y + (BTN_H - UI_GLYPH_H) / 2,
+    UiText(P2_SORT_LABEL_X, P2_SORT_LABEL_Y,
            UiAscii(label, "BAG SORT", sizeof(label)),
            UiThemeText(), UiThemeShadow());
 
     mode = Ctr3dsGetBagSort();
 
-    DrawButton(SORT_X(0), P2_SORT_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
+    DrawButton(SORT_X(0), P2_SORT_BTN_Y, SORT_W, UiAscii(label, "OFF", sizeof(label)),
                mode == CTR_BAGSORT_OFF);
-    DrawButton(SORT_X(1), P2_SORT_Y, SORT_W, UiAscii(label, "TYPE", sizeof(label)),
+    DrawButton(SORT_X(1), P2_SORT_BTN_Y, SORT_W, UiAscii(label, "TYPE", sizeof(label)),
                mode == CTR_BAGSORT_TYPE);
-    DrawButton(SORT_X(2), P2_SORT_Y, SORT_W, UiAscii(label, "NAME", sizeof(label)),
+    DrawButton(SORT_X(2), P2_SORT_BTN_Y, SORT_W, UiAscii(label, "NAME", sizeof(label)),
                mode == CTR_BAGSORT_NAME);
 }
 
@@ -501,6 +602,7 @@ enum {
     P3_QUICK_BALL,
     P3_BATTLE_ANIM,
     P3_DAY_CARE,
+    P3_REMATCH_MARKS,
 };
 
 static void DrawPage3(void)
@@ -537,6 +639,11 @@ static void DrawPage3(void)
     // Route 117, because the yard objects are made at map load.
     DrawCheckRow(P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H, "DAY CARE",
                  "Pokemon in the yard", Ctr3dsGetDayCareYard());
+
+    // The red REMATCH dots on MAP, with their key and caption note. The roamer
+    // and the outbreak keep their marks.
+    DrawCheckRow(P3_ROW_Y(P3_REMATCH_MARKS), CHK_ROW_H, "REMATCHES",
+                 "red dots on MAP", !Ctr3dsGetRematchMarksOff());
 }
 
 // ---- PAGE 4: the follower --------------------------------------------------
@@ -550,8 +657,7 @@ enum {
     P4_BALL,
 };
 
-// A label and two buttons. The buttons use the right two columns of LEVEL CAP
-// on page 2, so the pages align.
+// A label and two buttons (CHOICE_X).
 static void DrawChoiceRow(int y, const char *text, const char *left,
                           const char *right, int rightOn)
 {
@@ -559,9 +665,9 @@ static void DrawChoiceRow(int y, const char *text, const char *left,
 
     UiText(16, y + (BTN_H - UI_GLYPH_H) / 2,
            UiAscii(label, text, sizeof(label)), UiThemeText(), UiThemeShadow());
-    DrawButton(WIDE_X(1), y, WIDE_W, UiAscii(label, left, sizeof(label)),
+    DrawButton(CHOICE_X(0), y, CHOICE_W, UiAscii(label, left, sizeof(label)),
                !rightOn);
-    DrawButton(WIDE_X(2), y, WIDE_W, UiAscii(label, right, sizeof(label)),
+    DrawButton(CHOICE_X(1), y, CHOICE_W, UiAscii(label, right, sizeof(label)),
                rightOn);
 }
 
@@ -640,7 +746,14 @@ static const u8 sDebugAudio[] = {
 #define DBG_LABEL_X   16
 #define DBG_BTN_W     60
 #define DBG_BTN_X(c)  (62 + (c) * (DBG_BTN_W + 6))
+// On the rail the note goes under the buttons, at the column of TEST.
+#if CTR_UI_RAIL
+#define DBG_NOTE_X    DBG_BTN_X(0)
+#define DBG_NOTE_DY   (DBG_PITCH + (DBG_BTN_H - UI_GLYPH_H) / 2)
+#else
 #define DBG_NOTE_X    198
+#define DBG_NOTE_DY   ((DBG_BTN_H - UI_GLYPH_H) / 2)
+#endif
 
 // One function reads a row and one writes a row, so the draw and the touch
 // handler always agree on which switch a row is.
@@ -700,7 +813,7 @@ static void DrawAchRow(void)
 
     if (badIds == 0 && tooWide == 0)
     {
-        UiText(DBG_NOTE_X, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+        UiText(DBG_NOTE_X, y + DBG_NOTE_DY,
                UiAscii(label, "all text fits", sizeof(label)),
                UI_COL_DIM, UiThemeShadow());
     }
@@ -708,9 +821,9 @@ static void DrawAchRow(void)
     {
         int x = DBG_NOTE_X;
 
-        x += UiNum(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2, badIds ? badIds : tooWide,
+        x += UiNum(x, y + DBG_NOTE_DY, badIds ? badIds : tooWide,
                    UI_COL_ACCENT, UiThemeShadow());
-        UiText(x, y + (DBG_BTN_H - UI_GLYPH_H) / 2,
+        UiText(x, y + DBG_NOTE_DY,
                UiAscii(label, badIds ? " bad ids" : " too wide", sizeof(label)),
                UI_COL_ACCENT, UiThemeShadow());
     }
@@ -798,7 +911,7 @@ static void DrawPageTitle(u8 page)
                 UiAscii(label, "BACK", sizeof(label)), FALSE);
 
     if (page == PAGE_SETTINGS)
-        DrawButtonH(NAVBAR_BTN_X, PGR_Y, NAVBAR_BTN_W, PGR_H,
+        DrawButtonH(NAVBAR_BTN_X, NAVBAR_BTN_Y, NAVBAR_BTN_W, PGR_H,
                     UiAscii(label, "NAV BAR", sizeof(label)), FALSE);
     else if (page == PAGE_NAVBAR)
         DrawButtonH(DEFAULT_BTN_X, PGR_Y, DEFAULT_BTN_W, PGR_H,
@@ -806,7 +919,7 @@ static void DrawPageTitle(u8 page)
 
 #if CTR_DEBUG_MENU
     if (page == PAGE_SETTINGS)
-        DrawButtonH(DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H,
+        DrawButtonH(DEBUG_BTN_X, DEBUG_BTN_Y, DEBUG_BTN_W, PGR_H,
                     UiAscii(label, "DEBUG", sizeof(label)), FALSE);
 #endif
 }
@@ -820,7 +933,7 @@ static u8 sNavPick = NAV_NO_PICK;
 static void NavSlotRect(u32 slot, int *x, int *w)
 {
     int total = 4 * NAV_BOX_W + NAV_HOME_W + 4 * NAV_GAP;
-    int left = (CTR_BOTTOM_WIDTH - total) / 2;
+    int left = (UI_CONTENT_W - total) / 2;
 
     *x = left + (int)slot * (NAV_BOX_W + NAV_GAP)
        + (slot > UI_NAV_HOME_SLOT ? NAV_HOME_W - NAV_BOX_W : 0);
@@ -841,7 +954,7 @@ static int NavChoiceX(u32 i)
 {
     int total = 5 * NAV_BOX_W + 4 * NAV_GAP;
 
-    return (CTR_BOTTOM_WIDTH - total) / 2 + (int)i * (NAV_BOX_W + NAV_GAP);
+    return (UI_CONTENT_W - total) / 2 + (int)i * (NAV_BOX_W + NAV_GAP);
 }
 
 static void DrawNavBox(int x, int y, int w, u8 tab, bool8 selected, bool8 fixed)
@@ -1014,7 +1127,7 @@ void UiExtraDraw(void)
         return;
     }
 
-    UiWindowFrame(0, 0, CTR_BOTTOM_WIDTH / 8, UI_CONTENT_H / 8);
+    UiWindowFrame(0, 0, UI_CONTENT_W / 8, UI_CONTENT_H / 8);
 
     if (page == PAGE_CLOCK)
         UiClockPageDraw();
@@ -1126,6 +1239,14 @@ static void TouchPage1(const CtrTouchState *t)
         return;
     }
 
+    // AUTO, then CPU, then GPU, then AUTO again.
+    if (UiHit(t, RND_X, RND_Y, RND_W, RND_H))
+    {
+        Ctr3dsSetRenderer((Ctr3dsGetRenderer() + 1) % CTR_RENDERER_COUNT);
+        UiMarkDirty();
+        return;
+    }
+
     for (u32 i = 0; i < SPEED_COUNT; i++)
     {
         if (UiHit(t, SPD_X((int)i), SPD_Y, SPD_W, BTN_H))
@@ -1198,7 +1319,7 @@ static void TouchPage2(const CtrTouchState *t)
 
     for (u32 i = 0; i < ARRAY_COUNT(sSortModes); i++)
     {
-        if (UiHit(t, SORT_X((int)i), P2_SORT_Y, SORT_W, BTN_H))
+        if (UiHit(t, SORT_X((int)i), P2_SORT_BTN_Y, SORT_W, BTN_H))
         {
             Ctr3dsSetBagSort(sSortModes[i]);
 
@@ -1224,6 +1345,8 @@ static void TouchPage3(const CtrTouchState *t)
         Ctr3dsSetBattleAnimOff(!Ctr3dsGetBattleAnimOff());
     else if (HitCheckRow(t, P3_ROW_Y(P3_DAY_CARE), CHK_ROW_H))
         Ctr3dsSetDayCareYard(!Ctr3dsGetDayCareYard());
+    else if (HitCheckRow(t, P3_ROW_Y(P3_REMATCH_MARKS), CHK_ROW_H))
+        Ctr3dsSetRematchMarksOff(!Ctr3dsGetRematchMarksOff());
     else
         return;
 
@@ -1241,17 +1364,17 @@ static void TouchPage4(const CtrTouchState *t)
         Ctr3dsSetFollowerOn(!Ctr3dsGetFollowerOn());
         Ctr3dsRefreshFollowerNow();
     }
-    else if (UiHit(t, WIDE_X(1), P4_ROW_Y(P4_WHO), WIDE_W, BTN_H))
+    else if (UiHit(t, CHOICE_X(0), P4_ROW_Y(P4_WHO), CHOICE_W, BTN_H))
         who = CTR_FOLLOWER_LEAD;
-    else if (UiHit(t, WIDE_X(2), P4_ROW_Y(P4_WHO), WIDE_W, BTN_H))
+    else if (UiHit(t, CHOICE_X(1), P4_ROW_Y(P4_WHO), CHOICE_W, BTN_H))
         who = CTR_FOLLOWER_STARTER;
     // BOBBING and BALL need no refresh. They show at the next step and at the
     // next ball animation.
     else if (HitCheckRow(t, P4_ROW_Y(P4_BOBBING), CHK_ROW_H))
         Ctr3dsSetFollowerBobOff(!Ctr3dsGetFollowerBobOff());
-    else if (UiHit(t, WIDE_X(1), P4_ROW_Y(P4_BALL), WIDE_W, BTN_H))
+    else if (UiHit(t, CHOICE_X(0), P4_ROW_Y(P4_BALL), CHOICE_W, BTN_H))
         Ctr3dsSetFollowerPokeBall(0);
-    else if (UiHit(t, WIDE_X(2), P4_ROW_Y(P4_BALL), WIDE_W, BTN_H))
+    else if (UiHit(t, CHOICE_X(1), P4_ROW_Y(P4_BALL), CHOICE_W, BTN_H))
         Ctr3dsSetFollowerPokeBall(1);
     else
         return;
@@ -1330,7 +1453,7 @@ void UiExtraTouch(const CtrTouchState *t)
     }
 
     // A second page view over SETTINGS, so its BACK returns there.
-    if (page == PAGE_SETTINGS && UiHit(t, NAVBAR_BTN_X, PGR_Y, NAVBAR_BTN_W, PGR_H))
+    if (page == PAGE_SETTINGS && UiHit(t, NAVBAR_BTN_X, NAVBAR_BTN_Y, NAVBAR_BTN_W, PGR_H))
     {
         sNavPick = NAV_NO_PICK;
         UiViewPush(UI_VIEW_HOME_PAGE, PAGE_NAVBAR);
@@ -1347,7 +1470,7 @@ void UiExtraTouch(const CtrTouchState *t)
 
 #if CTR_DEBUG_MENU
     // The same for DEBUG.
-    if (page == PAGE_SETTINGS && UiHit(t, DEBUG_BTN_X, PGR_Y, DEBUG_BTN_W, PGR_H))
+    if (page == PAGE_SETTINGS && UiHit(t, DEBUG_BTN_X, DEBUG_BTN_Y, DEBUG_BTN_W, PGR_H))
     {
         sAchResyncArmed = FALSE;
         UiViewPush(UI_VIEW_HOME_PAGE, PAGE_DEBUG);

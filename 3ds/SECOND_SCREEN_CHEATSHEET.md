@@ -75,6 +75,14 @@ shows up one frame later**, never half-drawn. If no second core can be had, or
 the build is `CTR_PPU_THREAD=0`, it rasterises inline inside
 `CtrVideoPresent()`, which is the old single-core path.
 
+**The GPU renderer can take the frame instead.** With RENDERER at GPU, or at
+AUTO on a console with no second core, `gpu_decide()` in video.c picks the path
+for each frame. A frame that `GpuComposeCheck()` accepts skips the rasteriser,
+the worker kick and the top upload: [host/gpu_compose.c](host/gpu_compose.c)
+draws it after `C3D_FrameBegin`, into a surface that the top screen then
+samples. A refused frame, and the next 8, go to ppu.c as above. None of this
+changes the bottom screen or what a touch handler may touch.
+
 **The UI paints straight into the buffer the GPU transfer reads.** `sFb` is the
 host's `linearAlloc`'d stage, handed over by `CtrVideoInit` before anything
 paints, at a row stride of `UI_STRIDE` (512) because a PICA200 texture's width
@@ -1563,6 +1571,7 @@ appears.
 | A missing prototype links, then fails at link | `build_objs.sh` passes `-Wno-implicit-function-declaration`. A call across the seam with no declaration compiles silently. |
 | Host-side change did nothing | Forgot `3ds/build_objs.sh`, or passed `CTR_BOOT_DIAG` to only one of the two builds. |
 | The game pauses for a moment whenever you touch the second screen | Something on the touch path is doing blocking work in the frame. Read `log.txt` for `slow <stage>` lines: `CtrLogSlow` ([bridge.h](bridge.h)) reports any timed stage over 50 ms. The file only exists with `CTR_DEBUG_MENU` on. |
+| The top screen looks different with RENDERER at GPU | Build with `make -C 3ds CTR_GPU_VERIFY=1` and set RENDERER to GPU. Each GPU frame is drawn by ppu.c too and compared. `log.txt` gets a `gpu verify #N` line for the first difference in each scene, and `sdmc:/3ds/emerald3ds/gpuverify/NN_ppu.bmp` and `NN_gpu.bmp` show both pictures. The `gpu drew N of 600 frames` line says why ppu.c took the other frames. Rotated or scaled sprites and affine BGs can differ by a texel on tile edges; that is known (the top of gpu_compose.c). |
 | The frame rate drops while something on the bottom screen is animating | First check the boot log says `rasteriser on core 2` (or core 1). On the single-core path it is expected and quantified: `fps = 3600 / (60 + repaints per second)` (section 7). With the rasteriser on its own core a repaint should cost nothing, so read `ppu.wait` and `frame`. Read `log.txt` for `prof <stage>` lines rather than guessing -- `CtrProfile` ([bridge.h](bridge.h)) reports the mean and worst of each stage in MICROseconds every 600 samples, which is what `CtrLogSlow`'s 50 ms threshold and 1 ms clock cannot see. `paint` is the software fill, `upload.bot.flush/xfer` the host's two upload stages (the copy is gone), and `framebegin` is the VBlank wait, so a `framebegin` near zero means the frame had no slack left. |
 | Profiler numbers that make no sense, or a crash inside `CtrProfile` | Called from a thread other than the main one. `CtrProfile` and `CtrLogSlow` keep unlocked static tables. The rasteriser's worker and the I/O thread measure themselves and let the main thread report. |
 | The top screen shows garbage or a torn picture for a frame | Something made the rasteriser read live memory while the game or the paint was writing it. In threaded mode `ppu_set_memory()` must point at the snapshot `CtrVideoRenderBegin()` fills, never at `gGbaMem` ([host/video.c](host/video.c)). |

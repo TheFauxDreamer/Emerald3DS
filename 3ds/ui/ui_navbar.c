@@ -318,6 +318,15 @@ void UiNavReset(void)
 
 // -------------------------------------------------------------------- bar ---
 
+#if CTR_UI_RAIL
+// The rail: five slots of 48px, top to bottom, all as wide as the rail.
+#define RAIL_SLOT_H  (CTR_BOTTOM_HEIGHT / UI_NAV_SLOTS)
+
+static int SlotX(u32 slot) { (void)slot; return UI_CONTENT_W; }
+static int SlotW(u32 slot) { (void)slot; return UI_RAIL_W; }
+static int SlotY(u32 slot) { return (int)slot * RAIL_SLOT_H; }
+static int SlotH(u32 slot) { (void)slot; return RAIL_SLOT_H; }
+#else
 static int SlotX(u32 slot)
 {
     return (int)slot * SLOT_W + (slot > UI_NAV_HOME_SLOT ? HOME_W - SLOT_W : 0);
@@ -327,6 +336,10 @@ static int SlotW(u32 slot)
 {
     return slot == UI_NAV_HOME_SLOT ? HOME_W : SLOT_W;
 }
+
+static int SlotY(u32 slot) { (void)slot; return UI_CONTENT_H; }
+static int SlotH(u32 slot) { (void)slot; return UI_TABBAR_H; }
+#endif
 
 void UiNavDraw(u8 activeTab)
 {
@@ -339,7 +352,7 @@ void UiNavDraw(u8 activeTab)
     for (u32 i = 0; i < UI_NAV_SLOTS; i++)
     {
         int x = SlotX(i), w = SlotW(i);
-        int y = UI_CONTENT_H;
+        int y = SlotY(i), h = SlotH(i);
         bool8 home = (i == UI_NAV_HOME_SLOT);
         int size = home ? UI_NAV_ICON_HOME : UI_NAV_ICON;
         bool8 active = slots[i] == activeTab || (home && activeTab == spare);
@@ -347,13 +360,13 @@ void UiNavDraw(u8 activeTab)
         u16 color = active ? UI_COL_ACCENT : live ? UiThemeText() : UI_COL_DIM;
         int iconY;
 
-        UiFillRect(x, y, w, UI_TABBAR_H, active ? UI_COL_BG : UI_COL_HP_BACK);
-        UiRect(x, y, w, UI_TABBAR_H, UI_COL_DIM);
+        UiFillRect(x, y, w, h, active ? UI_COL_BG : UI_COL_HP_BACK);
+        UiRect(x, y, w, h, UI_COL_DIM);
 
         if (labels)
             iconY = y + (home ? HOME_ICON_DY : ICON_DY);
         else
-            iconY = y + (UI_TABBAR_H - size) / 2;
+            iconY = y + (h - size) / 2;
 
         UiNavDrawIcon(x + (w - size) / 2, iconY, slots[i], color);
 
@@ -385,7 +398,7 @@ u8 UiNavHit(const CtrTouchState *t)
 
     for (u32 i = 0; i < UI_NAV_SLOTS; i++)
     {
-        if (!UiHit(t, SlotX(i), UI_CONTENT_H, SlotW(i), UI_TABBAR_H))
+        if (!UiHit(t, SlotX(i), SlotY(i), SlotW(i), SlotH(i)))
             continue;
 
         return UiTabUnlocked(slots[i]) ? slots[i] : UI_TAB_COUNT;

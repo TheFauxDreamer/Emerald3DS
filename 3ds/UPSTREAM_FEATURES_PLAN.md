@@ -82,10 +82,10 @@ Space that is left:
 - **settings.bin:** one free byte in each per-save record (`pad` in
   `struct CtrSaveSettings`), and bits 4 to 7 of the record's `follower` byte for
   more follower options. Also two free per-console bytes (`pad[2]` in
-  `struct CtrSettings`), and three in the table header (`pad2`). A larger
+  `struct CtrSettings`), and one in the table header (`pad2`; RENDERER and REMATCHES took the other
+  two). A larger
   record needs a new version and a migration.
-- **EXTRA tab:** pages 1 and 2 are full. Page 3 has four check rows and room for
-  one more. Page 4 (FOLLOWER) has four rows at a 34px pitch that end at y 158,
+- **EXTRA tab:** pages 1, 2 and 3 are full. Page 4 (FOLLOWER) has four rows at a 34px pitch that end at y 158,
   so a fifth row needs a 30px pitch. A sixth page does not fit in a debug
   build: the pager would reach the "test build" caption of the debug page.
 - **Save data:** keep the retail layout (`SAVE_STRUCT_ALIGNED` in
