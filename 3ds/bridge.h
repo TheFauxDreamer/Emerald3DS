@@ -215,6 +215,19 @@ int  Ctr3dsUiModifierHeld(void);
 void Ctr3dsSetTopScale(int mode);
 int  Ctr3dsGetTopScale(void);
 
+// What draws the top screen (3ds/host/video.c). CPU is rp2350/ppu.c, the
+// reference. GPU is the compositor in 3ds/host/gpu_compose.c, which gives a
+// frame back to ppu.c when the frame uses something it cannot draw the same.
+// AUTO is GPU when ppu.c has no core of its own (an Old 3DS), else CPU. This
+// setting persists, as the scale does.
+#define CTR_RENDERER_AUTO  0
+#define CTR_RENDERER_CPU   1
+#define CTR_RENDERER_GPU   2
+#define CTR_RENDERER_COUNT 3
+
+void Ctr3dsSetRenderer(int mode);
+int  Ctr3dsGetRenderer(void);
+
 // ---- the wide overworld (CTR_TOP_SCALE_WIDE) --------------------------------
 //
 // At WIDE, the top screen shows the GBA picture at 1.5x, as 1.5X does. In the

@@ -12,8 +12,8 @@
 //   game data, as the Poketch apps of the DS games do. Each has its own
 //   view_*.c (view_home.h). They only read, and they open only when a save is loaded.
 //   FRONTIER opens only after the player reaches the Battle Frontier.
-// - SETTINGS is host side only: fast-forward, top-screen scale and button
-//   binds. It does not change how the game plays.
+// - SETTINGS is host side only: fast-forward, top-screen scale, the renderer
+//   and button binds. It does not change how the game plays.
 // - GAMEPLAY contains cheats: EXP All, a level cap, a species randomizer and a
 //   bag sort order. The file 3ds/tweaks.c holds the behavior. This file only
 //   draws the toggles.
@@ -146,6 +146,14 @@ static const char *const sTurboNames[CTR_TURBO_COUNT] = { "X", "Y", "ZL", "ZR" }
 #define FFA_W         88
 #define FFA_Y         P1_ROW_Y(0)
 #define FFA_H         PGR_H
+
+// What draws the top screen. The same kind of control as FFA, on the line of
+// the SCREEN SIZE label, which ends near x 83. "RENDER AUTO" is the widest
+// label.
+#define RND_X         FFA_X
+#define RND_W         FFA_W
+#define RND_Y         P1_ROW_Y(1)
+#define RND_H         PGR_H
 
 // The pager, right-aligned to the interior edge at x 311, on the top line of
 // each page. It is 17px tall at y 8 and ends at y 24. Every page starts its
@@ -395,6 +403,20 @@ static void DrawPage1(void)
         DrawButton(SCL_X((int)i), SCL_Y, SCL_W,
                    UiAscii(label, sScaleNames[i], sizeof(label)),
                    sScales[i] == Ctr3dsGetTopScale());
+
+    // Highlight a choice that is not AUTO, as FFA highlights FAST.
+    {
+        static const char *const names[CTR_RENDERER_COUNT] = {
+            [CTR_RENDERER_AUTO] = "RENDER AUTO",
+            [CTR_RENDERER_CPU]  = "RENDER CPU",
+            [CTR_RENDERER_GPU]  = "RENDER GPU",
+        };
+        int mode = Ctr3dsGetRenderer();
+
+        DrawButtonH(RND_X, RND_Y, RND_W, RND_H,
+                    UiAscii(label, names[mode], sizeof(label)),
+                    mode != CTR_RENDERER_AUTO);
+    }
 
     UiText(16, P1_ROW_Y(2), UiAscii(label, "BUTTON HOLD", sizeof(label)),
            UiThemeText(), UiThemeShadow());
@@ -1122,6 +1144,14 @@ static void TouchPage1(const CtrTouchState *t)
     {
         Ctr3dsSetFfAudio(Ctr3dsGetFfAudio() == CTR_FFAUDIO_FAST
                              ? CTR_FFAUDIO_NORMAL : CTR_FFAUDIO_FAST);
+        UiMarkDirty();
+        return;
+    }
+
+    // AUTO, then CPU, then GPU, then AUTO again.
+    if (UiHit(t, RND_X, RND_Y, RND_W, RND_H))
+    {
+        Ctr3dsSetRenderer((Ctr3dsGetRenderer() + 1) % CTR_RENDERER_COUNT);
         UiMarkDirty();
         return;
     }

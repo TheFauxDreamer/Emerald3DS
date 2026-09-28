@@ -64,7 +64,9 @@
 // - v15 uses the two padding bytes after dayCareYard for the bottom screen's
 //   nav bar: its four slots and the label switch. Same size. Older files have
 //   zero there, which is the default bar with labels.
-#define SETTINGS_VERSION 15
+// - v16 uses the first byte of pad2 for RENDERER. Same size. Older files have
+//   zero there, which is CTR_RENDERER_AUTO.
+#define SETTINGS_VERSION 16
 
 // The number of saves with their own record. When all are in use, a new save
 // replaces the least recently used record, as in 3ds/host/achievements.c.
@@ -147,7 +149,8 @@ struct CtrSettings {
     // zero.
     uint32_t clock;                    // the next lastUsed value
     uint8_t  count;                    // records in use, from rec[0]
-    uint8_t  pad2[3];
+    uint8_t  renderer;                 // CTR_RENDERER_*, added in v16
+    uint8_t  pad2[2];
     struct CtrSaveSettings rec[CTR_SETTINGS_SAVES];
 };
 
@@ -176,6 +179,8 @@ _Static_assert(sizeof(struct CtrSettings)
 // Defined in video.c and main.c, which own the live values.
 extern int  Ctr3dsGetTopScale(void);
 extern void Ctr3dsApplyTopScale(int mode);
+extern int  Ctr3dsGetRenderer(void);
+extern void Ctr3dsApplyRenderer(int mode);
 extern int  Ctr3dsGetTurboBind(int button);
 extern void Ctr3dsApplyTurboBind(int button, int value);
 extern int  Ctr3dsGetShowAllTabs(void);
@@ -498,10 +503,10 @@ void CtrSettingsLoad(void)
     if (s.magic != SETTINGS_MAGIC)
         return;                       // anything unexpected: keep the defaults
 
-    // Files v11 to v15 have the same size. Their bytes for the later values
+    // Files v11 to v16 have the same size. Their bytes for the later values
     // are zero.
-    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
-        || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 15 || s.version == 14
+        || s.version == 13 || s.version == 12 || s.version == 11)
     {
         if (n != sizeof(s) || s.count > CTR_SETTINGS_SAVES)
             return;
@@ -550,6 +555,11 @@ void CtrSettingsLoad(void)
     if (s.topScale < CTR_TOP_SCALE_COUNT)
         Ctr3dsApplyTopScale((int)s.topScale);
 
+    // Zero for a file older than v16, which is AUTO. Only v11 and later have
+    // the byte; an older file is a short read and leaves it zero.
+    if (s.renderer < CTR_RENDERER_COUNT)
+        Ctr3dsApplyRenderer((int)s.renderer);
+
     // Any byte that is not zero means on, so a bad value cannot be out of
     // range.
     Ctr3dsApplyShowAllTabs(s.showAllTabs != 0);
@@ -583,8 +593,8 @@ void CtrSettingsLoad(void)
 
     // The per-save values wait for CtrSettingsAdopt(). A short read of an older
     // file leaves a newer field at zero, which is its default.
-    if (s.version == SETTINGS_VERSION || s.version == 14 || s.version == 13
-        || s.version == 12 || s.version == 11)
+    if (s.version == SETTINGS_VERSION || s.version == 15 || s.version == 14
+        || s.version == 13 || s.version == 12 || s.version == 11)
     {
         sClock = s.clock;
         sCount = s.count;
@@ -614,6 +624,7 @@ static void settings_build(struct CtrSettings *s)
     s->magic    = SETTINGS_MAGIC;
     s->version  = SETTINGS_VERSION;
     s->topScale = (uint8_t)Ctr3dsGetTopScale();
+    s->renderer = (uint8_t)Ctr3dsGetRenderer();
     s->showAllTabs = (uint8_t)(Ctr3dsGetShowAllTabs() ? 1 : 0);
     for (int i = 0; i < CTR_TURBO_COUNT; i++)
         s->turbo[i] = (uint8_t)Ctr3dsGetTurboBind(i);
