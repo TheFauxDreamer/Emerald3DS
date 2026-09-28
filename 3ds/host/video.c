@@ -19,13 +19,22 @@
 // pixels on each side (3ds/bridge.h). Such a frame is 272 wide and needs a
 // texture 512 wide, so it has a texture of its own. Every other frame keeps
 // the 256-wide texture and its upload cost.
+//
+// The GPU path (RENDERER on SETTINGS) skips all of the above for a frame that
+// gpu_compose.c can draw: the GPU composes the frame into its own 512x256
+// surface, with the same layout as the stage, and the same scale code draws
+// that surface. See "the GPU compositor" below.
 
 #include <3ds.h>
 #include <citro2d.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "../bridge.h"
 #include "trace.h"
+#include "gpu_compose.h"
 #include "../../rp2350/ppu.h"
 
 void CtrSettingsMarkDirty(void);   // 3ds/host/settings.c
@@ -93,6 +102,30 @@ void Ctr3dsSetTopScale(int mode)
     // Queue a write only when the value changes. A tap on the active button
     // costs nothing.
     if (sTopScale != before)
+        CtrSettingsMarkDirty();
+}
+
+// RENDERER, with the same three functions as the scale.
+static int sRenderer = CTR_RENDERER_AUTO;
+
+void Ctr3dsApplyRenderer(int mode)
+{
+    if (mode < 0 || mode >= CTR_RENDERER_COUNT)
+        mode = CTR_RENDERER_AUTO;
+    sRenderer = mode;
+}
+
+int Ctr3dsGetRenderer(void)
+{
+    return sRenderer;
+}
+
+void Ctr3dsSetRenderer(int mode)
+{
+    int before = sRenderer;
+
+    Ctr3dsApplyRenderer(mode);
+    if (sRenderer != before)
         CtrSettingsMarkDirty();
 }
 
@@ -390,6 +423,302 @@ int Ctr3dsRasteriserOnOwnCore(void)
     return sPpuCore >= 0;
 }
 
+
+// ---- the GPU compositor -------------------------------------------------------
+//
+// gpu_compose.c draws a frame when two things are true: RENDERER asks for the
+// GPU, and GpuComposeCheck() finds nothing in the frame that it cannot draw as
+// ppu.c does. Otherwise ppu.c draws it, as before. The choice is made for each
+// frame: in CtrVideoRenderBegin() when ppu.c has its own core, else in
+// CtrVideoPresent().
+//
+// After a refusal, ppu.c keeps the next GPU_HOLD_FRAMES frames too, so a scene
+// on the edge of a rule does not change path on every frame.
+//
+// When the path changes from the GPU to ppu.c, the stage gets the GPU's last
+// picture first (gpu_to_stage). ppu.c keeps old pixels where a window hides
+// the backdrop, and those must be the pixels of the frame before, not of the
+// last frame that ppu.c drew.
+//
+// CTR_GPU_VERIFY=1 (3ds/Makefile) also runs ppu.c on each GPU frame, and
+// compares the two pictures before the next frame. See gpu_verify_pending().
+
+#ifndef CTR_GPU_VERIFY
+#define CTR_GPU_VERIFY 0
+#endif
+
+#define GPU_HOLD_FRAMES  8
+#define GPU_REPORT_EVERY 600
+// C2D_Init's quad budget. A full redraw of four text BGs and their side maps
+// is below 10000, and 16383 is citro2d's 16-bit index limit.
+#define GPU_MAX_QUADS    12288
+
+static int sGpuReady;            // GpuComposeInit worked
+static int sGpuFrame;            // threaded: this frame goes to the GPU
+static int sFramePlanned;        // threaded: CtrVideoRenderBegin chose a path
+static int sGpuShown;            // the frame on the screen came from the GPU
+static int sGpuHold;
+static void *sGpuBounce;         // linear, 512x256 RGBA8: the readback
+static C3D_Tex *sGpuTex;
+static Tex3DS_SubTexture sGpuSub, sGpuWideSub;
+static C2D_Image sGpuImage, sGpuWideImage;
+
+static unsigned sGpuSeen, sGpuDrawn, sGpuHeld, sGpuWhy[GPU_WHY_COUNT];
+
+static int gpu_wanted(void)
+{
+    if (!sGpuReady)
+        return 0;
+    switch (sRenderer) {
+    case CTR_RENDERER_CPU: return 0;
+    case CTR_RENDERER_GPU: return 1;
+    default:               return sPpuCore < 0;
+    }
+}
+
+static void gpu_input_snap(GpuComposeInput *in)
+{
+    in->reg = sSnapReg;
+    in->pal = sSnapPal;
+    in->vram = sSnapVram;
+    in->oam = sSnapOam;
+    in->margin = sSnapWide ? CTR_WIDE_MARGIN : 0;
+    for (int bg = 0; bg < 4; bg++)
+        in->side[bg] = sSnapSidePtr[bg];
+    in->sideDelta = sSnapDelta;
+}
+
+static void gpu_input_live(GpuComposeInput *in, const CtrWideField *w)
+{
+    in->reg = sLiveReg;
+    in->pal = sLivePal;
+    in->vram = sLiveVram;
+    in->oam = sLiveOam;
+    in->margin = w->active ? CTR_WIDE_MARGIN : 0;
+    for (int bg = 0; bg < 4; bg++)
+        in->side[bg] = w->active ? w->sideMap[bg] : NULL;
+    in->sideDelta = w->sideDelta;
+}
+
+static void gpu_refused(unsigned why)
+{
+    for (int i = 0; i < GPU_WHY_COUNT; i++)
+        if (why & (1u << i))
+            sGpuWhy[i]++;
+    sGpuHold = GPU_HOLD_FRAMES;
+}
+
+// One line for each GPU_REPORT_EVERY frames: how many the GPU drew, and why
+// ppu.c drew the others.
+static void gpu_report(void)
+{
+    char line[256];
+    int n;
+
+    if (sGpuSeen < GPU_REPORT_EVERY)
+        return;
+    n = snprintf(line, sizeof(line), "emerald3ds: gpu drew %u of %u frames; ppu.c for",
+                 sGpuDrawn, sGpuSeen);
+    for (int i = 0; i < GPU_WHY_COUNT && n < (int)sizeof(line); i++)
+        if (sGpuWhy[i])
+            n += snprintf(line + n, sizeof(line) - n, " %s %u", kGpuWhyName[i], sGpuWhy[i]);
+    if (sGpuHeld && n < (int)sizeof(line))
+        n += snprintf(line + n, sizeof(line) - n, " held %u", sGpuHeld);
+    CtrLog("%s\n", line);
+    sGpuSeen = sGpuDrawn = sGpuHeld = 0;
+    memset(sGpuWhy, 0, sizeof(sGpuWhy));
+}
+
+// Which path draws the frame in 'in'. Call it once for each presented frame.
+static int gpu_decide(const GpuComposeInput *in)
+{
+    unsigned why;
+
+    if (!sGpuReady)
+        return 0;
+    // Always, so that the check keeps the palette of the last frame.
+    why = GpuComposeCheck(in);
+    if (!gpu_wanted())
+        return 0;
+    sGpuSeen++;
+    if (why) {
+        gpu_refused(why);
+        return 0;
+    }
+    if (sGpuHold > 0) {
+        sGpuHold--;
+        sGpuHeld++;
+        return 0;
+    }
+    return 1;
+}
+
+// Before ppu.c draws a frame: if the GPU drew the last one, copy its picture
+// into the stage. Outside a frame only.
+static void gpu_to_stage(int wide)
+{
+    if (!sGpuShown)
+        return;
+    sGpuShown = 0;
+    GpuComposeReadback(sTopStage, wide ? TOP_WIDE_TEX_W : TOP_TEX_W, 0, sGpuBounce);
+}
+
+#if CTR_GPU_VERIFY
+static int      sVerifyPending;   // the GPU and ppu.c both drew the last frame
+static int      sVerifyWide;
+static uint16_t sVerifyReg[4];    // DISPCNT, BLDCNT, WININ, WINOUT of that frame
+static uint32_t sVerifyGpu[512 * CTR_GBA_HEIGHT];
+static unsigned sVerifyFrames, sVerifyBad, sVerifyWorst, sVerifyDumps;
+static uint32_t sVerifyKeys[16];
+
+#define VERIFY_DIR "sdmc:/3ds/emerald3ds/gpuverify"
+
+static void put_le(FILE *f, uint32_t v, int bytes)
+{
+    for (int i = 0; i < bytes; i++)
+        fputc((int)((v >> (8 * i)) & 0xff), f);
+}
+
+// A 24-bit BMP of columns [x0, x1) of a picture: RGB565 from the stage, or
+// RGBA8 from the GPU.
+static void verify_bmp(const char *path, const void *px, int stride, int rgba8, int x0, int x1)
+{
+    FILE *f = fopen(path, "wb");
+    int w = x1 - x0, pad = (4 - (w * 3) % 4) % 4;
+    uint32_t size = 54 + (uint32_t)(w * 3 + pad) * CTR_GBA_HEIGHT;
+
+    if (f == NULL)
+        return;
+    fputc('B', f);
+    fputc('M', f);
+    put_le(f, size, 4);
+    put_le(f, 0, 4);
+    put_le(f, 54, 4);
+    put_le(f, 40, 4);
+    put_le(f, (uint32_t)w, 4);
+    put_le(f, CTR_GBA_HEIGHT, 4);
+    put_le(f, 1, 2);
+    put_le(f, 24, 2);
+    put_le(f, 0, 4);
+    put_le(f, size - 54, 4);
+    put_le(f, 2835, 4);
+    put_le(f, 2835, 4);
+    put_le(f, 0, 4);
+    put_le(f, 0, 4);
+    for (int y = CTR_GBA_HEIGHT - 1; y >= 0; y--) {
+        for (int x = x0; x < x1; x++) {
+            int r, g, b;
+
+            if (rgba8) {
+                uint32_t c = ((const uint32_t *)px)[y * stride + x];
+
+                r = c >> 24;
+                g = (c >> 16) & 0xff;
+                b = (c >> 8) & 0xff;
+            } else {
+                uint16_t c = ((const uint16_t *)px)[y * stride + x];
+
+                r = (c >> 11) << 3;
+                g = ((c >> 5) & 63) << 2;
+                b = (c & 31) << 3;
+            }
+            fputc(b, f);
+            fputc(g, f);
+            fputc(r, f);
+        }
+        for (int i = 0; i < pad; i++)
+            fputc(0, f);
+    }
+    fclose(f);
+}
+
+// Compare the GPU's picture of the last frame with ppu.c's. ppu.c stores RGB565
+// and the GPU RGBA8, so the GPU value is cut to 565 first. One step in any
+// channel is allowed: the GPU widens 5-bit colour and rounds the blend in its
+// own way.
+static void gpu_verify_pending(void)
+{
+    const int stride = sVerifyWide ? TOP_WIDE_TEX_W : TOP_TEX_W;
+    const int x0 = TOP_STAGE_X - (sVerifyWide ? CTR_WIDE_MARGIN : 0);
+    const int x1 = TOP_STAGE_X + CTR_GBA_WIDTH + (sVerifyWide ? CTR_WIDE_MARGIN : 0);
+    unsigned bad = 0;
+    int fx = 0, fy = 0;
+    uint16_t fc = 0;
+    uint32_t fg = 0, key;
+
+    if (!sVerifyPending)
+        return;
+    sVerifyPending = 0;
+    GpuComposeReadback(sVerifyGpu, 512, 1, sGpuBounce);
+
+    for (int y = 0; y < CTR_GBA_HEIGHT; y++)
+        for (int x = x0; x < x1; x++) {
+            uint16_t c = sTopStage[y * stride + x];
+            uint32_t g = sVerifyGpu[y * 512 + x];
+            int dr = (int)(g >> 27) - (c >> 11);
+            int dg = (int)((g >> 18) & 63) - ((c >> 5) & 63);
+            int db = (int)((g >> 11) & 31) - (c & 31);
+
+            if (abs(dr) > 1 || abs(dg) > 1 || abs(db) > 1) {
+                if (bad++ == 0) {
+                    fx = x - TOP_STAGE_X;
+                    fy = y;
+                    fc = c;
+                    fg = g;
+                }
+            }
+        }
+
+    sVerifyFrames++;
+    if (bad) {
+        sVerifyBad++;
+        if (bad > sVerifyWorst)
+            sVerifyWorst = bad;
+        key = sVerifyReg[0] ^ ((uint32_t)sVerifyReg[1] << 16) ^ ((uint32_t)sVerifyReg[2] << 7)
+            ^ ((uint32_t)sVerifyReg[3] << 21);
+        for (unsigned i = 0; i < sVerifyDumps; i++)
+            if (sVerifyKeys[i] == key)
+                key = 0;
+        // The first frame of each new scene: a log line and two pictures.
+        if (key != 0 && sVerifyDumps < sizeof(sVerifyKeys) / sizeof(sVerifyKeys[0])) {
+            char path[64];
+
+            sVerifyKeys[sVerifyDumps] = key;
+            CtrLog("emerald3ds: gpu verify #%u: %u px differ, first (%d,%d) ppu %04X gpu %08lX; "
+                   "DISPCNT=%04X BLDCNT=%04X WININ=%04X WINOUT=%04X\n",
+                   sVerifyDumps, bad, fx, fy, fc, (unsigned long)fg,
+                   sVerifyReg[0], sVerifyReg[1], sVerifyReg[2], sVerifyReg[3]);
+            mkdir("sdmc:/3ds", 0777);
+            mkdir("sdmc:/3ds/emerald3ds", 0777);
+            mkdir(VERIFY_DIR, 0777);
+            snprintf(path, sizeof(path), VERIFY_DIR "/%02u_ppu.bmp", sVerifyDumps);
+            verify_bmp(path, sTopStage, stride, 0, x0, x1);
+            snprintf(path, sizeof(path), VERIFY_DIR "/%02u_gpu.bmp", sVerifyDumps);
+            verify_bmp(path, sVerifyGpu, 512, 1, x0, x1);
+            sVerifyDumps++;
+        }
+    }
+    if (sVerifyFrames >= GPU_REPORT_EVERY) {
+        CtrLog("emerald3ds: gpu verify: %u frames, %u differ, worst %u px\n",
+               sVerifyFrames, sVerifyBad, sVerifyWorst);
+        sVerifyFrames = sVerifyBad = sVerifyWorst = 0;
+    }
+}
+
+static void gpu_verify_arm(const GpuComposeInput *in)
+{
+    sVerifyPending = 1;
+    sVerifyWide = in->margin != 0;
+    sVerifyReg[0] = (uint16_t)(in->reg[0x00] | (in->reg[0x01] << 8));
+    sVerifyReg[1] = (uint16_t)(in->reg[0x50] | (in->reg[0x51] << 8));
+    sVerifyReg[2] = (uint16_t)(in->reg[0x48] | (in->reg[0x49] << 8));
+    sVerifyReg[3] = (uint16_t)(in->reg[0x4a] | (in->reg[0x4b] << 8));
+}
+#else
+static void gpu_verify_pending(void) {}
+static void gpu_verify_arm(const GpuComposeInput *in) { (void)in; }
+#endif // CTR_GPU_VERIFY
+
 // Copy the video state out of gGbaMem and start the rasterizer on it.
 //
 // Rp2350PresentFrame() (3ds/host/main.c) calls this on the frame that will
@@ -399,12 +728,19 @@ int Ctr3dsRasteriserOnOwnCore(void)
 // true, with no rule for what the paint can touch.
 //
 // No effect when inline: CtrVideoPresent() then rasterizes gGbaMem directly.
+//
+// This is also where the frame's path is chosen when ppu.c has its own core.
+// A GPU frame does not start the worker, unless CTR_GPU_VERIFY wants both.
 void CtrVideoRenderBegin(void)
 {
     unsigned long long t;
+    GpuComposeInput in;
 
-    if (!sReady || sPpuCore < 0 || sPpuPending)
+    if (!sReady || sPpuCore < 0 || sPpuPending || sFramePlanned)
         return;
+
+    // The stage still holds ppu.c's picture of the last frame.
+    gpu_verify_pending();
 
     t = CtrTicksNow();
 
@@ -431,6 +767,14 @@ void CtrVideoRenderBegin(void)
     }
 
     CtrProfile("ppu.snap", t);
+
+    gpu_input_snap(&in);
+    sGpuFrame = gpu_decide(&in);
+    sFramePlanned = 1;
+    if (sGpuFrame && !CTR_GPU_VERIFY)
+        return;   // CtrVideoPresent() has the GPU draw it
+    if (!sGpuFrame)
+        gpu_to_stage(sSnapWide);
 
     sPpuPending = 1;
     __dmb();
@@ -463,6 +807,8 @@ static void apply_top_filter(void)
 
     C3D_TexSetFilter(&sTopTex, f, f);
     C3D_TexSetFilter(&sTopWideTex, f, f);
+    if (sGpuReady)
+        C3D_TexSetFilter(sGpuTex, f, f);
 }
 
 // Kept so that the diagnostics below can read the registers. The
@@ -596,7 +942,9 @@ int CtrVideoInit(void)
 {
     gfxInitDefault();
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
-    C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
+    // The GPU compositor sends many more quads than the one or two for each
+    // screen that the ppu.c path needs.
+    C2D_Init(GPU_MAX_QUADS);
     C2D_Prepare();
 
     sTopTarget = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
@@ -659,6 +1007,18 @@ int CtrVideoInit(void)
         ppu_set_memory(reg, pal, vram, oam);
     sRegBase = (const uint8_t *)reg;
 
+    // The GPU path is optional. Without memory for it, ppu.c draws every frame.
+    sGpuBounce = linearAlloc(512 * 256 * 4);
+    if (sGpuBounce != NULL && GpuComposeInit()) {
+        sGpuTex = GpuComposeTexture();
+        init_subtex(&sGpuSub, TOP_STAGE_X, CTR_GBA_WIDTH, CTR_GBA_HEIGHT, 512, 256);
+        init_subtex(&sGpuWideSub, TOP_STAGE_X - CTR_WIDE_MARGIN, TOP_WIDE_W,
+                    CTR_GBA_HEIGHT, 512, 256);
+        sGpuImage = (C2D_Image){ sGpuTex, &sGpuSub };
+        sGpuWideImage = (C2D_Image){ sGpuTex, &sGpuWideSub };
+        sGpuReady = 1;
+    }
+
     sReady = 1;
 
     // After sReady, or the guard inside it would ignore this call too. The
@@ -676,6 +1036,13 @@ void CtrVideoExit(void)
 
     // First: the worker can still be writing to sTopStage.
     ppu_thread_stop();
+
+    if (sGpuReady)
+        GpuComposeExit();
+    if (sGpuBounce != NULL)
+        linearFree(sGpuBounce);
+    sGpuReady = 0;
+    sGpuBounce = NULL;
 
     linearFree(sTopStage);
     linearFree(sBotStage);
@@ -922,6 +1289,21 @@ static void note_frame_period(void)
     }
 }
 
+// The stage to its texture: the wide one on a wide frame, because that moves
+// twice the bytes.
+static void upload_top(void)
+{
+    unsigned int t0 = CtrTimeNowMs();
+
+    if (sShownWide)
+        upload(sTopStage, TOP_WIDE_TEX_W, NULL, TOP_WIDE_W, CTR_GBA_HEIGHT,
+               &sTopWideTex, kProfTop);
+    else
+        upload(sTopStage, TOP_TEX_W, NULL, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
+               &sTopTex, kProfTop);
+    CtrLogSlow("upload.top", t0);
+}
+
 void CtrVideoPresent(void)
 {
     // Measure the parts separately. The top upload runs on every displayed
@@ -930,6 +1312,8 @@ void CtrVideoPresent(void)
     // slow, the cause is the 512-wide stride or the rare cold path.
     unsigned int tPresent = CtrTimeNowMs();
     unsigned int t0;
+    GpuComposeInput in;
+    int gpu = 0;
 
     if (!sReady)
         return;
@@ -951,16 +1335,21 @@ void CtrVideoPresent(void)
     }
 
     // The frame that the game just wrote: collect it from the worker, or
-    // rasterize it here when there is no worker.
+    // rasterize it here when there is no worker. A GPU frame skips both; the
+    // GPU draws it inside the C3D frame below.
     t0 = CtrTimeNowMs();
-    unsigned long long ppuTicks;
+    unsigned long long ppuTicks = 0;
     if (sPpuCore >= 0) {
-        unsigned long long tw;
-
         // Only a guard. Rp2350PresentFrame() starts the render on each
         // presented frame, so a render is always out here.
-        if (!sPpuPending)
+        if (!sPpuPending && !sFramePlanned)
             CtrVideoRenderBegin();
+        sFramePlanned = 0;
+        gpu = sGpuFrame;
+        gpu_input_snap(&in);
+    }
+    if (sPpuCore >= 0 && sPpuPending) {
+        unsigned long long tw;
 
         // The ppu.wait stage is the time when the main thread had nothing to
         // do. Near zero means that the paint, the bottom upload and the audio
@@ -977,20 +1366,32 @@ void CtrVideoPresent(void)
         // path, so the logs of the two builds compare directly.
         ppuTicks = sPpuTicks;
         CtrProfile("ppu", CtrTicksNow() - ppuTicks);
-    } else {
-        unsigned long long tp = CtrTicksNow();
+    } else if (sPpuCore < 0) {
         CtrWideField w;
 
         // Inline, the rasterizer reads the live regions, and the live side
         // maps with them.
         CtrWideFieldGet(&w);
         sShownWide = w.active;
-        render_top(w.active, w.sideMap, w.sideDelta);
-        ppuTicks = CtrTicksNow() - tp;
-        CtrProfile("ppu", tp);
+        gpu_input_live(&in, &w);
+
+        // Before anything writes the stage: it holds ppu.c's last picture.
+        gpu_verify_pending();
+        gpu = gpu_decide(&in);
+        if (!gpu)
+            gpu_to_stage(w.active);
+        if (!gpu || CTR_GPU_VERIFY) {
+            unsigned long long tp = CtrTicksNow();
+
+            render_top(w.active, w.sideMap, w.sideDelta);
+            ppuTicks = CtrTicksNow() - tp;
+            CtrProfile("ppu", tp);
+        }
     }
-    CtrLogSlow("ppu", t0);
-    log_slow_scene(ppuTicks);
+    if (!gpu) {
+        CtrLogSlow("ppu", t0);
+        log_slow_scene(ppuTicks);
+    }
 #if CTR_PPU_PROFILE
     report_ppu_passes();
 #endif
@@ -1017,15 +1418,9 @@ void CtrVideoPresent(void)
         }
     }
 #endif
-    t0 = CtrTimeNowMs();
-    // A wide frame moves twice the bytes, because its texture is twice as wide.
-    if (sShownWide)
-        upload(sTopStage, TOP_WIDE_TEX_W, NULL, TOP_WIDE_W, CTR_GBA_HEIGHT,
-               &sTopWideTex, kProfTop);
-    else
-        upload(sTopStage, TOP_TEX_W, NULL, CTR_GBA_WIDTH, CTR_GBA_HEIGHT,
-               &sTopTex, kProfTop);
-    CtrLogSlow("upload.top", t0);
+    // A GPU frame has no stage to upload.
+    if (!gpu)
+        upload_top();
 
     // The inline path's bottom upload. The bottom screen is mostly static, so
     // tile it again only when the UI changed. Send it one slice for each frame,
@@ -1046,6 +1441,10 @@ void CtrVideoPresent(void)
         }
     }
 
+    // It must delete textures outside the frame.
+    if (sGpuReady)
+        GpuComposeMaintain();
+
     // The frame's sync point, and the best measure of the spare time. With
     // C3D_FRAME_SYNCDRAW, the wait for the previous frame's render is here, at
     // Begin, not at C3D_FrameEnd.
@@ -1060,6 +1459,29 @@ void CtrVideoPresent(void)
         CtrProfile("framebegin", tb);
         note_frame_period();
     }
+
+    // The GPU frame, before the screens: they sample its surface. If the GPU
+    // cannot finish it, ppu.c draws it now, and the upload joins the frame's
+    // queue.
+    if (gpu) {
+        unsigned long long tg = CtrTicksNow();
+        unsigned why = GpuComposeDraw(&in);
+
+        CtrProfile("gpu", tg);
+        if (why) {
+            gpu_refused(why);
+            render_top(in.margin != 0, in.side, in.sideDelta);
+            upload_top();
+            gpu = 0;
+        } else {
+            sGpuDrawn++;
+            if (CTR_GPU_VERIFY)
+                gpu_verify_arm(&in);
+        }
+    }
+    sGpuShown = gpu;
+    if (gpu_wanted())
+        gpu_report();
 
 #if CTR_BOOT_DIAG
     // Liveness without the log: moving bars mean that the frame loop runs, and
@@ -1091,8 +1513,10 @@ void CtrVideoPresent(void)
         float x  = (TOP_SCREEN_W - w * sx) / 2.0f;
         float y  = (TOP_SCREEN_H - CTR_GBA_HEIGHT * sy) / 2.0f;
 
-        C2D_DrawImageAt(sShownWide ? sTopWideImage : sTopImage, x, y, 0.0f,
-                        NULL, sx, sy);
+        C2D_Image img = gpu ? (sShownWide ? sGpuWideImage : sGpuImage)
+                            : (sShownWide ? sTopWideImage : sTopImage);
+
+        C2D_DrawImageAt(img, x, y, 0.0f, NULL, sx, sy);
     }
 
     C2D_TargetClear(sBotTarget, C2D_Color32(0, 0, 0, 0xFF));
