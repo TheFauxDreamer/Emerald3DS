@@ -8,8 +8,9 @@
 // - A window edge at x = 0 or 240 continues into the wide margin.
 //
 // What it cannot do, GpuComposeCheck() refuses (the GPU_WHY_* bits): the
-// bitmap modes, the OBJ window, and the two reference quirks that read the
-// previous frame. Those need the old pixels, and this file clears the surface.
+// bitmap modes, the OBJ window, a window region that turns a live colour
+// effect off, and the one reference quirk that reads the previous frame (a
+// blend with the backdrop as source), because this file clears the surface.
 //
 // HOW A FRAME IS DRAWN
 //
@@ -55,7 +56,7 @@
 #include "gpu_compose.h"
 
 const char *const kGpuWhyName[GPU_WHY_COUNT] = {
-    "bitmap", "objwin", "window", "blendback",
+    "bitmap", "objwin", "wineffect", "blendback",
     "singular", "fade", "budget", "vram",
 };
 
@@ -266,9 +267,11 @@ unsigned GpuComposeCheck(const GpuComposeInput *in)
     if (F.effect == 1 && (F.src & 0x20))
         why |= GPU_WHY_BLENDBACK;
 
-    // A region without bit 5 skips the backdrop, and ppu.c keeps the pixels of
-    // the frame before there.
-    if (!(why & GPU_WHY_OBJWIN) && (F.dispcnt & 0x6000)) {
+    // A region without bit 5 turns the colour effects off there. This file
+    // applies an effect to the whole screen, so refuse when one is live: an
+    // effect, and a first target that is on.
+    if (!(why & GPU_WHY_OBJWIN) && (F.dispcnt & 0x6000) && F.effect != 0
+        && (F.src & (((F.dispcnt >> 8) & 0x1f) | 0x20))) {
         Rect r[RECT_MAX];
         int n = build_rects(r);
 

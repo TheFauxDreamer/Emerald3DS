@@ -88,8 +88,9 @@ The large pieces:
     the divider's engage and release lines. The target is the field at 60 Hz
     with the divider off, and a title screen that does not stutter.
   - The `gpu drew N of 600 frames` lines say which rules send frames back to
-    ppu.c. `window` (a region with no backdrop) and `fade` are expected to be
-    the common ones. If one of them is most of the game, it is the next thing
+    ppu.c. `wineffect` (a window region that turns a live effect off),
+    `objwin` (the title's logo shine) and `fade` are expected to be the common
+    ones. If one of them is most of the game, it is the next thing
     to teach the compositor.
   - On a New 3DS at GPU, the picture must look the same, and `ppu.wait` must
     go to near zero on GPU frames.
